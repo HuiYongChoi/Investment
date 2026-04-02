@@ -1,0 +1,21 @@
+# OS Metadata
+.DS_Store
+Thumbs.db
+
+# Secrets and Credentials
+AWS.txt
+*.pem
+.env
+keys.json
+
+# Legacy / Backup Files
+dart_proxy.rb
+kiwoom_proxy.rb
+*_old.*
+*.bak
+
+# Documentation (Large files)
+*.pdf
+
+# Web Server logs
+*.log
