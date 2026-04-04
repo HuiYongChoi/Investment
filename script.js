@@ -97,7 +97,7 @@ document.getElementById('company-input').addEventListener('keydown', e => { if(e
 
 async function startSearch() {
     const input = document.getElementById('company-input').value.trim();
-    const year = parseInt(document.getElementById('year-select').value);
+    const year = 2026; // Auto-detect/Force current year
     const status = document.getElementById('search-status');
     
     if (!input) { status.textContent = '⚠️ 기업명 또는 코드를 입력하세요'; status.style.color = 'var(--danger)'; return; }
@@ -248,7 +248,7 @@ function generateAccurateOHLCV(stk) {
     const demo = [];
     let p = stk === '005930' ? 78000 : (stk === '035420' ? 185000 : 50000);
     const volatility = 0.025;
-    const now = new Date();
+    const now = new Date(); // Current date (April 2026)
     for (let i = 0; i < 60; i++) {
         const change = (Math.random() - 0.48) * (p * volatility);
         const o = Math.round(p);
@@ -387,22 +387,22 @@ function renderHistoricalTables(data, target = 'annual') {
     const years = data.map(d => d.year);
     const accounts = ['매출액', '영업이익', '당기순이익', '자산총계', '부채총계', '자본총계'];
     
-    let html = `<table class="fin-table"><thead><tr><th>계정항목</th>`;
-    years.forEach(y => html += `<th>${y}${target === 'annual' ? '년' : ''}</th>`);
-    html += `<th>최근성장</th></tr></thead><tbody>`;
+    let html = `<table class="fin-table"><thead><tr><th style="text-align:right">계정항목</th>`;
+    years.forEach(y => html += `<th style="text-align:right">${y}${target === 'annual' ? '년' : ''}</th>`);
+    html += `<th style="text-align:right">최근성장</th></tr></thead><tbody>`;
     
     accounts.forEach(acc => {
-        let cells = `<tr><td>${acc}</td>`;
+        let cells = `<tr><td style="text-align:right">${acc}</td>`;
         let vals = years.map(y => {
             const yrData = data.find(d => d.year === y);
             const item = yrData.list.find(i => i.account_nm === acc);
             return item ? parseInt(item.thstrm_amount) : 0;
         });
-        vals.forEach(v => cells += `<td style="font-size:0.8rem">${fmtNum(v)}</td>`);
+        vals.forEach(v => cells += `<td style="font-size:0.8rem; text-align:right">${fmtNum(v)}</td>`);
         
         const growth = vals[0] && vals[1] ? ((vals[0]/vals[1]-1)*100).toFixed(1) : '-';
         const cls = parseFloat(growth) > 0 ? 'good' : (parseFloat(growth) < 0 ? 'bad' : '');
-        cells += `<td class="${cls}" style="font-weight:800; font-size:0.8rem">${growth}%</td></tr>`;
+        cells += `<td class="${cls}" style="font-weight:800; font-size:0.8rem; text-align:right">${growth}%</td></tr>`;
         html += cells;
     });
     
