@@ -237,7 +237,7 @@ function mockDART(factor) {
 async function fetchKRXChart(stk) {
     try {
         const today = new Date().toISOString().slice(0,10).replace(/-/g,'');
-        const res = await fetch(`${KR_URL}/chart?isu_cd=${stk}&bas_dd=${today}`);
+        const res = await fetch(`${KRX_URL}/chart?isu_cd=${stk}&bas_dd=${today}`);
         const data = await res.json();
         
         if (data.OutBlock_1 && data.OutBlock_1.length > 0) {
