@@ -37,16 +37,25 @@ end
 
 server = WEBrick::HTTPServer.new(
   Port: 8081,
+  BindAddress: '0.0.0.0',
   Logger: WEBrick::Log.new($stderr, WEBrick::Log::INFO),
   AccessLog: []
 )
 
 # Common CORS logic
 def setup_cors(req, res)
-  res['Access-Control-Allow-Origin'] = '*'
-  res['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-  res['Access-Control-Allow-Headers'] = 'Content-Type, AUTH_KEY'
-  req.request_method == 'OPTIONS'
+  origin = req['Origin'] || '*'
+  # Security: Only allow specific domains in production if preferred. 
+  # For now, we allow the request's origin to support both localhost and hyfin.duckdns.org.
+  res['Access-Control-Allow-Origin'] = origin
+  res['Access-Control-Allow-Methods'] = 'POST, GET, OPTIONS'
+  res['Access-Control-Allow-Headers'] = 'Content-Type'
+  
+  if req.request_method == 'OPTIONS'
+    res.status = 200
+    return true
+  end
+  false
 end
 
 # -----------------------------------------------------

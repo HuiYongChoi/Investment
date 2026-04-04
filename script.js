@@ -2,7 +2,9 @@
 // INVESTMENT NAVIGATOR v2.0 (Premium)
 // =================================================================
 
-const PROXY = 'http://localhost:8081';
+// Detect Proxy Host (Local vs Production)
+const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+const PROXY = isLocal ? 'http://localhost:8081' : '/api';
 const DART_URL = `${PROXY}/dart`;
 const GEMINI_URL = `${PROXY}/gemini`;
 const KRX_URL = `${PROXY}/krx`;
@@ -143,7 +145,11 @@ async function startSearch() {
         document.getElementById('dashboard').scrollIntoView({ behavior:'smooth' });
 
     } catch (err) {
-        status.textContent = `❌ 오류: ${err.message}`;
+        let msg = err.message;
+        if (err.name === 'TypeError' && err.message.includes('fetch')) {
+            msg = '프록시 서버(api_proxy.rb)가 실행 중이지 않거나 연결할 수 없습니다.';
+        }
+        status.textContent = `❌ 오류: ${msg}`;
         status.style.color = 'var(--danger)';
     }
 }
