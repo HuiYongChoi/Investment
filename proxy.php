@@ -17,6 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 const DART_BASE = 'https://opendart.fss.or.kr/api';
 const KRX_BASE = 'https://data-dbg.krx.co.kr/svc/apis/sto';
+const NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock';
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 const KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token';
 
@@ -324,6 +325,17 @@ try {
         $url = GEMINI_URL . '?key=' . rawurlencode($key);
         $body = file_get_contents('php://input') ?: '{}';
         $upstream = request_upstream($url, ['Content-Type: application/json'], $body, 'POST');
+        http_response_code($upstream['status']);
+        echo $upstream['body'];
+        exit;
+    }
+
+    if ($action === 'quote') {
+        $stockCode = trim((string) ($_GET['stock_code'] ?? ''));
+        if ($stockCode === '') json_response(400, ['error' => 'stock_code is required']);
+
+        $url = NAVER_STOCK_BASE . '/' . rawurlencode($stockCode) . '/basic';
+        $upstream = request_upstream($url);
         http_response_code($upstream['status']);
         echo $upstream['body'];
         exit;

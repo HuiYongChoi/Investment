@@ -364,6 +364,58 @@ header#header {
     font-size: 1.06rem;
 }
 
+.company-suggestions {
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 0;
+    right: 0;
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 22px;
+    border: 1px solid var(--glass-border);
+    background: rgba(10, 15, 24, 0.96);
+    box-shadow: var(--shadow-soft);
+    z-index: 20;
+}
+
+.company-option {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-primary);
+    text-align: left;
+}
+
+.company-option:hover,
+.company-option.active {
+    border-color: rgba(143, 211, 255, 0.28);
+    background: rgba(79, 140, 255, 0.14);
+}
+
+.company-option-name {
+    min-width: 0;
+    font-size: 0.96rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.company-option-code {
+    font-size: 0.82rem;
+    font-weight: 800;
+    color: var(--accent-cyan);
+    letter-spacing: 0.08em;
+}
+
 .btn-search,
 .btn-primary,
 .btn-outline {
@@ -1119,6 +1171,14 @@ header#header {
 
     .btn-search {
         height: 52px;
+    }
+
+    .company-option {
+        grid-template-columns: 1fr;
+    }
+
+    .company-option-code {
+        letter-spacing: 0.04em;
     }
 
     .dashboard {

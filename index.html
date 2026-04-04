@@ -74,8 +74,8 @@
         <div class="search-row">
             <div class="search-input-wrap">
                 <i data-lucide="search" class="search-icon"></i>
-                <input type="text" id="company-input" list="company-list" placeholder="기업명 또는 종목코드 (예: 삼성전자, 005930)">
-                <datalist id="company-list"></datalist>
+                <input type="text" id="company-input" autocomplete="off" placeholder="기업명 또는 종목코드 (예: 삼성전자, 005930)">
+                <div id="company-suggestions" class="company-suggestions hidden"></div>
             </div>
             <button class="btn-search" id="search-btn">
                 <span>분석 시작</span>
@@ -117,7 +117,7 @@
                 <div class="card-icon chart-gradient"><i data-lucide="chart-candlestick"></i></div>
                 <div class="card-copy">
                     <h2>주가 흐름 및 추세</h2>
-                    <p class="card-sub" id="chart-meta">KRX 일별 시세를 기반으로 MA5, MA20, 툴팁, 매수·매도 시그널을 표기합니다.</p>
+                    <p class="card-sub" id="chart-meta">KRX 일별 시세를 기반으로 OHLC 툴팁과 MA5, MA20, 볼린저 오버레이를 표시합니다.</p>
                 </div>
             </div>
             <div class="chart-toolbar">
@@ -212,7 +212,7 @@
                 <div class="card-icon tech-gradient"><i data-lucide="activity"></i></div>
                 <div class="card-copy">
                     <h2>기술적 분석</h2>
-                    <p class="card-sub">선택한 지표만 차트 아래 패널에 그려주고, 매수·매도·중립 의견을 집계합니다.</p>
+                    <p class="card-sub">선택한 지표 패널에 매수·매도 시그널을 반영하고, 의견 집계를 함께 보여줍니다.</p>
                 </div>
             </div>
             <div class="chart-toolbar">
@@ -231,6 +231,7 @@
             <div class="indicator-shell">
                 <canvas id="indicator-chart" width="1000" height="280"></canvas>
             </div>
+            <div id="tech-legend" class="chart-legend"></div>
             <div id="technical-grid" class="technical-grid"></div>
             <div id="tech-summary" class="tech-summary"></div>
         </section>
@@ -264,6 +265,7 @@
         </section>
     </main>
 
+    <script src="dashboard_logic.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

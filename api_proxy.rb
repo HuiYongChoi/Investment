@@ -9,6 +9,7 @@ AWS_FILE = File.join(APP_ROOT, 'AWS.txt')
 
 DART_BASE = 'https://opendart.fss.or.kr/api'
 KRX_BASE = 'https://data-dbg.krx.co.kr/svc/apis/sto'
+NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock'
 GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
 KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token'
 
@@ -346,6 +347,25 @@ server.mount_proc '/market/summary' do |req, res|
   end
 
   json_response(res, 200, summary)
+end
+
+server.mount_proc '/market/quote' do |req, res|
+  next unless with_cors(req, res)
+
+  stock_code = (req.query['stock_code'] || '').strip
+  if stock_code.empty?
+    json_response(res, 400, error: 'stock_code 파라미터가 필요합니다.')
+    next
+  end
+
+  begin
+    upstream = perform_request(method: :get, url: "#{NAVER_STOCK_BASE}/#{URI.encode_www_form_component(stock_code)}/basic")
+    res.status = upstream[:status]
+    res['Content-Type'] = 'application/json; charset=utf-8'
+    res.body = upstream[:body]
+  rescue StandardError => error
+    json_response(res, 500, error: error.message)
+  end
 end
 
 server.mount_proc '/' do |req, res|

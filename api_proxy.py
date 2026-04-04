@@ -11,6 +11,7 @@ AWS_FILE = APP_ROOT / "AWS.txt"
 
 DART_BASE = "https://opendart.fss.or.kr/api"
 KRX_BASE = "https://data-dbg.krx.co.kr/svc/apis/sto"
+NAVER_STOCK_BASE = "https://m.stock.naver.com/api/stock"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 KAKAO_TOKEN_URL = "https://kauth.kakao.com/oauth/token"
 
@@ -168,6 +169,9 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             return
         if path == "/market/summary":
             self.handle_market_summary()
+            return
+        if path == "/market/quote":
+            self.handle_market_quote(params)
             return
 
         self.send_json(200, {
@@ -343,6 +347,22 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             pass
 
         self.send_json(200, summary)
+
+    def handle_market_quote(self, params):
+        stock_code = params.get("stock_code", "").strip()
+        if not stock_code:
+            self.send_json(400, {"error": "stock_code 파라미터가 필요합니다."})
+            return
+
+        try:
+            status, raw = request_json(f"{NAVER_STOCK_BASE}/{urllib.parse.quote(stock_code)}/basic")
+            self.send_response(status)
+            self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin", "*"))
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(raw.encode("utf-8"))
+        except Exception as error:
+            self.send_json(500, {"error": str(error)})
 
 
 if __name__ == "__main__":

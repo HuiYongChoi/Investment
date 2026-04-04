@@ -37,13 +37,15 @@ const COMPANY_MAP = {
 };
 
 const BASE_PRICE_HINTS = {
-    '005930': 81000,
+    '005930': 186200,
     '000660': 215000,
     '035420': 205000,
     '035720': 58000,
     '005380': 255000,
     '207940': 1120000
 };
+
+const COMPANY_DIRECTORY = InvestmentLogic.buildCompanyDirectory(COMPANY_MAP);
 
 const ACCOUNT_ALIASES = {
     revenue: ['매출액', '영업수익', '수익(매출액)', '보험영업수익'],
@@ -65,10 +67,12 @@ const state = {
     annuals: [],
     quarterlies: [],
     reports: [],
+    publicQuote: null,
     chartDaily: [],
     chartVisible: [],
     chartRange: '1M',
     chartSource: 'idle',
+    searchMatches: [],
     technicals: null,
     ratings: null,
     metrics: null,
@@ -83,7 +87,6 @@ let priceHoverIndex = null;
 
 lucide.createIcons();
 
-populateAutocomplete();
 drawXP();
 bindEvents();
 startClock();
@@ -93,10 +96,32 @@ consumeKakaoMessage();
 loadMarketSummary();
 
 function bindEvents() {
+    const companyInput = document.getElementById('company-input');
+    const suggestionBox = document.getElementById('company-suggestions');
     document.getElementById('search-btn').addEventListener('click', startSearch);
-    document.getElementById('company-input').addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') startSearch();
+    companyInput.addEventListener('input', (event) => {
+        renderCompanySuggestions(event.target.value);
     });
+    companyInput.addEventListener('focus', (event) => {
+        renderCompanySuggestions(event.target.value);
+    });
+    companyInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            hideCompanySuggestions();
+            return;
+        }
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            if (!resolveCompany(companyInput.value) && state.searchMatches[0]) {
+                selectCompanySuggestion(state.searchMatches[0].stockCode);
+            }
+            startSearch();
+        }
+    });
+    suggestionBox.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+    });
+    suggestionBox.addEventListener('click', onSuggestionClick);
     document.getElementById('calc-btn').addEventListener('click', calcMetrics);
     document.getElementById('tech-refresh-btn').addEventListener('click', () => {
         if (!state.chartVisible.length) return;
@@ -113,6 +138,11 @@ function bindEvents() {
             renderCharts();
         }
     }, 120));
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.search-input-wrap')) {
+            hideCompanySuggestions();
+        }
+    });
 }
 
 function addXP(amount) {
@@ -131,14 +161,40 @@ function drawXP() {
     document.getElementById('xp-text').textContent = `${xpData.xp}/${XP_MAX}`;
 }
 
-function populateAutocomplete() {
-    const datalist = document.getElementById('company-list');
-    const options = [];
-    Object.entries(COMPANY_MAP).forEach(([name, value]) => {
-        options.push(`<option value="${name}">`);
-        options.push(`<option value="${value.stockCode}">`);
-    });
-    datalist.innerHTML = options.join('');
+function renderCompanySuggestions(rawQuery = '') {
+    const container = document.getElementById('company-suggestions');
+    const matches = InvestmentLogic.matchCompanies(COMPANY_DIRECTORY, rawQuery, 8);
+    state.searchMatches = matches;
+
+    if (!matches.length || document.activeElement !== document.getElementById('company-input')) {
+        hideCompanySuggestions();
+        return;
+    }
+
+    container.innerHTML = matches.map((company) => `
+        <button type="button" class="company-option" data-stock-code="${company.stockCode}">
+            <span class="company-option-name">${escapeHtml(company.name)}</span>
+            <span class="company-option-code">${company.stockCode}</span>
+        </button>
+    `).join('');
+    container.classList.remove('hidden');
+}
+
+function hideCompanySuggestions() {
+    document.getElementById('company-suggestions').classList.add('hidden');
+}
+
+function onSuggestionClick(event) {
+    const button = event.target.closest('.company-option');
+    if (!button) return;
+    selectCompanySuggestion(button.dataset.stockCode);
+}
+
+function selectCompanySuggestion(stockCode) {
+    const selected = COMPANY_DIRECTORY.find((item) => item.stockCode === stockCode);
+    if (!selected) return;
+    document.getElementById('company-input').value = selected.displayLabel;
+    hideCompanySuggestions();
 }
 
 function setStatus(message, tone = 'neutral') {
@@ -309,6 +365,7 @@ async function startSearch() {
         return;
     }
 
+    hideCompanySuggestions();
     state.company = company;
     state.chartRange = '1M';
     setStatus(`${company.name} 분석을 시작합니다. DART, KRX, 공시 리포트를 동기화하는 중입니다.`);
@@ -322,11 +379,12 @@ async function startSearch() {
     document.getElementById('dashboard').classList.remove('hidden');
 
     try {
-        const [annualsResult, quarterliesResult, reportsResult, chartResult] = await Promise.allSettled([
+        const [annualsResult, quarterliesResult, reportsResult, chartResult, quoteResult] = await Promise.allSettled([
             fetchMultiYearDart(company.corpCode),
             fetchQuarterlyHistory(company.corpCode),
             fetchDartReportList(company.corpCode),
-            fetchKrxChart(company.stockCode, company.market)
+            fetchKrxChart(company.stockCode, company.market),
+            fetchPublicQuote(company.stockCode)
         ]);
 
         if (annualsResult.status !== 'fulfilled' || !annualsResult.value.length) {
@@ -336,6 +394,7 @@ async function startSearch() {
         state.annuals = annualsResult.value;
         state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
         state.reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
+        state.publicQuote = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
 
         const chartPayload = chartResult.status === 'fulfilled' ? chartResult.value : { live: false, points: [], error: 'KRX 차트 요청 실패' };
         const livePoints = Array.isArray(chartPayload.points) ? chartPayload.points : [];
@@ -344,9 +403,15 @@ async function startSearch() {
             state.chartSource = 'live';
             setSourceBadge('source-krx', 'KRX Open API 연동됨', 'success');
         } else {
-            state.chartDaily = generateSyntheticChart(company.stockCode);
-            state.chartSource = 'synthetic';
-            setSourceBadge('source-krx', chartPayload.error ? `KRX 제한: ${chartPayload.error}` : 'KRX 대체 차트 사용', 'warn');
+            state.chartDaily = generateSyntheticChart(company.stockCode, state.publicQuote);
+            state.chartSource = state.publicQuote?.close ? 'public_quote' : 'synthetic';
+            setSourceBadge(
+                'source-krx',
+                chartPayload.error
+                    ? `KRX 제한: ${chartPayload.error}${state.publicQuote?.close ? ' · 공개 시세 보정 차트 사용' : ''}`
+                    : (state.publicQuote?.close ? '공개 시세 보정 차트 사용' : 'KRX 대체 차트 사용'),
+                'warn'
+            );
         }
 
         state.summaries = state.annuals.map((item) => ({
@@ -369,7 +434,9 @@ async function startSearch() {
         setSourceBadge('source-dart', 'DART 공시 연동됨', 'success');
         document.getElementById('chart-status').textContent = state.chartSource === 'live'
             ? 'KRX 시세 기반 차트'
-            : 'KRX 인증 이슈로 대체 YTD 차트를 표시 중입니다.';
+            : state.chartSource === 'public_quote'
+                ? 'KRX 인증 이슈로 공개 종가에 맞춘 대체 2026 차트를 표시 중입니다.'
+                : 'KRX 인증 이슈로 대체 YTD 차트를 표시 중입니다.';
         addXP(18);
 
         await generateBriefing();
@@ -390,9 +457,22 @@ function resolveCompany(input) {
         return { name: input, ...COMPANY_MAP[input] };
     }
 
-    const matchByStock = Object.entries(COMPANY_MAP).find(([, data]) => data.stockCode === input);
-    if (matchByStock) {
-        return { name: matchByStock[0], ...matchByStock[1] };
+    const stockCode = (input.match(/\b(\d{6})\b/) || [])[1];
+    if (stockCode) {
+        const matchByStock = COMPANY_DIRECTORY.find((item) => item.stockCode === stockCode);
+        if (matchByStock) {
+            return { name: matchByStock.name, corpCode: matchByStock.corpCode, stockCode: matchByStock.stockCode, market: matchByStock.market };
+        }
+    }
+
+    const exactNameMatch = COMPANY_DIRECTORY.find((item) => item.name === input || item.displayLabel === input);
+    if (exactNameMatch) {
+        return { name: exactNameMatch.name, corpCode: exactNameMatch.corpCode, stockCode: exactNameMatch.stockCode, market: exactNameMatch.market };
+    }
+
+    const fuzzyMatch = InvestmentLogic.matchCompanies(COMPANY_DIRECTORY, input, 1)[0];
+    if (fuzzyMatch) {
+        return { name: fuzzyMatch.name, corpCode: fuzzyMatch.corpCode, stockCode: fuzzyMatch.stockCode, market: fuzzyMatch.market };
     }
 
     if (/^\d{8}$/.test(input)) {
@@ -477,11 +557,7 @@ async function fetchMultiYearDart(corpCode) {
 async function fetchQuarterlyHistory(corpCode) {
     const currentYear = getCurrentYearKst();
     const results = [];
-    const reportCodes = [
-        { code: '11014', label: '3분기', rank: 3 },
-        { code: '11012', label: '반기', rank: 2 },
-        { code: '11013', label: '1분기', rank: 1 }
-    ];
+    const reportCodes = InvestmentLogic.getQuarterlyReportConfigs();
 
     for (let year = currentYear; year >= currentYear - 2; year -= 1) {
         for (const report of reportCodes) {
@@ -494,9 +570,10 @@ async function fetchQuarterlyHistory(corpCode) {
                 if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
                     results.push({
                         year,
-                        label: `${year} ${report.label}`,
+                        label: `${year} ${report.annual ? '4분기(사업보고서)' : report.label}`,
                         period: `Q${report.rank}`,
                         sortKey: year * 10 + report.rank,
+                        isAnnual: Boolean(report.annual),
                         list: data.list
                     });
                 }
@@ -506,7 +583,7 @@ async function fetchQuarterlyHistory(corpCode) {
         }
     }
 
-    return results.sort((a, b) => b.sortKey - a.sortKey);
+    return InvestmentLogic.sortPeriods(results);
 }
 
 async function fetchDartReportList(corpCode) {
@@ -533,6 +610,13 @@ async function fetchDartReportList(corpCode) {
         .slice(0, 12);
 }
 
+async function fetchPublicQuote(stockCode) {
+    const payload = await fetchJson(buildProxyUrl('market', '/quote', {
+        stock_code: stockCode
+    }, 'quote'));
+    return InvestmentLogic.normalizePublicQuote(payload);
+}
+
 async function fetchKrxChart(stockCode, market) {
     const currentYear = getCurrentYearKst();
     const today = getCurrentDateTokenKst();
@@ -544,35 +628,14 @@ async function fetchKrxChart(stockCode, market) {
     }, 'krx_chart'));
 }
 
-function generateSyntheticChart(stockCode) {
-    const tokens = buildBusinessDateTokens(`${getCurrentYearKst()}0101`, getCurrentDateTokenKst());
-    const base = BASE_PRICE_HINTS[stockCode] || ((numericSeed(stockCode) % 180000) + 12000);
-    let lastClose = base;
-    let phase = numericSeed(`${stockCode}-phase`) % 7;
-
-    return tokens.map((dateToken, index) => {
-        phase += 1;
-        const wave = Math.sin((index + phase) / 6) * 0.012;
-        const drift = ((numericSeed(`${stockCode}-${index}`) % 13) - 6) / 1000;
-        const open = Math.max(1000, Math.round(lastClose * (1 + drift / 2)));
-        const close = Math.max(1000, Math.round(open * (1 + wave + drift)));
-        const high = Math.max(open, close) + Math.round(Math.abs(close - open) * 0.4 + base * 0.004);
-        const low = Math.min(open, close) - Math.round(Math.abs(close - open) * 0.35 + base * 0.003);
-        const volume = Math.round((numericSeed(`vol-${stockCode}-${index}`) % 4000000) + 600000);
-        const change = close - open;
-        const changePct = open ? (change / open) * 100 : 0;
-        lastClose = close;
-        return {
-            date: dateToken,
-            open,
-            high,
-            low: Math.max(500, low),
-            close,
-            volume,
-            change,
-            changePct,
-            listedShares: 0
-        };
+function generateSyntheticChart(stockCode, quote = null) {
+    return InvestmentLogic.generateAnchoredSyntheticChart({
+        stockCode,
+        startDate: `${getCurrentYearKst()}0101`,
+        endDate: getCurrentDateTokenKst(),
+        anchorClose: quote?.close || 0,
+        anchorChange: quote?.change ?? null,
+        baseHints: BASE_PRICE_HINTS
     });
 }
 
@@ -725,37 +788,41 @@ function renderFinancialTable(containerId, periods) {
 
 function renderStockStrip(lastPoint) {
     if (!lastPoint) return;
+    const isLiveKrx = state.chartSource === 'live';
     const price = lastPoint.close;
     const change = lastPoint.change ?? (lastPoint.close - lastPoint.open);
     const changePct = lastPoint.changePct ?? percentage(change, lastPoint.open);
     const className = change > 0 ? 'up' : change < 0 ? 'down' : '';
     const sign = change > 0 ? '+' : '';
+    const priceSub = isLiveKrx
+        ? `${sign}${change.toLocaleString()}원 (${changePct.toFixed(2)}%)`
+        : `${sign}${change.toLocaleString()}원 (${changePct.toFixed(2)}%) · ${formatQuoteTime(state.publicQuote?.asOf)}`;
     document.getElementById('stock-realtime').classList.remove('hidden');
     document.getElementById('stock-realtime').innerHTML = `
         <div class="ss-item">
             <div class="ss-label">현재가</div>
             <div class="ss-val ${className}">${price.toLocaleString()}원</div>
-            <div class="ss-sub ${className}">${sign}${change.toLocaleString()}원 (${changePct.toFixed(2)}%)</div>
+            <div class="ss-sub ${className}">${priceSub}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">시가</div>
-            <div class="ss-val">${lastPoint.open.toLocaleString()}원</div>
-            <div class="ss-sub">당일 시작 가격</div>
+            <div class="ss-val">${isLiveKrx ? `${lastPoint.open.toLocaleString()}원` : '-'}</div>
+            <div class="ss-sub">${isLiveKrx ? '당일 시작 가격' : 'KRX 실데이터 연동 시 표시'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">고가</div>
-            <div class="ss-val good">${lastPoint.high.toLocaleString()}원</div>
-            <div class="ss-sub">장중 최고가</div>
+            <div class="ss-val good">${isLiveKrx ? `${lastPoint.high.toLocaleString()}원` : '-'}</div>
+            <div class="ss-sub">${isLiveKrx ? '장중 최고가' : 'KRX 실데이터 연동 시 표시'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">저가</div>
-            <div class="ss-val bad">${lastPoint.low.toLocaleString()}원</div>
-            <div class="ss-sub">장중 최저가</div>
+            <div class="ss-val bad">${isLiveKrx ? `${lastPoint.low.toLocaleString()}원` : '-'}</div>
+            <div class="ss-sub">${isLiveKrx ? '장중 최저가' : 'KRX 실데이터 연동 시 표시'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">거래량</div>
-            <div class="ss-val">${formatCompact(lastPoint.volume)}</div>
-            <div class="ss-sub">누적 거래량</div>
+            <div class="ss-val">${isLiveKrx ? formatCompact(lastPoint.volume) : '-'}</div>
+            <div class="ss-sub">${isLiveKrx ? '누적 거래량' : 'KRX 실데이터 연동 시 표시'}</div>
         </div>
     `;
 }
@@ -817,8 +884,9 @@ function buildRatings() {
     const previous = state.summaries[1]?.summary;
     if (!current) return;
 
-    const latestQuarter = state.quarterlies[0] ? summarizeStatement(state.quarterlies[0].list) : null;
-    const previousQuarter = state.quarterlies[1] ? summarizeStatement(state.quarterlies[1].list) : null;
+    const comparableQuarterlies = state.quarterlies.filter((item) => !item.isAnnual);
+    const latestQuarter = comparableQuarterlies[0] ? summarizeStatement(comparableQuarterlies[0].list) : null;
+    const previousQuarter = comparableQuarterlies[1] ? summarizeStatement(comparableQuarterlies[1].list) : null;
 
     const revenueGrowth = computeGrowth(current.revenue, previous?.revenue);
     const opGrowth = computeGrowth(current.operatingIncome, previous?.operatingIncome);
@@ -934,6 +1002,7 @@ function refreshTechnicals() {
     renderTechnicalCards();
     renderTechSummary();
     renderCharts();
+    renderTechLegend();
 }
 
 function computeTechnicals(data) {
@@ -1072,6 +1141,7 @@ function renderCharts() {
     renderPriceChart(state.chartVisible);
     renderIndicatorChart(state.chartVisible);
     renderChartLegend();
+    renderTechLegend();
 }
 
 function getVisibleChartData(dailyData, range) {
@@ -1187,25 +1257,6 @@ function renderPriceChart(data) {
         drawOverlayLine(context, boll.map((item) => item?.lower ?? null), xAt, yAt, 'rgba(124,108,255,0.9)');
     }
 
-    const markers = buildSignalMarkers(data, ma5, ma20, localRsi);
-    markers.forEach((marker) => {
-        const x = xAt(marker.index);
-        const y = marker.type === 'buy' ? yAt(data[marker.index].low) + 14 : yAt(data[marker.index].high) - 14;
-        context.fillStyle = marker.type === 'buy' ? '#22c55e' : '#ef4444';
-        context.beginPath();
-        if (marker.type === 'buy') {
-            context.moveTo(x, y + 8);
-            context.lineTo(x - 6, y - 4);
-            context.lineTo(x + 6, y - 4);
-        } else {
-            context.moveTo(x, y - 8);
-            context.lineTo(x - 6, y + 4);
-            context.lineTo(x + 6, y + 4);
-        }
-        context.closePath();
-        context.fill();
-    });
-
     const labelStep = Math.max(1, Math.floor(data.length / 6));
     context.fillStyle = '#64748b';
     context.textAlign = 'center';
@@ -1304,6 +1355,9 @@ function renderIndicatorChart(data) {
             context.fillText('RSI / Stochastic', padding.left + 8, top + 14);
             context.fillText('70', canvas.width - 18, yAt(70) + 4);
             context.fillText('30', canvas.width - 18, yAt(30) + 4);
+            buildOscillatorMarkers(localTechnicals, state.selectedIndicators).forEach((marker) => {
+                drawSignalMarker(context, xAt(marker.index), yAt(marker.value), marker.type);
+            });
         } else {
             const series = localTechnicals.macd.macd;
             const signal = localTechnicals.macd.signal;
@@ -1327,6 +1381,9 @@ function renderIndicatorChart(data) {
             context.fillStyle = '#94a3b8';
             context.font = '11px Inter';
             context.fillText('MACD', padding.left + 8, top + 14);
+            buildMacdMarkers(localTechnicals.macd).forEach((marker) => {
+                drawSignalMarker(context, xAt(marker.index), yAt(marker.value), marker.type);
+            });
         }
     });
 }
@@ -1345,10 +1402,24 @@ function renderChartLegend() {
         items.push({ type: 'line', color: 'rgba(34,211,238,0.9)', label: '볼린저 상단' });
         items.push({ type: 'line', color: 'rgba(124,108,255,0.9)', label: '볼린저 하단' });
     }
-    items.push({ type: 'dot', color: '#22c55e', label: '매수 시그널' });
-    items.push({ type: 'dot', color: '#ef4444', label: '매도 시그널' });
 
     document.getElementById('chart-legend').innerHTML = items.map((item) => `
+        <span class="legend-chip">
+            <span class="${item.type === 'line' ? 'legend-line' : 'legend-dot'}" style="background:${item.color}"></span>
+            <span>${item.label}</span>
+        </span>
+    `).join('');
+}
+
+function renderTechLegend() {
+    const items = [
+        { type: 'line', color: '#8fd3ff', label: '기술 지표선' },
+        { type: 'line', color: '#f59e0b', label: '보조 신호선' },
+        { type: 'dot', color: '#22c55e', label: '매수 시그널' },
+        { type: 'dot', color: '#ef4444', label: '매도 시그널' }
+    ];
+
+    document.getElementById('tech-legend').innerHTML = items.map((item) => `
         <span class="legend-chip">
             <span class="${item.type === 'line' ? 'legend-line' : 'legend-dot'}" style="background:${item.color}"></span>
             <span>${item.label}</span>
@@ -1380,7 +1451,7 @@ ${company}에 대한 한국어 투자 브리핑을 작성하세요.
 - 건전성 점수: ${state.ratings.stability.score}/5
 - 효율성 점수: ${state.ratings.efficiency.score}/5
 - 기술적 판단: ${technicalCards.map((card) => `${card.label} ${card.signal}`).join(', ')}
-- 차트 소스: ${state.chartSource === 'live' ? 'KRX Open API' : 'KRX 대체 차트'}
+- 차트 소스: ${state.chartSource === 'live' ? 'KRX Open API' : state.chartSource === 'public_quote' ? '공개 시세 보정 대체 차트' : 'KRX 대체 차트'}
 
 [출력 형식]
 1. 한 줄 요약
@@ -1434,7 +1505,7 @@ function buildLocalBriefing() {
     ];
     const riskLines = [
         `상승여력 ${state.metrics.upside.toFixed(1)}%는 입력한 목표 PER 가정에 민감합니다.`,
-        `KRX 차트 소스는 현재 ${state.chartSource === 'live' ? '실데이터' : '대체 YTD 차트'}입니다.`,
+        `KRX 차트 소스는 현재 ${state.chartSource === 'live' ? '실데이터' : state.chartSource === 'public_quote' ? '공개 시세 보정 차트' : '대체 YTD 차트'}입니다.`,
         `최근 분기 데이터가 부족한 경우 분기 성장률 평가는 보수적으로 해석해야 합니다.`
     ];
     const finalOpinion = state.lastAnalysis.totalPct >= 80 ? '매수 후보' : state.lastAnalysis.totalPct >= 60 ? '관망 우위' : '주의 구간';
@@ -1641,20 +1712,67 @@ function drawTooltip(context, x, y, lines, maxX, maxY) {
     });
 }
 
-function buildSignalMarkers(data, ma5, ma20, rsi) {
+function buildOscillatorMarkers(technicals, selectedIndicators) {
     const markers = [];
-    for (let index = 1; index < data.length; index += 1) {
-        if (ma5[index - 1] !== null && ma20[index - 1] !== null && ma5[index] !== null && ma20[index] !== null) {
-            if (ma5[index - 1] <= ma20[index - 1] && ma5[index] > ma20[index]) {
-                markers.push({ index, type: 'buy' });
-            } else if (ma5[index - 1] >= ma20[index - 1] && ma5[index] < ma20[index]) {
-                markers.push({ index, type: 'sell' });
+    for (let index = 1; index < technicals.rsi.length; index += 1) {
+        if (selectedIndicators.has('RSI') && technicals.rsi[index] !== null) {
+            if (technicals.rsi[index] < 30) markers.push({ index, type: 'buy', value: technicals.rsi[index] });
+            if (technicals.rsi[index] > 70) markers.push({ index, type: 'sell', value: technicals.rsi[index] });
+        }
+
+        if (selectedIndicators.has('STOCH')) {
+            const previousK = technicals.stoch.k[index - 1];
+            const previousD = technicals.stoch.d[index - 1];
+            const currentK = technicals.stoch.k[index];
+            const currentD = technicals.stoch.d[index];
+            if (previousK !== null && previousD !== null && currentK !== null && currentD !== null) {
+                if (previousK <= previousD && currentK > currentD && currentK < 25) {
+                    markers.push({ index, type: 'buy', value: currentK });
+                } else if (previousK >= previousD && currentK < currentD && currentK > 75) {
+                    markers.push({ index, type: 'sell', value: currentK });
+                }
             }
         }
-        if (rsi[index] !== null && rsi[index] < 30) markers.push({ index, type: 'buy' });
-        if (rsi[index] !== null && rsi[index] > 70) markers.push({ index, type: 'sell' });
     }
     return markers.slice(-10);
+}
+
+function buildMacdMarkers(macd) {
+    const markers = [];
+    for (let index = 1; index < macd.macd.length; index += 1) {
+        const prevMacd = macd.macd[index - 1];
+        const prevSignal = macd.signal[index - 1];
+        const currMacd = macd.macd[index];
+        const currSignal = macd.signal[index];
+        if (prevMacd === null || prevSignal === null || currMacd === null || currSignal === null) continue;
+        if (prevMacd <= prevSignal && currMacd > currSignal) {
+            markers.push({ index, type: 'buy', value: currMacd });
+        } else if (prevMacd >= prevSignal && currMacd < currSignal) {
+            markers.push({ index, type: 'sell', value: currMacd });
+        }
+    }
+    return markers.slice(-10);
+}
+
+function drawSignalMarker(context, x, y, type) {
+    context.save();
+    context.fillStyle = type === 'buy' ? '#22c55e' : '#ef4444';
+    context.strokeStyle = 'rgba(8,10,16,0.72)';
+    context.lineWidth = 1;
+    context.beginPath();
+    if (type === 'buy') {
+        context.moveTo(x, y - 9);
+        context.lineTo(x - 7, y + 5);
+        context.lineTo(x + 7, y + 5);
+    } else {
+        context.moveTo(x, y + 9);
+        context.lineTo(x - 7, y - 5);
+        context.lineTo(x + 7, y - 5);
+    }
+    context.closePath();
+    context.fill();
+    context.stroke();
+    context.restore();
 }
 
 function scoreByRules(rules) {
@@ -1698,6 +1816,20 @@ function formatNullablePct(value) {
 function formatDateToken(token) {
     if (!token || token.length !== 8) return token || '-';
     return `${token.slice(0, 4)}.${token.slice(4, 6)}.${token.slice(6, 8)}`;
+}
+
+function formatQuoteTime(value) {
+    if (!value) return '공개 종가 기준';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '공개 종가 기준';
+    return new Intl.DateTimeFormat('ko-KR', {
+        timeZone: 'Asia/Seoul',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    }).format(date);
 }
 
 function formatAxisDate(token, weekly = false) {
