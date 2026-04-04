@@ -143,6 +143,16 @@ header#header {
     -webkit-text-fill-color: transparent;
 }
 
+.fin-section h3 {
+    margin-top: 10px;
+}
+.fin-table td {
+    padding: 12px 10px;
+}
+@media (max-width: 768px) {
+    .fin-table td { font-size: 0.7rem; }
+}
+
 .logo-sub {
     font-size: 0.7rem;
     color: var(--text-muted);

@@ -105,32 +105,43 @@
         <div class="card" id="card-financials">
             <div class="card-header">
                 <div class="card-icon" style="background:linear-gradient(135deg, #10b981, #059669);"><i data-lucide="pie-chart"></i></div>
-                <h2>핵심 재무제표 (3개년)</h2>
+                <h2>핵심 재무제표 (3개년 연간/분기)</h2>
             </div>
-            <div id="fin-tables" style="overflow-x:auto"></div>
+            <div class="fin-section">
+                <h3 style="font-size:0.9rem; margin-bottom:12px; color:var(--accent-blue);">[연간 실적]</h3>
+                <div id="fin-annual-table" style="overflow-x:auto; margin-bottom:24px;"></div>
+                <h3 style="font-size:0.9rem; margin-bottom:12px; color:var(--accent-blue);">[분기 실적]</h3>
+                <div id="fin-quarterly-table" style="overflow-x:auto"></div>
+            </div>
         </div>
 
         <!-- 4. Metrics -->
         <div class="card" id="card-metrics">
             <div class="card-header">
                 <div class="card-icon" style="background:linear-gradient(135deg, #8b5cf6, #6366f1);"><i data-lucide="calculator"></i></div>
-                <h2>투자 가치 지표</h2>
+                <h2>투자 가치 지표 & 적정주가 산출</h2>
             </div>
-            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-bottom:24px;">
+            <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; margin-bottom:20px;">
                 <div style="display:flex; flex-direction:column; gap:6px;">
-                    <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">현재 주가</label>
+                    <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">현재 주가 (원)</label>
                     <input type="number" id="m-price" class="tech-in" style="margin:0" placeholder="0">
                 </div>
                 <div style="display:flex; flex-direction:column; gap:6px;">
-                    <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">상장주식수</label>
+                    <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">상장주식수 (만주)</label>
                     <input type="number" id="m-shares" class="tech-in" style="margin:0" placeholder="0">
                 </div>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; margin-bottom:24px;">
                 <div style="display:flex; flex-direction:column; gap:6px;">
-                    <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">목표 PER</label>
+                    <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">예상 영업이익 (억)</label>
+                    <input type="number" id="m-expected-op" class="tech-in" style="margin:0" placeholder="0">
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">목표 PER/업종 PER</label>
                     <input type="number" id="m-target-per" class="tech-in" style="margin:0" placeholder="15">
                 </div>
             </div>
-            <button class="btn-primary" style="width:100%" id="calc-btn"><i data-lucide="refresh-cw"></i> 지표 재계산</button>
+            <button class="btn-primary" style="width:100%" id="calc-btn"><i data-lucide="refresh-cw"></i> 가치 지표 재계산</button>
             <div class="metrics-grid" id="metrics-grid" style="margin-top:24px;"></div>
         </div>
 

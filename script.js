@@ -129,7 +129,11 @@ async function startSearch() {
 
         renderStockStrip(chartOHLCV[chartOHLCV.length - 1]);
         renderCandleChart(chartOHLCV);
-        renderHistoricalTables(multiYearData);
+        
+        // Split data into Annual and Quarterly (Mocking Quarterly for now if not available)
+        renderHistoricalTables(multiYearData, 'annual');
+        const qData = await fetchQuarterlyDART(currentCorpCode, year);
+        renderHistoricalTables(qData, 'quarterly');
         
         // 3. Analytics & Rating
         autoFillMetrics(multiYearData[0].list, chartOHLCV[chartOHLCV.length-1]);
@@ -159,20 +163,61 @@ async function fetchMultiYearDART(corp, year) {
     const years = [year, year-1, year-2];
     const results = [];
     for (const y of years) {
+        let found = false;
+        // Try Annual (11011) first
         try {
             const res = await fetch(`${DART_URL}/fnlttSinglAcnt.json?corp_code=${corp}&bsns_year=${y}&reprt_code=11011`);
             const data = await res.json();
             if (data.status === '000' && data.list) {
-                results.push({ year: y, list: data.list });
+                results.push({ year: y, list: data.list, type: 'annual' });
+                found = true;
             }
-        } catch (e) { console.warn(`DART ${y} fetch failed`, e); }
+        } catch (e) {}
+
+        // Fallback for 2026/Current Year (Check Quarterly if Annual fails)
+        if (!found) {
+            const reportCodes = ['11014', '11012', '11013']; // Q3, Q2, Q1
+            for (const code of reportCodes) {
+                try {
+                    const res = await fetch(`${DART_URL}/fnlttSinglAcnt.json?corp_code=${corp}&bsns_year=${y}&reprt_code=${code}`);
+                    const data = await res.json();
+                    if (data.status === '000' && data.list) {
+                        results.push({ year: y, list: data.list, type: `Q${reportCodes.indexOf(code)+1}` });
+                        found = true;
+                        break;
+                    }
+                } catch (e) {}
+            }
+        }
     }
-    // Fallback Mock if real API fails for demo
     if (results.length === 0) {
         return [
             { year: 2024, list: mockDART(1.1) },
             { year: 2023, list: mockDART(1.0) },
             { year: 2022, list: mockDART(0.95) }
+        ];
+    }
+    return results;
+}
+
+async function fetchQuarterlyDART(corp, year) {
+    // Simplified: just fetch latest quarters for the grid
+    const reportCodes = [{c:'11013', n:'1분기'}, {c:'11012', n:'반기'}, {c:'11014', n:'3분기'}];
+    const results = [];
+    for (const item of reportCodes) {
+        try {
+            const res = await fetch(`${DART_URL}/fnlttSinglAcnt.json?corp_code=${corp}&bsns_year=${year}&reprt_code=${item.c}`);
+            const data = await res.json();
+            if (data.status === '000' && data.list) {
+                results.push({ year: item.n, list: data.list });
+            }
+        } catch(e) {}
+    }
+    if (results.length === 0) {
+        return [
+            { year: '1분기', list: mockDART(0.25) },
+            { year: '2분기', list: mockDART(0.52) },
+            { year: '3분기', list: mockDART(0.78) }
         ];
     }
     return results;
@@ -223,16 +268,23 @@ function generateAccurateOHLCV(stk) {
 function renderStockStrip(last) {
     if (!last) return;
     const price = last.close;
-    const diff = price - last.open;
-    const pct = (diff / last.open * 100).toFixed(2);
-    const cls = diff > 0 ? 'up' : diff < 0 ? 'down' : '';
-    const sign = diff > 0 ? '▲' : '▼';
+    const prev = last.open; // Estimate prev close as open for demo
+    const diff = price - prev;
+    const pct = (diff / prev * 100).toFixed(2);
+    
+    const hDiff = last.high - prev;
+    const hPct = (hDiff / prev * 100).toFixed(2);
+    const lDiff = last.low - prev;
+    const lPct = (lDiff / prev * 100).toFixed(2);
+
+    const getCls = (v) => v > 0 ? 'up' : v < 0 ? 'down' : '';
+    const getSign = (v) => v > 0 ? '▲' : v < 0 ? '▼' : '';
     
     document.getElementById('stock-realtime').innerHTML = `
-        <div class="ss-item"><div class="ss-label">현재가</div><div class="ss-val ${cls}">${price.toLocaleString()}원</div><div class="ss-sub ${cls}">${sign} ${Math.abs(diff).toLocaleString()} (${pct}%)</div></div>
+        <div class="ss-item"><div class="ss-label">현재가</div><div class="ss-val ${getCls(diff)}">${price.toLocaleString()}원</div><div class="ss-sub ${getCls(diff)}">${getSign(diff)} ${Math.abs(diff).toLocaleString()} (${pct}%)</div></div>
         <div class="ss-item"><div class="ss-label">시가</div><div class="ss-val">${last.open.toLocaleString()}원</div></div>
-        <div class="ss-item"><div class="ss-label">고가</div><div class="ss-val up">${last.high.toLocaleString()}원</div></div>
-        <div class="ss-item"><div class="ss-label">저가</div><div class="ss-val down">${last.low.toLocaleString()}원</div></div>
+        <div class="ss-item"><div class="ss-label">고가</div><div class="ss-val up">${last.high.toLocaleString()}원</div><div class="ss-sub up" style="font-size:0.7rem">${getSign(hDiff)} ${hPct}%</div></div>
+        <div class="ss-item"><div class="ss-label">저가</div><div class="ss-val down">${last.low.toLocaleString()}원</div><div class="ss-sub down" style="font-size:0.7rem">${getSign(lDiff)} ${lPct}%</div></div>
         <div class="ss-item"><div class="ss-label">거래량</div><div class="ss-val">${fmtNum(last.volume)}</div></div>
     `;
     document.getElementById('m-price').value = price;
@@ -248,49 +300,76 @@ function renderCandleChart(data) {
     const cw = W - pad.l - pad.r;
     const ch = H - pad.t - pad.b;
 
-    ctx.clearRect(0,0,W,H);
-    
     let minP = Math.min(...data.map(d => d.low)) * 0.98;
     let maxP = Math.max(...data.map(d => d.high)) * 1.02;
     const yP = (p) => pad.t + ch - ((p - minP) / (maxP - minP)) * ch;
     const gap = cw / data.length;
     const barW = gap * 0.7;
 
-    // Grid & Axis
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-    ctx.lineWidth = 1;
-    for(let i=0; i<=5; i++) {
-        const y = pad.t + (ch/5)*i;
-        const p = maxP - ((maxP-minP)/5)*i;
-        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W-pad.r, y); ctx.stroke();
-        ctx.fillStyle = 'var(--text-muted)'; ctx.font = '11px Inter'; ctx.textAlign = 'right';
-        ctx.fillText(Math.round(p).toLocaleString(), pad.l - 12, y + 4);
-    }
-
-    // Indicators for logic markers
-    const rsiArr = data.map((_, i) => computeRSI(data.slice(0, i+1).map(x=>x.close)));
-
-    // Candles
-    data.forEach((d, i) => {
-        const x = pad.l + gap * i + gap/2;
-        const isUp = d.close >= d.open;
-        const color = isUp ? '#ef4444' : '#3b82f6';
-        
-        ctx.strokeStyle = color; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(x, yP(d.high)); ctx.lineTo(x, yP(d.low)); ctx.stroke();
-        
-        ctx.fillStyle = color;
-        const h = Math.max(1, Math.abs(yP(d.open) - yP(d.close)));
-        ctx.fillRect(x - barW/2, Math.min(yP(d.open), yP(d.close)), barW, h);
-
-        // Buy/Sell Markers (RSI Based)
-        const rsi = rsiArr[i];
-        if (rsi && rsi <= 30) {
-            ctx.fillStyle = '#10b981'; ctx.beginPath(); ctx.arc(x, yP(d.low) + 15, 4, 0, Math.PI*2); ctx.fill();
-        } else if (rsi && rsi >= 70) {
-            ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(x, yP(d.high) - 15, 4, 0, Math.PI*2); ctx.fill();
+    const draw = () => {
+        ctx.clearRect(0,0,W,H);
+        // Grid & Axis
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = 1;
+        for(let i=0; i<=5; i++) {
+            const y = pad.t + (ch/5)*i;
+            const p = maxP - ((maxP-minP)/5)*i;
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W-pad.r, y); ctx.stroke();
+            ctx.fillStyle = 'var(--text-muted)'; ctx.font = '11px Inter'; ctx.textAlign = 'right';
+            ctx.fillText(Math.round(p).toLocaleString(), pad.l - 12, y + 4);
         }
-    });
+
+        const rsiArr = data.map((_, i) => computeRSI(data.slice(0, i+1).map(x=>x.close)));
+
+        data.forEach((d, i) => {
+            const x = pad.l + gap * i + gap/2;
+            const color = d.close >= d.open ? '#ef4444' : '#3b82f6';
+            ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(x, yP(d.high)); ctx.lineTo(x, yP(d.low)); ctx.stroke();
+            ctx.fillStyle = color;
+            const h = Math.max(1, Math.abs(yP(d.open) - yP(d.close)));
+            ctx.fillRect(x - barW/2, Math.min(yP(d.open), yP(d.close)), barW, h);
+
+            const rsi = rsiArr[i];
+            if (rsi && rsi <= 30) {
+                ctx.fillStyle = '#10b981'; ctx.beginPath(); ctx.arc(x, yP(d.low) + 15, 4, 0, Math.PI*2); ctx.fill();
+            } else if (rsi && rsi >= 70) {
+                ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(x, yP(d.high) - 15, 4, 0, Math.PI*2); ctx.fill();
+            }
+        });
+    };
+
+    draw();
+
+    // Tooltip Implementation
+    canvas.onmousemove = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        if (mouseX < pad.l || mouseX > W - pad.r) return;
+        
+        const idx = Math.floor((mouseX - pad.l) / gap);
+        if (idx >= 0 && idx < data.length) {
+            draw();
+            const d = data[idx];
+            const x = pad.l + gap * idx + gap/2;
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, H - pad.b); ctx.stroke();
+            
+            // Floating Tooltip Detail
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+            ctx.fillRect(x + 10, e.clientY - rect.top - 40, 140, 80);
+            ctx.strokeStyle = 'var(--accent-blue)';
+            ctx.strokeRect(x + 10, e.clientY - rect.top - 40, 140, 80);
+            
+            ctx.fillStyle = 'white'; ctx.textAlign = 'left'; ctx.font = 'bold 11px Inter';
+            ctx.fillText(`날짜: ${d.date}`, x + 20, e.clientY - rect.top - 24);
+            ctx.font = '10px Inter';
+            ctx.fillText(`시가: ${d.open.toLocaleString()}`, x + 20, e.clientY - rect.top - 8);
+            ctx.fillText(`종가: ${d.close.toLocaleString()}`, x + 20, e.clientY - rect.top + 8);
+            ctx.fillText(`고가: ${d.high.toLocaleString()}`, x + 20, e.clientY - rect.top + 24);
+        }
+    };
+    canvas.onmouseleave = draw;
 
     document.getElementById('chart-legend').innerHTML = `
         <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;margin-right:5px"></span>상승</span>
@@ -300,13 +379,16 @@ function renderCandleChart(data) {
     `;
 }
 
-function renderHistoricalTables(data) {
-    const container = document.getElementById('fin-tables');
+function renderHistoricalTables(data, target = 'annual') {
+    const containerId = target === 'annual' ? 'fin-annual-table' : 'fin-quarterly-table';
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
     const years = data.map(d => d.year);
     const accounts = ['매출액', '영업이익', '당기순이익', '자산총계', '부채총계', '자본총계'];
     
     let html = `<table class="fin-table"><thead><tr><th>계정항목</th>`;
-    years.forEach(y => html += `<th>${y}년</th>`);
+    years.forEach(y => html += `<th>${y}${target === 'annual' ? '년' : ''}</th>`);
     html += `<th>최근성장</th></tr></thead><tbody>`;
     
     accounts.forEach(acc => {
@@ -316,11 +398,11 @@ function renderHistoricalTables(data) {
             const item = yrData.list.find(i => i.account_nm === acc);
             return item ? parseInt(item.thstrm_amount) : 0;
         });
-        vals.forEach(v => cells += `<td>${fmtNum(v)}</td>`);
+        vals.forEach(v => cells += `<td style="font-size:0.8rem">${fmtNum(v)}</td>`);
         
         const growth = vals[0] && vals[1] ? ((vals[0]/vals[1]-1)*100).toFixed(1) : '-';
         const cls = parseFloat(growth) > 0 ? 'good' : (parseFloat(growth) < 0 ? 'bad' : '');
-        cells += `<td class="${cls}" style="font-weight:800">${growth}%</td></tr>`;
+        cells += `<td class="${cls}" style="font-weight:800; font-size:0.8rem">${growth}%</td></tr>`;
         html += cells;
     });
     
@@ -353,6 +435,7 @@ document.getElementById('calc-btn').addEventListener('click', calcMetrics);
 function calcMetrics() {
     const p = parseFloat(document.getElementById('m-price').value) || 0;
     const s = parseFloat(document.getElementById('m-shares').value) * 10000 || 0;
+    const expOp = parseFloat(document.getElementById('m-expected-op').value) * 1e8 || 0;
     const tper = parseFloat(document.getElementById('m-target-per').value) || 15;
     const f = lastAnalysis.fin;
     
@@ -361,15 +444,19 @@ function calcMetrics() {
     const roe = f.eq > 0 ? (f.net / f.eq * 100) : 0;
     const debtR = f.eq > 0 ? (f.debt / f.eq * 100) : 0;
     const opM = f.rev > 0 ? (f.op / f.rev * 100) : 0;
-    const targetPrice = eps * tper;
+    
+    // Fair Price Calculation (S-Rim style or OpProfit based)
+    const fairMarketCap = expOp > 0 ? expOp * tper : (f.net * tper);
+    const targetPrice = s > 0 ? fairMarketCap / s : 0;
     const upside = p > 0 ? (targetPrice / p - 1) * 100 : 0;
 
     const items = [
-        { l:'EPS', v:Math.round(eps).toLocaleString()+'원' },
-        { l:'PER', v:per.toFixed(1)+'배', c:per<15?'good':per<25?'warn':'bad' },
+        { l:'EPS (현재)', v:Math.round(eps).toLocaleString()+'원' },
+        { l:'현재 PER', v:per.toFixed(1)+'배', c:per<tper?'good':per<(tper*1.5)?'warn':'bad' },
         { l:'ROE', v:roe.toFixed(1)+'%', c:roe>12?'good':roe>8?'warn':'bad' },
         { l:'영업이익률', v:opM.toFixed(1)+'%', c:opM>10?'good':opM>5?'warn':'bad' },
         { l:'부채비율', v:debtR.toFixed(0)+'%', c:debtR<80?'good':debtR<150?'warn':'bad' },
+        { l:'적정주가', v:Math.round(targetPrice).toLocaleString()+'원' },
         { l:'상승여력', v:(upside>0?'+':'')+upside.toFixed(1)+'%', c:upside>0?'good':'bad' }
     ];
 
@@ -379,7 +466,7 @@ function calcMetrics() {
             <div class="mt-value ${i.c||''}">${i.v}</div>
         </div>
     `).join('');
-    lastAnalysis.metrics = { per, roe, opM, debtR, upside };
+    lastAnalysis.metrics = { per, roe, opM, debtR, upside, targetPrice };
 }
 
 function autoRate(multiData) {
@@ -452,15 +539,35 @@ function autoComputeTechnicals(data) {
 
 document.getElementById('tech-btn').addEventListener('click', calcTech);
 function calcTech() {
+    let buys=0, sells=0, total=5;
+    
     const rsi = parseFloat(document.getElementById('t-rsi').value);
-    const sig = document.getElementById('sig-rsi');
-    let buys=0, sells=0;
-    if (rsi < 35) { sig.className='tech-sig buy'; sig.textContent='강력 매수 (침체)'; buys++; }
-    else if (rsi > 65) { sig.className='tech-sig sell'; sig.textContent='강력 매도 (과열)'; sells++; }
-    else { sig.className='tech-sig neutral'; sig.textContent='중립'; }
+    const macd = parseFloat(document.getElementById('t-macd').value);
+    const macdSig = parseFloat(document.getElementById('t-macd-sig').value);
+    const stochK = parseFloat(document.getElementById('t-sk').value);
+    const stochD = parseFloat(document.getElementById('t-sd').value);
+    const maS = parseFloat(document.getElementById('t-mas').value);
+    const maL = parseFloat(document.getElementById('t-mal').value);
+    const bPrice = parseFloat(document.getElementById('t-bp').value);
+    const bLower = parseFloat(document.getElementById('t-bl').value);
+    const bUpper = parseFloat(document.getElementById('t-bu').value);
+
+    const updateSig = (id, condBuy, condSell) => {
+        const el = document.getElementById(id);
+        if (condBuy) { el.className='tech-sig buy'; el.textContent='매수'; buys++; }
+        else if (condSell) { el.className='tech-sig sell'; el.textContent='매도'; sells++; }
+        else { el.className='tech-sig neutral'; el.textContent='중립'; }
+    };
+
+    updateSig('sig-rsi', rsi < 35, rsi > 65);
+    updateSig('sig-macd', macd > macdSig, macd < macdSig);
+    updateSig('sig-stoch', stochK > stochD && stochK < 25, stochK < stochD && stochK > 75);
+    updateSig('sig-cross', maS > maL, maS < maL);
+    updateSig('sig-bb', bPrice < bLower, bPrice > bUpper);
 
     const summary = document.getElementById('tech-summary');
-    summary.innerHTML = `<div style="font-size:1.5rem; font-weight:800; color:var(--accent-blue); padding:12px; background:rgba(255,255,255,0.03); border-radius:12px;">AI 시그널 집계: 매수 ${buys} / 매도 ${sells}</div>`;
+    const result = buys > sells ? '매수 우세' : (sells > buys ? '매도 우세' : '중립');
+    summary.innerHTML = `<div style="font-size:1.5rem; font-weight:800; color:var(--accent-blue); padding:12px; background:rgba(255,255,255,0.03); border-radius:12px;">기술적 지표 집계: ${result} (매수 ${buys} / 매도 ${sells} / 중립 ${total-buys-sells})</div>`;
 }
 
 // =================================================================
@@ -475,6 +582,7 @@ async function generateBriefing() {
     - 현재 점수: 가치투자 부합도 ${pct}%
     - 재무상태: 매출액 ${fmtNum(f.rev)}, 영업이익 ${fmtNum(f.op)}, 순이익 ${fmtNum(f.net)}, 부채비율 ${lastAnalysis.metrics.debtR.toFixed(0)}%
     - 투자 매력도: 수익성(${lastAnalysis.scores.profit}/5), 성장성(${lastAnalysis.scores.growth}/5), 안전성(${lastAnalysis.scores.safety}/5)
+    - 상승여력: ${lastAnalysis.metrics.upside.toFixed(1)}% (적정주가 ${Math.round(lastAnalysis.metrics.targetPrice).toLocaleString()}원 대비)
     
     작성 가이드:
     1. 분석 요약 (한 문장)
@@ -487,6 +595,7 @@ async function generateBriefing() {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
         });
+        if (!res.ok) throw new Error('API Response Error');
         const data = await res.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "분석 결과를 출력할 수 없습니다.";
         briefing.innerHTML = `
@@ -496,7 +605,8 @@ async function generateBriefing() {
             <div style="font-size:1rem; line-height:1.7; color:var(--text-main); white-space:pre-wrap;">${text}</div>
         `;
     } catch (e) {
-        briefing.innerHTML = `<div style="padding:40px; text-align:center; color:var(--danger);">Gemini AI 브리핑 생성 실패. 네트워크를 확인하세요.</div>`;
+        console.error(e);
+        briefing.innerHTML = `<div style="padding:40px; text-align:center; color:var(--danger);">Gemini AI 브리핑 생성 실패. 프록시 서버나 API 설정을 확인하세요.</div>`;
     }
 }
 
