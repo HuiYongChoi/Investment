@@ -1,9 +1,6 @@
 const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-const PROXY = isLocal ? 'http://localhost:8081' : '/api';
-const DART_URL = `${PROXY}/dart`;
-const KRX_URL = `${PROXY}/krx`;
-const GEMINI_URL = `${PROXY}/gemini`;
-const MARKET_URL = `${PROXY}/market`;
+const LOCAL_PROXY = 'http://localhost:8081';
+const PROD_PROXY = '/proxy.php';
 const KAKAO_JS_KEY = '88cd449d612399a0219090bbcfc20b24';
 const KAKAO_REDIRECT_URI = new URL('/auth/kakao/callback', window.location.origin).toString();
 const XP_MAX = 100;
@@ -185,7 +182,7 @@ function updateClock() {
 
 async function loadMarketSummary() {
     try {
-        const data = await fetchJson(`${MARKET_URL}/summary`);
+        const data = await fetchJson(buildProxyUrl('market', '/summary'));
         if (data.usdKrw) {
             document.getElementById('fx-usdkrw').textContent = `${data.usdKrw.toFixed(2)}원`;
             document.getElementById('fx-usdkrw-note').textContent = '1달러 기준';
@@ -418,6 +415,31 @@ async function fetchJson(url, options = {}) {
     return data;
 }
 
+function buildProxyUrl(service, endpoint = '', params = {}, productionAction = service) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+            query.set(key, value);
+        }
+    });
+
+    if (isLocal) {
+        const base = `${LOCAL_PROXY}/${service}${endpoint}`;
+        return query.toString() ? `${base}?${query.toString()}` : base;
+    }
+
+    query.set('action', productionAction);
+    if (endpoint) query.set('endpoint', endpoint);
+    return `${PROD_PROXY}?${query.toString()}`;
+}
+
+function buildProxyPostUrl(service, endpoint = '', productionAction = service) {
+    if (isLocal) return `${LOCAL_PROXY}/${service}${endpoint}`;
+    const query = new URLSearchParams({ action: productionAction });
+    if (endpoint) query.set('endpoint', endpoint);
+    return `${PROD_PROXY}?${query.toString()}`;
+}
+
 async function fetchMultiYearDart(corpCode) {
     const currentYear = getCurrentYearKst();
     const years = [currentYear, currentYear - 1, currentYear - 2];
@@ -434,7 +456,11 @@ async function fetchMultiYearDart(corpCode) {
         let found = null;
         for (const candidate of candidates) {
             try {
-                const data = await fetchJson(`${DART_URL}/fnlttSinglAcnt.json?corp_code=${corpCode}&bsns_year=${year}&reprt_code=${candidate.code}`);
+                const data = await fetchJson(buildProxyUrl('dart', '/fnlttSinglAcnt.json', {
+                    corp_code: corpCode,
+                    bsns_year: year,
+                    reprt_code: candidate.code
+                }));
                 if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
                     found = { year, label: candidate.label, period: candidate.period, list: data.list };
                     break;
@@ -460,7 +486,11 @@ async function fetchQuarterlyHistory(corpCode) {
     for (let year = currentYear; year >= currentYear - 2; year -= 1) {
         for (const report of reportCodes) {
             try {
-                const data = await fetchJson(`${DART_URL}/fnlttSinglAcnt.json?corp_code=${corpCode}&bsns_year=${year}&reprt_code=${report.code}`);
+                const data = await fetchJson(buildProxyUrl('dart', '/fnlttSinglAcnt.json', {
+                    corp_code: corpCode,
+                    bsns_year: year,
+                    reprt_code: report.code
+                }));
                 if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
                     results.push({
                         year,
@@ -483,7 +513,12 @@ async function fetchDartReportList(corpCode) {
     const currentYear = getCurrentYearKst();
     const bgn = `${currentYear - 2}0101`;
     const end = `${currentYear}1231`;
-    const data = await fetchJson(`${DART_URL}/list.json?corp_code=${corpCode}&bgn_de=${bgn}&end_de=${end}&page_count=100`);
+    const data = await fetchJson(buildProxyUrl('dart', '/list.json', {
+        corp_code: corpCode,
+        bgn_de: bgn,
+        end_de: end,
+        page_count: 100
+    }));
     if (data.status !== '000' || !Array.isArray(data.list)) return [];
 
     return data.list
@@ -501,7 +536,12 @@ async function fetchDartReportList(corpCode) {
 async function fetchKrxChart(stockCode, market) {
     const currentYear = getCurrentYearKst();
     const today = getCurrentDateTokenKst();
-    return fetchJson(`${KRX_URL}/chart?stock_code=${stockCode}&market=${market}&start_date=${currentYear}0101&end_date=${today}`);
+    return fetchJson(buildProxyUrl('krx', '/chart', {
+        stock_code: stockCode,
+        market,
+        start_date: `${currentYear}0101`,
+        end_date: today
+    }, 'krx_chart'));
 }
 
 function generateSyntheticChart(stockCode) {
@@ -1351,7 +1391,7 @@ ${company}에 대한 한국어 투자 브리핑을 작성하세요.
     `.trim();
 
     try {
-        const response = await fetchJson(GEMINI_URL, {
+        const response = await fetchJson(buildProxyPostUrl('gemini'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

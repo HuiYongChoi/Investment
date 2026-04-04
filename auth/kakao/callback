@@ -37,7 +37,7 @@
     </div>
     <script>
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-        const proxyBase = isLocal ? 'http://localhost:8081' : '/api';
+        const proxyBase = isLocal ? 'http://localhost:8081/kakao/token' : '/proxy.php?action=kakao';
         const returnUrl = sessionStorage.getItem('invest_nav_kakao_return_url') || new URL('/index.html', location.origin).toString();
         const params = new URLSearchParams(location.search);
         const code = params.get('code');
@@ -52,7 +52,7 @@
             }
 
             try {
-                const response = await fetch(`${proxyBase}/kakao/token`, {
+                const response = await fetch(proxyBase, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
