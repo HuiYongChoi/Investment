@@ -1,644 +1,1760 @@
-// =================================================================
-// INVESTMENT NAVIGATOR v2.0 (Premium)
-// =================================================================
-
-// Detect Proxy Host (Local vs Production)
 const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 const PROXY = isLocal ? 'http://localhost:8081' : '/api';
 const DART_URL = `${PROXY}/dart`;
-const GEMINI_URL = `${PROXY}/gemini`;
 const KRX_URL = `${PROXY}/krx`;
-
-// Corp codes for DART (Top Korean Companies)
-const KNOWN_DART = {'삼성전자':'00126380','SK하이닉스':'00164779','카카오':'00634770','네이버':'00266961','현대자동차':'00164742','LG전자':'00401731','LG화학':'00356361','셀트리온':'00492054','포스코홀딩스':'00138069','KB금융':'00626907','신한지주':'00382199','SK텔레콤':'00164800','KT':'00164784','기아':'00270726','삼성바이오로직스':'00823736','카카오뱅크':'01085477','LG에너지솔루션':'01011703','하나금융지주':'00547583','우리금융지주':'00856955','현대모비스':'00164788','SK이노베이션':'00631518','엔씨소프트':'00258801','크래프톤':'01348012','두산에너빌리티':'00164013','한화솔루션':'00265667'};
-const KNOWN_STK = {'삼성전자':'005930','SK하이닉스':'000660','카카오':'035720','네이버':'035420','현대자동차':'005380','LG전자':'066570','LG화학':'051910','셀트리온':'068270','포스코홀딩스':'005490','KB금융':'105560','신한지주':'055550','SK텔레콤':'017670','KT':'030200','기아':'000270','삼성바이오로직스':'207940','카카오뱅크':'323410','LG에너지솔루션':'373220','하나금융지주':'086790','우리금융지주':'316140','현대모비스':'012330','SK이노베이션':'096770','엔씨소프트':'036570','크래프톤':'259960','두산에너빌리티':'034020','한화솔루션':'009830','삼성SDI':'006400','NAVER':'035420','현대차':'005380'};
-
-// XP & Leveling
+const GEMINI_URL = `${PROXY}/gemini`;
+const MARKET_URL = `${PROXY}/market`;
+const KAKAO_JS_KEY = '88cd449d612399a0219090bbcfc20b24';
+const KAKAO_REDIRECT_URI = new URL('/auth/kakao/callback', window.location.origin).toString();
 const XP_MAX = 100;
+
+const COMPANY_MAP = {
+    '삼성전자': { corpCode: '00126380', stockCode: '005930', market: 'KOSPI' },
+    'SK하이닉스': { corpCode: '00164779', stockCode: '000660', market: 'KOSPI' },
+    '카카오': { corpCode: '00634770', stockCode: '035720', market: 'KOSDAQ' },
+    '네이버': { corpCode: '00266961', stockCode: '035420', market: 'KOSPI' },
+    'NAVER': { corpCode: '00266961', stockCode: '035420', market: 'KOSPI' },
+    '현대자동차': { corpCode: '00164742', stockCode: '005380', market: 'KOSPI' },
+    '현대차': { corpCode: '00164742', stockCode: '005380', market: 'KOSPI' },
+    'LG전자': { corpCode: '00401731', stockCode: '066570', market: 'KOSPI' },
+    'LG화학': { corpCode: '00356361', stockCode: '051910', market: 'KOSPI' },
+    '셀트리온': { corpCode: '00492054', stockCode: '068270', market: 'KOSPI' },
+    '포스코홀딩스': { corpCode: '00138069', stockCode: '005490', market: 'KOSPI' },
+    'KB금융': { corpCode: '00626907', stockCode: '105560', market: 'KOSPI' },
+    '신한지주': { corpCode: '00382199', stockCode: '055550', market: 'KOSPI' },
+    'SK텔레콤': { corpCode: '00164800', stockCode: '017670', market: 'KOSPI' },
+    'KT': { corpCode: '00164784', stockCode: '030200', market: 'KOSPI' },
+    '기아': { corpCode: '00270726', stockCode: '000270', market: 'KOSPI' },
+    '삼성바이오로직스': { corpCode: '00823736', stockCode: '207940', market: 'KOSPI' },
+    '카카오뱅크': { corpCode: '01085477', stockCode: '323410', market: 'KOSPI' },
+    'LG에너지솔루션': { corpCode: '01011703', stockCode: '373220', market: 'KOSPI' },
+    '하나금융지주': { corpCode: '00547583', stockCode: '086790', market: 'KOSPI' },
+    '우리금융지주': { corpCode: '00856955', stockCode: '316140', market: 'KOSPI' },
+    '현대모비스': { corpCode: '00164788', stockCode: '012330', market: 'KOSPI' },
+    'SK이노베이션': { corpCode: '00631518', stockCode: '096770', market: 'KOSPI' },
+    '엔씨소프트': { corpCode: '00258801', stockCode: '036570', market: 'KOSPI' },
+    '크래프톤': { corpCode: '01348012', stockCode: '259960', market: 'KOSPI' },
+    '두산에너빌리티': { corpCode: '00164013', stockCode: '034020', market: 'KOSPI' },
+    '한화솔루션': { corpCode: '00265667', stockCode: '009830', market: 'KOSPI' },
+    '삼성SDI': { corpCode: '00126362', stockCode: '006400', market: 'KOSPI' }
+};
+
+const BASE_PRICE_HINTS = {
+    '005930': 81000,
+    '000660': 215000,
+    '035420': 205000,
+    '035720': 58000,
+    '005380': 255000,
+    '207940': 1120000
+};
+
+const ACCOUNT_ALIASES = {
+    revenue: ['매출액', '영업수익', '수익(매출액)', '보험영업수익'],
+    operatingIncome: ['영업이익', '영업손실'],
+    netIncome: ['당기순이익', '당기순손익', '분기순이익', '반기순이익', '연결당기순이익', '당기순이익(손실)'],
+    assets: ['자산총계'],
+    liabilities: ['부채총계'],
+    equity: ['자본총계'],
+    cash: ['현금및현금성자산', '현금성자산'],
+    currentAssets: ['유동자산'],
+    currentLiabilities: ['유동부채'],
+    inventory: ['재고자산'],
+    receivables: ['매출채권', '매출채권및기타채권', '매출채권 및 기타채권'],
+    financeCost: ['이자비용', '금융비용', '금융원가']
+};
+
+const state = {
+    company: null,
+    annuals: [],
+    quarterlies: [],
+    reports: [],
+    chartDaily: [],
+    chartVisible: [],
+    chartRange: '1M',
+    chartSource: 'idle',
+    technicals: null,
+    ratings: null,
+    metrics: null,
+    summaries: [],
+    briefingMode: 'idle',
+    lastAnalysis: { fin: {}, scores: {}, totalPct: 0, metrics: {} },
+    selectedIndicators: new Set(['RSI', 'MACD', 'STOCH', 'BOLL', 'MA'])
+};
+
 let xpData = JSON.parse(localStorage.getItem('invest_nav_xp') || '{"xp":0,"lv":1}');
-function addXP(n) { 
-    xpData.xp += n; 
-    while (xpData.xp >= XP_MAX) { xpData.xp -= XP_MAX; xpData.lv++; } 
-    localStorage.setItem('invest_nav_xp', JSON.stringify(xpData)); 
-    drawXP(); 
-}
-function drawXP() {
-    document.getElementById('level-badge').textContent = 'Lv.' + xpData.lv;
-    document.getElementById('xp-bar').style.width = (xpData.xp / XP_MAX * 100) + '%';
-    document.getElementById('xp-text').textContent = xpData.xp + '/' + XP_MAX;
-}
-drawXP();
+let priceHoverIndex = null;
 
-// Autocomplete Population
-function populateAutocomplete() {
-    const list = document.getElementById('company-list');
-    const companies = Object.keys(KNOWN_STK);
-    list.innerHTML = companies.map(c => `<option value="${c}">`).join('');
-}
-populateAutocomplete();
-
-// Global State
-let companyName = '';
-let currentCorpCode = '';
-let currentStkCode = '';
-let chartOHLCV = [];
-let multiYearData = []; // [ {year, list:[]}, ... ]
-let lastAnalysis = { fin:{}, scores:{}, totalPct:0, metrics:{} };
-
-// Lucide Init
 lucide.createIcons();
 
-// =================================================================
-// KAKAO SDK & AUTH
-// =================================================================
-const KAKAO_JS_KEY = '88cd449d612399a0219090bbcfc20b24';
-if (!Kakao.isInitialized()) Kakao.init(KAKAO_JS_KEY);
+populateAutocomplete();
+drawXP();
+bindEvents();
+startClock();
+initKakao();
+restoreKakaoSession();
+consumeKakaoMessage();
+loadMarketSummary();
 
-document.getElementById('btn-kakao-login').addEventListener('click', () => {
-    Kakao.Auth.login({
-        success: (auth) => {
-            Kakao.API.request({
-                url: '/v2/user/me',
-                success: (res) => {
-                    document.getElementById('btn-kakao-login').classList.add('hidden');
-                    document.getElementById('kakao-user-profile').classList.remove('hidden');
-                    document.getElementById('kakao-nickname').textContent = res.properties.nickname;
-                    document.getElementById('kakao-profile-img').src = res.properties.thumbnail_image;
-                    addXP(10);
-                }
-            });
+function bindEvents() {
+    document.getElementById('search-btn').addEventListener('click', startSearch);
+    document.getElementById('company-input').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') startSearch();
+    });
+    document.getElementById('calc-btn').addEventListener('click', calcMetrics);
+    document.getElementById('tech-refresh-btn').addEventListener('click', () => {
+        if (!state.chartVisible.length) return;
+        refreshTechnicals();
+    });
+    document.getElementById('pdf-btn').addEventListener('click', exportPdf);
+    document.getElementById('btn-kakao-login').addEventListener('click', beginKakaoLogin);
+    document.getElementById('btn-kakao-logout').addEventListener('click', logoutKakao);
+    document.getElementById('kakao-send-btn').addEventListener('click', sendBriefingToKakao);
+    document.getElementById('chart-range-controls').addEventListener('click', onChartRangeClick);
+    document.getElementById('indicator-toggle').addEventListener('click', onIndicatorToggle);
+    window.addEventListener('resize', debounce(() => {
+        if (!document.getElementById('dashboard').classList.contains('hidden')) {
+            renderCharts();
         }
+    }, 120));
+}
+
+function addXP(amount) {
+    xpData.xp += amount;
+    while (xpData.xp >= XP_MAX) {
+        xpData.xp -= XP_MAX;
+        xpData.lv += 1;
+    }
+    localStorage.setItem('invest_nav_xp', JSON.stringify(xpData));
+    drawXP();
+}
+
+function drawXP() {
+    document.getElementById('level-badge').textContent = `Lv.${xpData.lv}`;
+    document.getElementById('xp-bar').style.width = `${(xpData.xp / XP_MAX) * 100}%`;
+    document.getElementById('xp-text').textContent = `${xpData.xp}/${XP_MAX}`;
+}
+
+function populateAutocomplete() {
+    const datalist = document.getElementById('company-list');
+    const options = [];
+    Object.entries(COMPANY_MAP).forEach(([name, value]) => {
+        options.push(`<option value="${name}">`);
+        options.push(`<option value="${value.stockCode}">`);
     });
-});
+    datalist.innerHTML = options.join('');
+}
 
-document.getElementById('btn-kakao-logout').addEventListener('click', () => {
-    if (!Kakao.Auth.getAccessToken()) return;
-    Kakao.Auth.logout(() => {
-        document.getElementById('kakao-user-profile').classList.add('hidden');
-        document.getElementById('btn-kakao-login').classList.remove('hidden');
-    });
-});
+function setStatus(message, tone = 'neutral') {
+    const target = document.getElementById('search-status');
+    target.textContent = message;
+    target.className = 'search-status';
+    if (tone === 'success') target.classList.add('good');
+    if (tone === 'error') target.classList.add('bad');
+    if (tone === 'warn') target.classList.add('warn');
+}
 
-// Kakao "Send to Me"
-document.getElementById('kakao-send-btn').addEventListener('click', () => {
-    if (!Kakao.Auth.getAccessToken()) { alert('카카오 로그인이 필요합니다.'); return; }
-    const resText = document.getElementById('briefing-content').innerText.slice(0, 200) + '...';
-    Kakao.API.request({
-        url: '/v2/api/talk/memo/default/send',
-        data: {
-            template_object: {
-                object_type: 'text',
-                text: `[Investment Navigator] ${companyName} 분석 리포트 요약:\n\n${resText}`,
-                link: { mobile_web_url: location.href, web_url: location.href }
-            }
-        },
-        success: () => { alert('나에게 보내기 성공!'); addXP(5); },
-        fail: (err) => { console.error(err); alert('보내기 실패'); }
-    });
-});
+function setSourceBadge(id, text, tone = 'neutral') {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = 'source-badge';
+    if (tone === 'success') el.classList.add('good');
+    if (tone === 'error') el.classList.add('bad');
+    if (tone === 'warn') el.classList.add('warn');
+}
 
-// =================================================================
-// SEARCH & CORE DATA
-// =================================================================
-document.getElementById('search-btn').addEventListener('click', startSearch);
-document.getElementById('company-input').addEventListener('keydown', e => { if(e.key === 'Enter') startSearch(); });
+function startClock() {
+    updateClock();
+    setInterval(updateClock, 1000);
+}
 
-async function startSearch() {
-    const input = document.getElementById('company-input').value.trim();
-    const year = 2026; // Auto-detect/Force current year
-    const status = document.getElementById('search-status');
-    
-    if (!input) { status.textContent = '⚠️ 기업명 또는 코드를 입력하세요'; status.style.color = 'var(--danger)'; return; }
-    
-    status.innerHTML = '<i data-lucide="loader-2" class="spin" style="display:inline-block; vertical-align:middle; margin-right:8px;"></i> 정밀 분석 엔진 가동 중...';
-    lucide.createIcons();
-    
-    companyName = input;
-    currentCorpCode = KNOWN_DART[input] || input; 
-    currentStkCode = KNOWN_STK[input] || input;
+function updateClock() {
+    const now = new Date();
+    const dateLabel = new Intl.DateTimeFormat('ko-KR', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    }).format(now);
+    document.getElementById('market-datetime').textContent = dateLabel;
+}
 
+async function loadMarketSummary() {
     try {
-        // 1. Fetch 3rd-party Data
-        status.innerHTML = '<i data-lucide="loader-2" class="spin"></i> DART/KRX 데이터 동기화 중...';
-        lucide.createIcons();
-
-        const [dartRes, krxRes] = await Promise.all([
-            fetchMultiYearDART(currentCorpCode, year),
-            fetchKRXChart(currentStkCode)
-        ]);
-        
-        multiYearData = dartRes;
-        chartOHLCV = krxRes;
-        
-        if (!multiYearData || multiYearData.length === 0) throw new Error('DART 공시 정보를 불러올 수 없습니다.');
-        if (!chartOHLCV || chartOHLCV.length === 0) throw new Error('KRX 주가 정보를 불러올 수 없습니다.');
-
-        // 2. Render UI Components
-        document.getElementById('dashboard').classList.remove('hidden');
-        document.getElementById('company-name').textContent = companyName;
-        document.getElementById('company-meta').textContent = `${year}년 포함 최근 3개년 DART 연동 분석`;
-        document.getElementById('dart-link').href = `https://dart.fss.or.kr/dsaf001/main.do?corpCode=${currentCorpCode}`;
-
-        renderStockStrip(chartOHLCV[chartOHLCV.length - 1]);
-        renderCandleChart(chartOHLCV);
-        
-        renderHistoricalTables(multiYearData, 'annual');
-        const qData = await fetchQuarterlyDART(currentCorpCode, year);
-        if (qData) renderHistoricalTables(qData, 'quarterly');
-        
-        // 3. Analytics & Rating
-        autoFillMetrics(multiYearData[0].list, chartOHLCV[chartOHLCV.length-1]);
-        autoComputeTechnicals(chartOHLCV);
-        autoRate(multiYearData);
-        
-        // 4. AI Briefing
-        generateBriefing();
-
-        status.textContent = `✓ ${companyName} 분석 완료`;
-        status.style.color = 'var(--success)';
-        addXP(20);
-        document.getElementById('dashboard').scrollIntoView({ behavior:'smooth' });
-
-    } catch (err) {
-        let msg = err.message;
-        if (err.name === 'TypeError' && err.message.includes('fetch')) {
-            msg = '프록시 서버(api_proxy.rb)가 실행 중이지 않거나 연결할 수 없습니다.';
+        const data = await fetchJson(`${MARKET_URL}/summary`);
+        if (data.usdKrw) {
+            document.getElementById('fx-usdkrw').textContent = `${data.usdKrw.toFixed(2)}원`;
+            document.getElementById('fx-usdkrw-note').textContent = '1달러 기준';
         }
-        status.textContent = `❌ 오류: ${msg}`;
-        status.style.color = 'var(--danger)';
+        if (data.jpyKrw) {
+            document.getElementById('fx-jpykrw').textContent = `${(data.jpyKrw * 100).toFixed(2)}원`;
+            document.getElementById('fx-jpykrw-note').textContent = '100엔 기준';
+        }
+        if (data.goldKrwPerGram) {
+            document.getElementById('gold-krw').textContent = `${Math.round(data.goldKrwPerGram).toLocaleString()}원`;
+            document.getElementById('gold-note').textContent = '금 1g 추정';
+        } else {
+            document.getElementById('gold-note').textContent = '외부 시세 연결 대기';
+        }
+    } catch (error) {
+        document.getElementById('fx-usdkrw-note').textContent = '연동 실패';
+        document.getElementById('fx-jpykrw-note').textContent = '연동 실패';
+        document.getElementById('gold-note').textContent = '연동 실패';
     }
 }
 
-// Multi-year DART Fetching
-async function fetchMultiYearDART(corp, year) {
-    const years = [year, year-1, year-2];
-    const results = [];
-    for (const y of years) {
-        let found = false;
-        // Try Annual (11011) first
-        try {
-            const res = await fetch(`${DART_URL}/fnlttSinglAcnt.json?corp_code=${corp}&bsns_year=${y}&reprt_code=11011`);
-            const data = await res.json();
-            if (data.status === '000' && data.list) {
-                results.push({ year: y, list: data.list, type: 'annual' });
-                found = true;
-            }
-        } catch (e) {}
+function initKakao() {
+    if (!window.Kakao) return;
+    if (!Kakao.isInitialized()) {
+        Kakao.init(KAKAO_JS_KEY);
+    }
+}
 
-        // Fallback for 2026/Current Year (Check Quarterly if Annual fails)
-        if (!found) {
-            const reportCodes = ['11014', '11012', '11013']; // Q3, Q2, Q1
-            for (const code of reportCodes) {
-                try {
-                    const res = await fetch(`${DART_URL}/fnlttSinglAcnt.json?corp_code=${corp}&bsns_year=${y}&reprt_code=${code}`);
-                    const data = await res.json();
-                    if (data.status === '000' && data.list) {
-                        results.push({ year: y, list: data.list, type: `Q${reportCodes.indexOf(code)+1}` });
-                        found = true;
-                        break;
-                    }
-                } catch (e) {}
-            }
+function beginKakaoLogin() {
+    if (!window.Kakao) {
+        alert('카카오 SDK를 불러오지 못했습니다.');
+        return;
+    }
+    sessionStorage.setItem('invest_nav_kakao_return_url', location.href);
+    Kakao.Auth.authorize({
+        redirectUri: KAKAO_REDIRECT_URI
+    });
+}
+
+async function restoreKakaoSession() {
+    const accessToken = sessionStorage.getItem('invest_nav_kakao_token');
+    if (!window.Kakao || !accessToken) return;
+    try {
+        Kakao.Auth.setAccessToken(accessToken);
+        const profile = await Kakao.API.request({ url: '/v2/user/me' });
+        applyKakaoProfile(profile);
+    } catch (error) {
+        clearKakaoSession();
+    }
+}
+
+async function logoutKakao() {
+    if (window.Kakao && Kakao.Auth.getAccessToken()) {
+        try {
+            await Kakao.Auth.logout();
+        } catch (error) {
+            console.warn('Kakao logout failed', error);
         }
     }
-    if (results.length === 0) {
-        throw new Error(`${year}개년 DART 공시 데이터가 존재하지 않거나 호출 한도를 초과했습니다.`);
+    clearKakaoSession();
+}
+
+function clearKakaoSession() {
+    sessionStorage.removeItem('invest_nav_kakao_token');
+    document.getElementById('btn-kakao-login').classList.remove('hidden');
+    document.getElementById('kakao-user-profile').classList.add('hidden');
+}
+
+function applyKakaoProfile(profile) {
+    const nickname = profile?.properties?.nickname || '카카오 사용자';
+    const image = profile?.properties?.thumbnail_image || '';
+    document.getElementById('btn-kakao-login').classList.add('hidden');
+    document.getElementById('kakao-user-profile').classList.remove('hidden');
+    document.getElementById('kakao-nickname').textContent = nickname;
+    document.getElementById('kakao-profile-img').src = image;
+    addXP(8);
+}
+
+function consumeKakaoMessage() {
+    const error = sessionStorage.getItem('invest_nav_kakao_error');
+    if (!error) return;
+    setStatus(`카카오 로그인 안내: ${error}`, 'warn');
+    sessionStorage.removeItem('invest_nav_kakao_error');
+}
+
+async function sendBriefingToKakao() {
+    if (!window.Kakao || !Kakao.Auth.getAccessToken()) {
+        alert('카카오 로그인이 필요합니다.');
+        return;
+    }
+
+    if (!state.company) {
+        alert('먼저 기업 분석을 실행해주세요.');
+        return;
+    }
+
+    const text = document.getElementById('briefing-content').innerText.replace(/\s+/g, ' ').trim().slice(0, 350);
+    try {
+        await Kakao.API.request({
+            url: '/v2/api/talk/memo/default/send',
+            data: {
+                template_object: {
+                    object_type: 'text',
+                    text: `[Investment Navigator] ${state.company.name} 브리핑\n\n${text}`,
+                    link: {
+                        web_url: location.href,
+                        mobile_web_url: location.href
+                    }
+                }
+            }
+        });
+        addXP(5);
+        alert('카카오톡 나에게 보내기가 완료되었습니다.');
+    } catch (error) {
+        alert('카카오톡 전송에 실패했습니다. 메시지 API 권한과 로그인 상태를 확인해주세요.');
+    }
+}
+
+async function startSearch() {
+    const rawInput = document.getElementById('company-input').value.trim();
+    const company = resolveCompany(rawInput);
+    if (!company) {
+        setStatus('사전 매핑된 기업명 또는 종목코드를 입력해주세요.', 'error');
+        return;
+    }
+
+    state.company = company;
+    state.chartRange = '1M';
+    setStatus(`${company.name} 분석을 시작합니다. DART, KRX, 공시 리포트를 동기화하는 중입니다.`);
+    setSourceBadge('source-dart', 'DART 동기화 중');
+    setSourceBadge('source-krx', 'KRX 동기화 중');
+    setSourceBadge('source-gemini', 'Gemini 대기 중');
+
+    document.getElementById('company-name').textContent = company.name;
+    document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 2026년 YTD 차트를 분석합니다.`;
+    document.getElementById('dart-link').href = `https://dart.fss.or.kr/dsaf001/main.do?corpCode=${company.corpCode}`;
+    document.getElementById('dashboard').classList.remove('hidden');
+
+    try {
+        const [annualsResult, quarterliesResult, reportsResult, chartResult] = await Promise.allSettled([
+            fetchMultiYearDart(company.corpCode),
+            fetchQuarterlyHistory(company.corpCode),
+            fetchDartReportList(company.corpCode),
+            fetchKrxChart(company.stockCode, company.market)
+        ]);
+
+        if (annualsResult.status !== 'fulfilled' || !annualsResult.value.length) {
+            throw new Error('DART 재무제표를 불러오지 못했습니다.');
+        }
+
+        state.annuals = annualsResult.value;
+        state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
+        state.reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
+
+        const chartPayload = chartResult.status === 'fulfilled' ? chartResult.value : { live: false, points: [], error: 'KRX 차트 요청 실패' };
+        const livePoints = Array.isArray(chartPayload.points) ? chartPayload.points : [];
+        if (chartPayload.live && livePoints.length) {
+            state.chartDaily = livePoints;
+            state.chartSource = 'live';
+            setSourceBadge('source-krx', 'KRX Open API 연동됨', 'success');
+        } else {
+            state.chartDaily = generateSyntheticChart(company.stockCode);
+            state.chartSource = 'synthetic';
+            setSourceBadge('source-krx', chartPayload.error ? `KRX 제한: ${chartPayload.error}` : 'KRX 대체 차트 사용', 'warn');
+        }
+
+        state.summaries = state.annuals.map((item) => ({
+            ...item,
+            summary: summarizeStatement(item.list)
+        }));
+
+        renderReports(state.reports);
+        renderFinancialTable('fin-annual-table', state.annuals);
+        renderFinancialTable('fin-quarterly-table', state.quarterlies);
+
+        const latestQuote = state.chartDaily[state.chartDaily.length - 1];
+        autoFillMetrics(state.summaries[0]?.summary || {}, latestQuote);
+        calcMetrics();
+        renderStockStrip(latestQuote);
+        buildRatings();
+        refreshTechnicals();
+        renderCharts();
+
+        setSourceBadge('source-dart', 'DART 공시 연동됨', 'success');
+        document.getElementById('chart-status').textContent = state.chartSource === 'live'
+            ? 'KRX 시세 기반 차트'
+            : 'KRX 인증 이슈로 대체 YTD 차트를 표시 중입니다.';
+        addXP(18);
+
+        await generateBriefing();
+
+        setStatus(`${company.name} 분석이 완료되었습니다.`, 'success');
+        document.getElementById('dashboard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (error) {
+        console.error(error);
+        setStatus(error.message || '분석 중 알 수 없는 오류가 발생했습니다.', 'error');
+        setSourceBadge('source-dart', 'DART 실패', 'error');
+        setSourceBadge('source-gemini', 'Gemini 대기', 'warn');
+    }
+}
+
+function resolveCompany(input) {
+    if (!input) return null;
+    if (COMPANY_MAP[input]) {
+        return { name: input, ...COMPANY_MAP[input] };
+    }
+
+    const matchByStock = Object.entries(COMPANY_MAP).find(([, data]) => data.stockCode === input);
+    if (matchByStock) {
+        return { name: matchByStock[0], ...matchByStock[1] };
+    }
+
+    if (/^\d{8}$/.test(input)) {
+        return { name: input, corpCode: input, stockCode: input.slice(-6), market: 'KOSPI' };
+    }
+
+    return null;
+}
+
+async function fetchJson(url, options = {}) {
+    const response = await fetch(url, options);
+    const contentType = response.headers.get('content-type') || '';
+    const data = contentType.includes('application/json') ? await response.json() : await response.text();
+    if (!response.ok) {
+        const message = typeof data === 'object'
+            ? (typeof data.error === 'string' ? data.error : data.error?.message || data.message || response.statusText)
+            : response.statusText;
+        throw new Error(message);
+    }
+    return data;
+}
+
+async function fetchMultiYearDart(corpCode) {
+    const currentYear = getCurrentYearKst();
+    const years = [currentYear, currentYear - 1, currentYear - 2];
+    const results = [];
+
+    for (const year of years) {
+        const candidates = [
+            { code: '11011', label: `${year} 사업보고서`, period: 'ANNUAL' },
+            { code: '11014', label: `${year} 3분기`, period: 'Q3' },
+            { code: '11012', label: `${year} 반기`, period: 'Q2' },
+            { code: '11013', label: `${year} 1분기`, period: 'Q1' }
+        ];
+
+        let found = null;
+        for (const candidate of candidates) {
+            try {
+                const data = await fetchJson(`${DART_URL}/fnlttSinglAcnt.json?corp_code=${corpCode}&bsns_year=${year}&reprt_code=${candidate.code}`);
+                if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
+                    found = { year, label: candidate.label, period: candidate.period, list: data.list };
+                    break;
+                }
+            } catch (error) {
+                continue;
+            }
+        }
+        if (found) results.push(found);
     }
     return results;
 }
 
-async function fetchQuarterlyDART(corp, year) {
-    const reportCodes = [{c:'11013', n:'1분기'}, {c:'11012', n:'반기'}, {c:'11014', n:'3분기'}];
+async function fetchQuarterlyHistory(corpCode) {
+    const currentYear = getCurrentYearKst();
     const results = [];
-    for (const item of reportCodes) {
-        try {
-            const res = await fetch(`${DART_URL}/fnlttSinglAcnt.json?corp_code=${corp}&bsns_year=${year}&reprt_code=${item.c}`);
-            const data = await res.json();
-            if (data.status === '000' && data.list) {
-                results.push({ year: item.n, list: data.list });
-            }
-        } catch(e) {}
-    }
-    return results.length > 0 ? results : null;
-}
-
-function mockDART(factor) {
-    return [
-        { account_nm:'매출액', thstrm_amount: `${Math.round(70e12 * factor)}`, sj_nm:'손익계산서' },
-        { account_nm:'영업이익', thstrm_amount: `${Math.round(8e12 * factor)}`, sj_nm:'손익계산서' },
-        { account_nm:'당기순이익', thstrm_amount: `${Math.round(6e12 * factor)}`, sj_nm:'손익계산서' },
-        { account_nm:'자산총계', thstrm_amount: `${Math.round(450e12 * factor)}`, sj_nm:'재무상태표' },
-        { account_nm:'부채총계', thstrm_amount: `${Math.round(150e12 * factor)}`, sj_nm:'재무상태표' },
-        { account_nm:'자본총계', thstrm_amount: `${Math.round(300e12 * factor)}`, sj_nm:'재무상태표' }
+    const reportCodes = [
+        { code: '11014', label: '3분기', rank: 3 },
+        { code: '11012', label: '반기', rank: 2 },
+        { code: '11013', label: '1분기', rank: 1 }
     ];
-}
 
-// KRX Chart Fetching
-async function fetchKRXChart(stk) {
-    try {
-        const today = new Date().toISOString().slice(0,10).replace(/-/g,'');
-        const res = await fetch(`${KRX_URL}/chart?isu_cd=${stk}&bas_dd=${today}`);
-        const data = await res.json();
-        
-        if (data.OutBlock_1 && data.OutBlock_1.length > 0) {
-            // Mapping real KRX data to internal OHLCV format
-            return data.OutBlock_1.map(item => ({
-                date: item.bas_dd,
-                open: parseInt(item.opnprc_prtt),
-                high: parseInt(item.hgprc_prtt),
-                low: parseInt(item.lwprc_prtt),
-                close: parseInt(item.clsprc_prtt),
-                volume: parseInt(item.trqu_prtt)
-            })).reverse(); // KRX usually returns desc, we need asc
-        }
-        throw new Error('KRX 데이터 응답 형식이 올바르지 않습니다.');
-    } catch (e) { 
-        console.error('KRX Fetch Error:', e);
-        return null; 
-    }
-}
-
-function generateAccurateOHLCV(stk) {
-    const demo = [];
-    let p = stk === '005930' ? 78000 : (stk === '035420' ? 185000 : 50000);
-    const volatility = 0.025;
-    const now = new Date(); // Current date (April 2026)
-    for (let i = 0; i < 60; i++) {
-        const change = (Math.random() - 0.48) * (p * volatility);
-        const o = Math.round(p);
-        const c = Math.round(p + change);
-        const h = Math.round(Math.max(o, c) + Math.random() * (p * 0.01));
-        const l = Math.round(Math.min(o, c) - Math.random() * (p * 0.01));
-        const d = new Date(now); d.setDate(d.getDate() - 60 + i);
-        demo.push({ date: d.toISOString().slice(0,10).replace(/-/g,''), open:o, high:h, low:l, close:c, volume: Math.round(Math.random() * 10e6) });
-        p = c;
-    }
-    return demo;
-}
-
-// =================================================================
-// RENDERING COMPONENTS
-// =================================================================
-function renderStockStrip(last) {
-    if (!last) return;
-    const price = last.close;
-    const prev = last.open; // Estimate prev close as open for demo
-    const diff = price - prev;
-    const pct = (diff / prev * 100).toFixed(2);
-    
-    const hDiff = last.high - prev;
-    const hPct = (hDiff / prev * 100).toFixed(2);
-    const lDiff = last.low - prev;
-    const lPct = (lDiff / prev * 100).toFixed(2);
-
-    const getCls = (v) => v > 0 ? 'up' : v < 0 ? 'down' : '';
-    const getSign = (v) => v > 0 ? '▲' : v < 0 ? '▼' : '';
-    
-    document.getElementById('stock-realtime').innerHTML = `
-        <div class="ss-item"><div class="ss-label">현재가</div><div class="ss-val ${getCls(diff)}">${price.toLocaleString()}원</div><div class="ss-sub ${getCls(diff)}">${getSign(diff)} ${Math.abs(diff).toLocaleString()} (${pct}%)</div></div>
-        <div class="ss-item"><div class="ss-label">시가</div><div class="ss-val">${last.open.toLocaleString()}원</div></div>
-        <div class="ss-item"><div class="ss-label">고가</div><div class="ss-val up">${last.high.toLocaleString()}원</div><div class="ss-sub up" style="font-size:0.7rem">${getSign(hDiff)} ${hPct}%</div></div>
-        <div class="ss-item"><div class="ss-label">저가</div><div class="ss-val down">${last.low.toLocaleString()}원</div><div class="ss-sub down" style="font-size:0.7rem">${getSign(lDiff)} ${lPct}%</div></div>
-        <div class="ss-item"><div class="ss-label">거래량</div><div class="ss-val">${fmtNum(last.volume)}</div></div>
-    `;
-    document.getElementById('m-price').value = price;
-    document.getElementById('stock-realtime').classList.remove('hidden');
-}
-
-function renderCandleChart(data) {
-    const canvas = document.getElementById('candle-chart');
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width = canvas.parentElement.clientWidth;
-    const H = canvas.height = 360;
-    const pad = { t: 40, b: 50, l: 70, r: 20 };
-    const cw = W - pad.l - pad.r;
-    const ch = H - pad.t - pad.b;
-
-    let minP = Math.min(...data.map(d => d.low)) * 0.98;
-    let maxP = Math.max(...data.map(d => d.high)) * 1.02;
-    const yP = (p) => pad.t + ch - ((p - minP) / (maxP - minP)) * ch;
-    const gap = cw / data.length;
-    const barW = gap * 0.7;
-
-    const draw = () => {
-        ctx.clearRect(0,0,W,H);
-        // Grid & Axis
-        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-        ctx.lineWidth = 1;
-        for(let i=0; i<=5; i++) {
-            const y = pad.t + (ch/5)*i;
-            const p = maxP - ((maxP-minP)/5)*i;
-            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W-pad.r, y); ctx.stroke();
-            ctx.fillStyle = 'var(--text-muted)'; ctx.font = '11px Inter'; ctx.textAlign = 'right';
-            ctx.fillText(Math.round(p).toLocaleString(), pad.l - 12, y + 4);
-        }
-
-        const rsiArr = data.map((_, i) => computeRSI(data.slice(0, i+1).map(x=>x.close)));
-
-        data.forEach((d, i) => {
-            const x = pad.l + gap * i + gap/2;
-            const color = d.close >= d.open ? '#ef4444' : '#3b82f6';
-            ctx.strokeStyle = color; ctx.lineWidth = 1.5;
-            ctx.beginPath(); ctx.moveTo(x, yP(d.high)); ctx.lineTo(x, yP(d.low)); ctx.stroke();
-            ctx.fillStyle = color;
-            const h = Math.max(1, Math.abs(yP(d.open) - yP(d.close)));
-            ctx.fillRect(x - barW/2, Math.min(yP(d.open), yP(d.close)), barW, h);
-
-            const rsi = rsiArr[i];
-            if (rsi && rsi <= 30) {
-                ctx.fillStyle = '#10b981'; ctx.beginPath(); ctx.arc(x, yP(d.low) + 15, 4, 0, Math.PI*2); ctx.fill();
-            } else if (rsi && rsi >= 70) {
-                ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(x, yP(d.high) - 15, 4, 0, Math.PI*2); ctx.fill();
+    for (let year = currentYear; year >= currentYear - 2; year -= 1) {
+        for (const report of reportCodes) {
+            try {
+                const data = await fetchJson(`${DART_URL}/fnlttSinglAcnt.json?corp_code=${corpCode}&bsns_year=${year}&reprt_code=${report.code}`);
+                if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
+                    results.push({
+                        year,
+                        label: `${year} ${report.label}`,
+                        period: `Q${report.rank}`,
+                        sortKey: year * 10 + report.rank,
+                        list: data.list
+                    });
+                }
+            } catch (error) {
+                continue;
             }
-        });
-    };
-
-    draw();
-
-    // Tooltip Implementation
-    canvas.onmousemove = (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        if (mouseX < pad.l || mouseX > W - pad.r) return;
-        
-        const idx = Math.floor((mouseX - pad.l) / gap);
-        if (idx >= 0 && idx < data.length) {
-            draw();
-            const d = data[idx];
-            const x = pad.l + gap * idx + gap/2;
-            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-            ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, H - pad.b); ctx.stroke();
-            
-            // Floating Tooltip Detail
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-            ctx.fillRect(x + 10, e.clientY - rect.top - 40, 140, 80);
-            ctx.strokeStyle = 'var(--accent-blue)';
-            ctx.strokeRect(x + 10, e.clientY - rect.top - 40, 140, 80);
-            
-            ctx.fillStyle = 'white'; ctx.textAlign = 'left'; ctx.font = 'bold 11px Inter';
-            ctx.fillText(`날짜: ${d.date}`, x + 20, e.clientY - rect.top - 24);
-            ctx.font = '10px Inter';
-            ctx.fillText(`시가: ${d.open.toLocaleString()}`, x + 20, e.clientY - rect.top - 8);
-            ctx.fillText(`종가: ${d.close.toLocaleString()}`, x + 20, e.clientY - rect.top + 8);
-            ctx.fillText(`고가: ${d.high.toLocaleString()}`, x + 20, e.clientY - rect.top + 24);
         }
-    };
-    canvas.onmouseleave = draw;
+    }
 
-    document.getElementById('chart-legend').innerHTML = `
-        <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;margin-right:5px"></span>상승</span>
-        <span><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:2px;margin-right:5px"></span>하락</span>
-        <span><span style="display:inline-block;width:8px;height:8px;background:#10b981;border-radius:50%;margin-right:5px"></span>RSI 과매도 (매수)</span>
-        <span><span style="display:inline-block;width:8px;height:8px;background:#ef4444;border-radius:50%;margin-right:5px"></span>RSI 과매수 (매도)</span>
-    `;
+    return results.sort((a, b) => b.sortKey - a.sortKey);
 }
 
-function renderHistoricalTables(data, target = 'annual') {
-    const containerId = target === 'annual' ? 'fin-annual-table' : 'fin-quarterly-table';
-    const container = document.getElementById(containerId);
-    if (!container) return;
+async function fetchDartReportList(corpCode) {
+    const currentYear = getCurrentYearKst();
+    const bgn = `${currentYear - 2}0101`;
+    const end = `${currentYear}1231`;
+    const data = await fetchJson(`${DART_URL}/list.json?corp_code=${corpCode}&bgn_de=${bgn}&end_de=${end}&page_count=100`);
+    if (data.status !== '000' || !Array.isArray(data.list)) return [];
 
-    const years = data.map(d => d.year);
-    const accounts = ['매출액', '영업이익', '당기순이익', '자산총계', '부채총계', '자본총계'];
-    
-    let html = `<table class="fin-table"><thead><tr><th style="text-align:right">계정항목</th>`;
-    years.forEach(y => html += `<th style="text-align:right">${y}${target === 'annual' ? '년' : ''}</th>`);
-    html += `<th style="text-align:right">최근성장</th></tr></thead><tbody>`;
-    
-    accounts.forEach(acc => {
-        let cells = `<tr><td style="text-align:right">${acc}</td>`;
-        let vals = years.map(y => {
-            const yrData = data.find(d => d.year === y);
-            const item = yrData.list.find(i => i.account_nm === acc);
-            return item ? parseInt(item.thstrm_amount) : 0;
-        });
-        vals.forEach(v => cells += `<td style="font-size:0.8rem; text-align:right">${fmtNum(v)}</td>`);
-        
-        const growth = vals[0] && vals[1] ? ((vals[0]/vals[1]-1)*100).toFixed(1) : '-';
-        const cls = parseFloat(growth) > 0 ? 'good' : (parseFloat(growth) < 0 ? 'bad' : '');
-        cells += `<td class="${cls}" style="font-weight:800; font-size:0.8rem; text-align:right">${growth}%</td></tr>`;
-        html += cells;
+    return data.list
+        .filter((item) => /사업보고서|반기보고서|분기보고서/.test(item.report_nm))
+        .map((item) => ({
+            title: item.report_nm,
+            date: item.rcept_dt,
+            type: item.report_nm.includes('사업') ? '사업보고서' : item.report_nm.includes('반기') ? '반기보고서' : '분기보고서',
+            url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${item.rcept_no}`
+        }))
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 12);
+}
+
+async function fetchKrxChart(stockCode, market) {
+    const currentYear = getCurrentYearKst();
+    const today = getCurrentDateTokenKst();
+    return fetchJson(`${KRX_URL}/chart?stock_code=${stockCode}&market=${market}&start_date=${currentYear}0101&end_date=${today}`);
+}
+
+function generateSyntheticChart(stockCode) {
+    const tokens = buildBusinessDateTokens(`${getCurrentYearKst()}0101`, getCurrentDateTokenKst());
+    const base = BASE_PRICE_HINTS[stockCode] || ((numericSeed(stockCode) % 180000) + 12000);
+    let lastClose = base;
+    let phase = numericSeed(`${stockCode}-phase`) % 7;
+
+    return tokens.map((dateToken, index) => {
+        phase += 1;
+        const wave = Math.sin((index + phase) / 6) * 0.012;
+        const drift = ((numericSeed(`${stockCode}-${index}`) % 13) - 6) / 1000;
+        const open = Math.max(1000, Math.round(lastClose * (1 + drift / 2)));
+        const close = Math.max(1000, Math.round(open * (1 + wave + drift)));
+        const high = Math.max(open, close) + Math.round(Math.abs(close - open) * 0.4 + base * 0.004);
+        const low = Math.min(open, close) - Math.round(Math.abs(close - open) * 0.35 + base * 0.003);
+        const volume = Math.round((numericSeed(`vol-${stockCode}-${index}`) % 4000000) + 600000);
+        const change = close - open;
+        const changePct = open ? (change / open) * 100 : 0;
+        lastClose = close;
+        return {
+            date: dateToken,
+            open,
+            high,
+            low: Math.max(500, low),
+            close,
+            volume,
+            change,
+            changePct,
+            listedShares: 0
+        };
     });
-    
-    html += `</tbody></table>`;
-    container.innerHTML = html;
 }
 
-// =================================================================
-// ANALYTICS LOGIC
-// =================================================================
-function autoFillMetrics(list, lastTrade) {
-    const rev = find(list, '매출액');
-    const op = find(list, '영업이익');
-    const net = find(list, '당기순이익');
-    const eq = find(list, '자본총계');
-    const debt = find(list, '부채총계');
-    const assets = find(list, '자산총계');
-    
-    lastAnalysis.fin = { rev, op, net, eq, debt, assets };
-    document.getElementById('m-shares').value = 54000; 
-    calcMetrics();
+function buildFinancialRows(periods) {
+    return periods.map((period) => ({
+        ...period,
+        summary: summarizeStatement(period.list)
+    }));
 }
 
-function find(list, name) {
-    const item = list.find(i => i.account_nm && i.account_nm.includes(name));
-    return item ? parseInt(item.thstrm_amount) : 0;
-}
+function summarizeStatement(list) {
+    const revenue = findAmount(list, ACCOUNT_ALIASES.revenue);
+    const operatingIncome = findAmount(list, ACCOUNT_ALIASES.operatingIncome);
+    const netIncome = findAmount(list, ACCOUNT_ALIASES.netIncome);
+    const assets = findAmount(list, ACCOUNT_ALIASES.assets);
+    const liabilities = findAmount(list, ACCOUNT_ALIASES.liabilities);
+    const equity = findAmount(list, ACCOUNT_ALIASES.equity);
+    const cash = findAmount(list, ACCOUNT_ALIASES.cash);
+    const currentAssets = findAmount(list, ACCOUNT_ALIASES.currentAssets);
+    const currentLiabilities = findAmount(list, ACCOUNT_ALIASES.currentLiabilities);
+    const inventory = findAmount(list, ACCOUNT_ALIASES.inventory);
+    const receivables = findAmount(list, ACCOUNT_ALIASES.receivables);
+    const financeCost = findAmount(list, ACCOUNT_ALIASES.financeCost);
 
-document.getElementById('calc-btn').addEventListener('click', calcMetrics);
-function calcMetrics() {
-    const p = parseFloat(document.getElementById('m-price').value) || 0;
-    const s = parseFloat(document.getElementById('m-shares').value) * 10000 || 0;
-    const expOp = parseFloat(document.getElementById('m-expected-op').value) * 1e8 || 0;
-    const tper = parseFloat(document.getElementById('m-target-per').value) || 15;
-    const f = lastAnalysis.fin;
-    
-    const eps = s > 0 ? f.net / s : 0;
-    const per = eps > 0 ? p / eps : 0;
-    const roe = f.eq > 0 ? (f.net / f.eq * 100) : 0;
-    const debtR = f.eq > 0 ? (f.debt / f.eq * 100) : 0;
-    const opM = f.rev > 0 ? (f.op / f.rev * 100) : 0;
-    
-    // Fair Price Calculation (S-Rim style or OpProfit based)
-    const fairMarketCap = expOp > 0 ? expOp * tper : (f.net * tper);
-    const targetPrice = s > 0 ? fairMarketCap / s : 0;
-    const upside = p > 0 ? (targetPrice / p - 1) * 100 : 0;
+    const operatingMargin = percentage(operatingIncome, revenue);
+    const netMargin = percentage(netIncome, revenue);
+    const debtRatio = percentage(liabilities, equity);
+    const roe = percentage(netIncome, equity);
+    const roa = percentage(netIncome, assets);
+    const assetTurnover = safeDivide(revenue, assets);
+    const currentRatio = percentage(currentAssets, currentLiabilities);
+    const inventoryTurnover = safeDivide(revenue, inventory);
+    const receivableTurnover = safeDivide(revenue, receivables);
+    const interestCoverage = financeCost ? safeDivide(operatingIncome, Math.abs(financeCost)) : null;
 
-    const items = [
-        { l:'EPS (현재)', v:Math.round(eps).toLocaleString()+'원' },
-        { l:'현재 PER', v:per.toFixed(1)+'배', c:per<tper?'good':per<(tper*1.5)?'warn':'bad' },
-        { l:'ROE', v:roe.toFixed(1)+'%', c:roe>12?'good':roe>8?'warn':'bad' },
-        { l:'영업이익률', v:opM.toFixed(1)+'%', c:opM>10?'good':opM>5?'warn':'bad' },
-        { l:'부채비율', v:debtR.toFixed(0)+'%', c:debtR<80?'good':debtR<150?'warn':'bad' },
-        { l:'적정주가', v:Math.round(targetPrice).toLocaleString()+'원' },
-        { l:'상승여력', v:(upside>0?'+':'')+upside.toFixed(1)+'%', c:upside>0?'good':'bad' }
-    ];
-
-    document.getElementById('metrics-grid').innerHTML = items.map(i => `
-        <div class="metric-tile">
-            <div class="mt-label">${i.l}</div>
-            <div class="mt-value ${i.c||''}">${i.v}</div>
-        </div>
-    `).join('');
-    lastAnalysis.metrics = { per, roe, opM, debtR, upside, targetPrice };
-}
-
-function autoRate(multiData) {
-    const cur = multiData[0].list;
-    const prev = multiData[1]?.list || [];
-    const f = lastAnalysis.fin;
-    
-    const opM = f.rev > 0 ? (f.op / f.rev * 100) : 0;
-    const salesG = prev.length ? (find(cur, '매출액') / find(prev, '매출액') - 1) * 100 : 0;
-    const debtR = f.eq > 0 ? (f.debt / f.eq * 100) : 0;
-    const roe = f.eq > 0 ? (f.net / f.eq * 100) : 0;
-    
-    const scores = {
-        profit: (opM > 12 ? 5 : (opM > 6 ? 3 : 1)),
-        growth: (salesG > 10 ? 5 : (salesG > 0 ? 3 : 1)),
-        safety: (debtR < 60 ? 5 : (debtR < 120 ? 3 : 1))
+    return {
+        revenue,
+        operatingIncome,
+        netIncome,
+        assets,
+        liabilities,
+        equity,
+        cash,
+        currentAssets,
+        currentLiabilities,
+        inventory,
+        receivables,
+        financeCost,
+        operatingMargin,
+        netMargin,
+        debtRatio,
+        roe,
+        roa,
+        assetTurnover,
+        currentRatio,
+        inventoryTurnover,
+        receivableTurnover,
+        interestCoverage
     };
+}
 
-    const rItems = [
-        { icon:'💰', title:'수익성 (영업마진)', score: scores.profit },
-        { icon:'📈', title:'성장성 (매출성장)', score: scores.growth },
-        { icon:'🛡️', title:'건전성 (부채비율)', score: scores.safety }
+function findAmount(list, aliases) {
+    const normalizedAliases = aliases.map(normalizeAccountName);
+    const match = list.find((item) => {
+        const name = normalizeAccountName(item.account_nm || '');
+        return normalizedAliases.some((alias) => name.includes(alias));
+    });
+    if (!match) return 0;
+    return parseAmount(match.thstrm_amount);
+}
+
+function parseAmount(rawValue) {
+    if (rawValue === null || rawValue === undefined) return 0;
+    const value = String(rawValue).replace(/,/g, '').trim();
+    if (!value || value === '-') return 0;
+    const negative = value.includes('(') && value.includes(')');
+    const numeric = Number(value.replace(/[()]/g, ''));
+    if (Number.isNaN(numeric)) return 0;
+    return negative ? -numeric : numeric;
+}
+
+function normalizeAccountName(value) {
+    return String(value).replace(/\s+/g, '').replace(/[()]/g, '');
+}
+
+function renderReports(reports) {
+    const container = document.getElementById('report-list');
+    if (!reports.length) {
+        container.innerHTML = '<div class="report-item">최근 3년 공시 리포트를 찾지 못했습니다.</div>';
+        return;
+    }
+
+    container.innerHTML = reports.map((report) => `
+        <a class="report-item" href="${report.url}" target="_blank" rel="noreferrer">
+            <div class="report-head">
+                <div>
+                    <div class="report-title">${escapeHtml(report.title)}</div>
+                    <div class="report-date">${formatDateToken(report.date)}</div>
+                </div>
+                <span class="report-type">${report.type}</span>
+            </div>
+        </a>
+    `).join('');
+}
+
+function renderFinancialTable(containerId, periods) {
+    const container = document.getElementById(containerId);
+    if (!periods.length) {
+        container.innerHTML = '<div class="report-item">해당 기간 데이터를 찾지 못했습니다.</div>';
+        return;
+    }
+
+    const summaries = buildFinancialRows(periods);
+    const rows = [
+        { label: '매출액', key: 'revenue', type: 'money' },
+        { label: '영업이익', key: 'operatingIncome', type: 'money' },
+        { label: '당기순이익', key: 'netIncome', type: 'money' },
+        { label: '자산총계', key: 'assets', type: 'money' },
+        { label: '부채총계', key: 'liabilities', type: 'money' },
+        { label: '자본총계', key: 'equity', type: 'money' },
+        { label: '영업이익률', key: 'operatingMargin', type: 'pct' },
+        { label: '부채비율', key: 'debtRatio', type: 'pct' },
+        { label: 'ROE', key: 'roe', type: 'pct' }
     ];
 
-    document.getElementById('rating-overview').innerHTML = rItems.map(r => {
-        const stars = Array.from({length:5}, (_, i) => `<span class="${i < r.score ? 'on' : ''}">★</span>`).join('');
-        return `<div class="rating-card"><div class="rc-icon">${r.icon}</div><div style="flex:1"><div class="rc-title" style="font-size:0.85rem; font-weight:600;">${r.title}</div><div class="rc-stars" style="color:var(--warning); font-size:1.2rem;">${stars}</div></div><div class="rc-score" style="font-size:1.2rem; font-weight:800;">${r.score}/5</div></div>`;
+    const headerCells = summaries.map((period) => `<th>${period.label}</th>`).join('');
+    const body = rows.map((row) => {
+        const cells = summaries.map((period) => `<td>${formatMetricValue(period.summary[row.key], row.type)}</td>`).join('');
+        const latest = summaries[0]?.summary[row.key];
+        const previous = summaries[1]?.summary[row.key];
+        const growth = computeGrowth(latest, previous);
+        const className = growth > 0 ? 'good' : growth < 0 ? 'bad' : '';
+        const growthCell = growth === null ? '-' : `${growth > 0 ? '+' : ''}${growth.toFixed(1)}%`;
+        return `<tr><td>${row.label}</td>${cells}<td class="${className}">${growthCell}</td></tr>`;
     }).join('');
 
-    const avg = (scores.profit + scores.growth + scores.safety) / 3;
-    const verdict = avg >= 4 ? '우량 (가치투자 적합)' : (avg >= 2.5 ? '중립 (관망 필요)' : '주의 (투자 위험)');
-    document.getElementById('rating-details').innerHTML = `<div class="rating-verdict" style="background:var(--accent-gradient); color:white; padding:16px; border-radius:12px; margin-top:16px; text-align:center; font-weight:800;">종합 평가: ${verdict} (${avg.toFixed(1)}점 / 5.0)</div>`;
-    lastAnalysis.scores = scores;
-    lastAnalysis.totalPct = Math.round(avg / 5 * 100);
+    container.innerHTML = `
+        <table class="fin-table">
+            <thead>
+                <tr>
+                    <th>항목</th>
+                    ${headerCells}
+                    <th>최근 변화</th>
+                </tr>
+            </thead>
+            <tbody>${body}</tbody>
+        </table>
+    `;
 }
 
-// Technical Calculations
-function computeRSI(closes, period = 14) {
-    if (closes.length < period + 1) return 50;
-    let gains = 0, losses = 0;
-    for (let i = 1; i <= period; i++) {
-        let d = closes[i] - closes[i-1];
-        if (d > 0) gains += d; else losses -= d;
-    }
-    let avgG = gains / period, avgL = losses / period;
-    for (let i = period + 1; i < closes.length; i++) {
-        let d = closes[i] - closes[i-1];
-        avgG = (avgG * (period-1) + (d > 0 ? d : 0)) / period;
-        avgL = (avgL * (period-1) + (d < 0 ? -d : 0)) / period;
-    }
-    return 100 - (100 / (1 + avgG / (avgL || 1)));
+function renderStockStrip(lastPoint) {
+    if (!lastPoint) return;
+    const price = lastPoint.close;
+    const change = lastPoint.change ?? (lastPoint.close - lastPoint.open);
+    const changePct = lastPoint.changePct ?? percentage(change, lastPoint.open);
+    const className = change > 0 ? 'up' : change < 0 ? 'down' : '';
+    const sign = change > 0 ? '+' : '';
+    document.getElementById('stock-realtime').classList.remove('hidden');
+    document.getElementById('stock-realtime').innerHTML = `
+        <div class="ss-item">
+            <div class="ss-label">현재가</div>
+            <div class="ss-val ${className}">${price.toLocaleString()}원</div>
+            <div class="ss-sub ${className}">${sign}${change.toLocaleString()}원 (${changePct.toFixed(2)}%)</div>
+        </div>
+        <div class="ss-item">
+            <div class="ss-label">시가</div>
+            <div class="ss-val">${lastPoint.open.toLocaleString()}원</div>
+            <div class="ss-sub">당일 시작 가격</div>
+        </div>
+        <div class="ss-item">
+            <div class="ss-label">고가</div>
+            <div class="ss-val good">${lastPoint.high.toLocaleString()}원</div>
+            <div class="ss-sub">장중 최고가</div>
+        </div>
+        <div class="ss-item">
+            <div class="ss-label">저가</div>
+            <div class="ss-val bad">${lastPoint.low.toLocaleString()}원</div>
+            <div class="ss-sub">장중 최저가</div>
+        </div>
+        <div class="ss-item">
+            <div class="ss-label">거래량</div>
+            <div class="ss-val">${formatCompact(lastPoint.volume)}</div>
+            <div class="ss-sub">누적 거래량</div>
+        </div>
+    `;
 }
 
-function autoComputeTechnicals(data) {
-    const closes = data.map(d => d.close);
-    const rsi = computeRSI(closes);
-    document.getElementById('t-rsi').value = rsi.toFixed(1);
-    document.getElementById('t-macd').value = (Math.random() * 200 - 100).toFixed(0);
-    document.getElementById('t-macd-sig').value = (Math.random() * 200 - 100).toFixed(0);
-    document.getElementById('t-sk').value = (Math.random() * 100).toFixed(0);
-    document.getElementById('t-sd').value = (Math.random() * 100).toFixed(0);
-    const last = closes[closes.length-1];
-    document.getElementById('t-mas').value = Math.round(last * 0.99);
-    document.getElementById('t-mal').value = Math.round(last * 0.98);
-    document.getElementById('t-bp').value = last;
-    document.getElementById('t-bl').value = Math.round(last * 0.95);
-    document.getElementById('t-bu').value = Math.round(last * 1.05);
-    calcTech();
+function autoFillMetrics(summary, lastTrade) {
+    document.getElementById('m-price').value = lastTrade?.close || 0;
+    document.getElementById('m-shares').value = lastTrade?.listedShares || 0;
+    document.getElementById('m-expected-op').value = Math.max(summary.operatingIncome || 0, 0);
+    document.getElementById('m-target-per').value = 15;
+    state.lastAnalysis.fin = {
+        rev: summary.revenue || 0,
+        op: summary.operatingIncome || 0,
+        net: summary.netIncome || 0,
+        eq: summary.equity || 0,
+        debt: summary.liabilities || 0,
+        assets: summary.assets || 0
+    };
 }
 
-document.getElementById('tech-btn').addEventListener('click', calcTech);
-function calcTech() {
-    let buys=0, sells=0, total=5;
-    
-    const rsi = parseFloat(document.getElementById('t-rsi').value);
-    const macd = parseFloat(document.getElementById('t-macd').value);
-    const macdSig = parseFloat(document.getElementById('t-macd-sig').value);
-    const stochK = parseFloat(document.getElementById('t-sk').value);
-    const stochD = parseFloat(document.getElementById('t-sd').value);
-    const maS = parseFloat(document.getElementById('t-mas').value);
-    const maL = parseFloat(document.getElementById('t-mal').value);
-    const bPrice = parseFloat(document.getElementById('t-bp').value);
-    const bLower = parseFloat(document.getElementById('t-bl').value);
-    const bUpper = parseFloat(document.getElementById('t-bu').value);
+function calcMetrics() {
+    const price = Number(document.getElementById('m-price').value) || 0;
+    const shares = Number(document.getElementById('m-shares').value) || 0;
+    const expectedOp = Number(document.getElementById('m-expected-op').value) || 0;
+    const targetPer = Number(document.getElementById('m-target-per').value) || 15;
+    const fin = state.lastAnalysis.fin;
 
-    const updateSig = (id, condBuy, condSell) => {
-        const el = document.getElementById(id);
-        if (condBuy) { el.className='tech-sig buy'; el.textContent='매수'; buys++; }
-        else if (condSell) { el.className='tech-sig sell'; el.textContent='매도'; sells++; }
-        else { el.className='tech-sig neutral'; el.textContent='중립'; }
+    const eps = safeDivide(fin.net, shares);
+    const per = safeDivide(price, eps);
+    const roe = percentage(fin.net, fin.eq);
+    const debtRatio = percentage(fin.debt, fin.eq);
+    const operatingMargin = percentage(fin.op, fin.rev);
+    const targetPrice = shares ? Math.round(((expectedOp > 0 ? expectedOp : fin.net) * targetPer) / shares) : 0;
+    const upside = percentage(targetPrice - price, price);
+
+    state.lastAnalysis.metrics = { per, roe, debtR: debtRatio, opM: operatingMargin, targetPrice, upside };
+    state.metrics = state.lastAnalysis.metrics;
+
+    const items = [
+        { label: 'EPS', value: `${Math.round(eps || 0).toLocaleString()}원`, hint: '순이익 / 상장주식수' },
+        { label: '현재 PER', value: per ? `${per.toFixed(1)}배` : '-', tone: per && per <= targetPer ? 'good' : per && per <= targetPer * 1.4 ? 'warn' : 'bad', hint: `목표 PER ${targetPer}배 기준` },
+        { label: 'ROE', value: `${roe.toFixed(1)}%`, tone: roe > 12 ? 'good' : roe > 8 ? 'warn' : 'bad', hint: '당기순이익 / 자본' },
+        { label: '영업이익률', value: `${operatingMargin.toFixed(1)}%`, tone: operatingMargin > 10 ? 'good' : operatingMargin > 5 ? 'warn' : 'bad', hint: '영업이익 / 매출액' },
+        { label: '부채비율', value: `${debtRatio.toFixed(1)}%`, tone: debtRatio < 100 ? 'good' : debtRatio < 180 ? 'warn' : 'bad', hint: '부채총계 / 자본총계' },
+        { label: '적정주가', value: targetPrice ? `${targetPrice.toLocaleString()}원` : '-', hint: '예상 영업이익 x 목표 PER' },
+        { label: '상승여력', value: `${upside > 0 ? '+' : ''}${upside.toFixed(1)}%`, tone: upside > 0 ? 'good' : 'bad', hint: '적정주가 대비' }
+    ];
+
+    document.getElementById('metrics-grid').innerHTML = items.map((item) => `
+        <div class="metric-tile">
+            <div class="mt-label">${item.label}</div>
+            <div class="mt-value ${item.tone || ''}">${item.value}</div>
+            <div class="mt-hint">${item.hint}</div>
+        </div>
+    `).join('');
+}
+
+function buildRatings() {
+    const current = state.summaries[0]?.summary;
+    const previous = state.summaries[1]?.summary;
+    if (!current) return;
+
+    const latestQuarter = state.quarterlies[0] ? summarizeStatement(state.quarterlies[0].list) : null;
+    const previousQuarter = state.quarterlies[1] ? summarizeStatement(state.quarterlies[1].list) : null;
+
+    const revenueGrowth = computeGrowth(current.revenue, previous?.revenue);
+    const opGrowth = computeGrowth(current.operatingIncome, previous?.operatingIncome);
+    const equityGrowth = computeGrowth(current.equity, previous?.equity);
+    const quarterNetGrowth = latestQuarter ? computeGrowth(latestQuarter.netIncome, previousQuarter?.netIncome) : null;
+
+    const profitabilityScore = scoreByRules([
+        current.operatingMargin >= 12,
+        current.netMargin >= 8,
+        current.roe >= 10,
+        opGrowth !== null && opGrowth > 0,
+        quarterNetGrowth !== null && quarterNetGrowth > 0
+    ]);
+
+    const stabilityScore = scoreByRules([
+        current.debtRatio <= 100,
+        current.currentRatio >= 100,
+        current.cash > 0,
+        current.interestCoverage !== null && current.interestCoverage >= 4,
+        equityGrowth !== null && equityGrowth >= 0
+    ]);
+
+    const efficiencyScore = scoreByRules([
+        current.roa >= 5,
+        current.assetTurnover >= 0.6,
+        current.inventoryTurnover === null || current.inventoryTurnover >= 1,
+        current.receivableTurnover === null || current.receivableTurnover >= 1,
+        revenueGrowth !== null && revenueGrowth > 0
+    ]);
+
+    state.ratings = {
+        profitability: {
+            icon: '💰',
+            title: '수익성',
+            score: profitabilityScore,
+            sub: `영업이익률 ${current.operatingMargin.toFixed(1)}%, ROE ${current.roe.toFixed(1)}%`,
+            reasons: [
+                `영업이익률 ${current.operatingMargin.toFixed(1)}%`,
+                `순이익률 ${current.netMargin.toFixed(1)}%`,
+                `연간 영업이익 성장률 ${formatNullablePct(opGrowth)}`,
+                `최근 분기 순이익 증감률 ${formatNullablePct(quarterNetGrowth)}`
+            ]
+        },
+        stability: {
+            icon: '🛡️',
+            title: '건전성',
+            score: stabilityScore,
+            sub: `부채비율 ${current.debtRatio.toFixed(1)}%, 유동비율 ${current.currentRatio.toFixed(1)}%`,
+            reasons: [
+                `부채비율 ${current.debtRatio.toFixed(1)}%`,
+                `유동비율 ${current.currentRatio.toFixed(1)}%`,
+                `현금 및 현금성자산 ${formatMetricValue(current.cash, 'money')}`,
+                `이자보상배율 ${current.interestCoverage === null ? '-' : `${current.interestCoverage.toFixed(1)}배`}`
+            ]
+        },
+        efficiency: {
+            icon: '⚙️',
+            title: '효율성',
+            score: efficiencyScore,
+            sub: `ROA ${current.roa.toFixed(1)}%, 자산회전율 ${current.assetTurnover.toFixed(2)}회`,
+            reasons: [
+                `ROA ${current.roa.toFixed(1)}%`,
+                `자산회전율 ${current.assetTurnover.toFixed(2)}회`,
+                `재고회전율 ${current.inventoryTurnover ? `${current.inventoryTurnover.toFixed(2)}회` : '-'}`,
+                `매출채권회전율 ${current.receivableTurnover ? `${current.receivableTurnover.toFixed(2)}회` : '-'}`
+            ]
+        }
     };
 
-    updateSig('sig-rsi', rsi < 35, rsi > 65);
-    updateSig('sig-macd', macd > macdSig, macd < macdSig);
-    updateSig('sig-stoch', stochK > stochD && stochK < 25, stochK < stochD && stochK > 75);
-    updateSig('sig-cross', maS > maL, maS < maL);
-    updateSig('sig-bb', bPrice < bLower, bPrice > bUpper);
+    const ratingEntries = Object.values(state.ratings);
+    const average = ratingEntries.reduce((sum, entry) => sum + entry.score, 0) / ratingEntries.length;
+    const totalPct = Math.round((average / 5) * 100);
+    state.lastAnalysis.scores = {
+        profit: state.ratings.profitability.score,
+        safety: state.ratings.stability.score,
+        efficiency: state.ratings.efficiency.score
+    };
+    state.lastAnalysis.totalPct = totalPct;
 
-    const summary = document.getElementById('tech-summary');
-    const result = buys > sells ? '매수 우세' : (sells > buys ? '매도 우세' : '중립');
-    summary.innerHTML = `<div style="font-size:1.5rem; font-weight:800; color:var(--accent-blue); padding:12px; background:rgba(255,255,255,0.03); border-radius:12px;">기술적 지표 집계: ${result} (매수 ${buys} / 매도 ${sells} / 중립 ${total-buys-sells})</div>`;
+    document.getElementById('rating-overview').innerHTML = ratingEntries.map((entry) => {
+        const stars = Array.from({ length: 5 }, (_, index) => `<span class="${index < entry.score ? 'on' : ''}">★</span>`).join('');
+        return `
+            <div class="rating-card">
+                <div class="rc-icon">${entry.icon}</div>
+                <div>
+                    <div class="rc-title">${entry.title}</div>
+                    <div class="rc-sub">${entry.sub}</div>
+                    <div class="rc-stars">${stars}</div>
+                </div>
+                <div class="rc-score">${entry.score}/5</div>
+            </div>
+        `;
+    }).join('');
+
+    const verdict = average >= 4 ? '우량 구간' : average >= 3 ? '관찰 우위' : '보수적 접근';
+    document.getElementById('rating-details').innerHTML = `
+        <div class="verdict-box">종합 점수 ${totalPct}% · ${verdict}</div>
+        ${ratingEntries.map((entry) => `
+            <details class="rating-detail">
+                <summary>${entry.title} 평가 근거</summary>
+                <div class="detail-body">
+                    <ul class="detail-list">
+                        ${entry.reasons.map((reason) => `<li>${reason}</li>`).join('')}
+                    </ul>
+                </div>
+            </details>
+        `).join('')}
+    `;
 }
 
-// =================================================================
-// GEMINI AI & PDF
-// =================================================================
+function refreshTechnicals() {
+    state.technicals = computeTechnicals(state.chartDaily);
+    renderTechnicalCards();
+    renderTechSummary();
+    renderCharts();
+}
+
+function computeTechnicals(data) {
+    const closes = data.map((point) => point.close);
+    const highs = data.map((point) => point.high);
+    const lows = data.map((point) => point.low);
+
+    const ma5 = computeSMA(closes, 5);
+    const ma20 = computeSMA(closes, 20);
+    const rsi = computeRSISeries(closes, 14);
+    const macd = computeMACDSeries(closes, 12, 26, 9);
+    const stoch = computeStochasticSeries(highs, lows, closes, 14, 3);
+    const boll = computeBollingerSeries(closes, 20, 2);
+
+    const latestClose = closes[closes.length - 1] || 0;
+    const lastRsi = lastDefined(rsi);
+    const lastMacd = lastDefined(macd.macd);
+    const lastMacdSignal = lastDefined(macd.signal);
+    const lastStochK = lastDefined(stoch.k);
+    const lastStochD = lastDefined(stoch.d);
+    const lastMa5 = lastDefined(ma5);
+    const lastMa20 = lastDefined(ma20);
+    const lastBoll = lastDefinedObject(boll);
+
+    const cards = [
+        {
+            key: 'RSI',
+            label: 'RSI',
+            value: lastRsi !== null ? `${lastRsi.toFixed(1)}` : '-',
+            note: '14일 기준',
+            signal: lastRsi !== null ? (lastRsi < 35 ? '매수' : lastRsi > 65 ? '매도' : '중립') : '중립'
+        },
+        {
+            key: 'MACD',
+            label: 'MACD',
+            value: lastMacd !== null ? `${lastMacd.toFixed(2)} / ${lastMacdSignal?.toFixed(2) ?? '-'}` : '-',
+            note: 'MACD / Signal',
+            signal: lastMacd !== null && lastMacdSignal !== null ? (lastMacd > lastMacdSignal ? '매수' : lastMacd < lastMacdSignal ? '매도' : '중립') : '중립'
+        },
+        {
+            key: 'STOCH',
+            label: '스토캐스틱',
+            value: lastStochK !== null ? `${lastStochK.toFixed(1)} / ${lastStochD?.toFixed(1) ?? '-'}` : '-',
+            note: '%K / %D',
+            signal: lastStochK !== null && lastStochD !== null ? (lastStochK > lastStochD && lastStochK < 25 ? '매수' : lastStochK < lastStochD && lastStochK > 75 ? '매도' : '중립') : '중립'
+        },
+        {
+            key: 'MA',
+            label: '골든/데드크로스',
+            value: lastMa5 !== null ? `${Math.round(lastMa5).toLocaleString()} / ${Math.round(lastMa20 || 0).toLocaleString()}` : '-',
+            note: 'MA5 / MA20',
+            signal: lastMa5 !== null && lastMa20 !== null ? (lastMa5 > lastMa20 ? '매수' : lastMa5 < lastMa20 ? '매도' : '중립') : '중립'
+        },
+        {
+            key: 'BOLL',
+            label: '볼린저 밴드',
+            value: lastBoll ? `${Math.round(lastBoll.lower).toLocaleString()} ~ ${Math.round(lastBoll.upper).toLocaleString()}` : '-',
+            note: `현재가 ${latestClose.toLocaleString()}원`,
+            signal: lastBoll ? (latestClose < lastBoll.lower ? '매수' : latestClose > lastBoll.upper ? '매도' : '중립') : '중립'
+        }
+    ];
+
+    return { ma5, ma20, rsi, macd, stoch, boll, cards };
+}
+
+function renderTechnicalCards() {
+    const container = document.getElementById('technical-grid');
+    if (!state.technicals) {
+        container.innerHTML = '';
+        return;
+    }
+
+    container.innerHTML = state.technicals.cards.map((card) => {
+        const tone = card.signal === '매수' ? 'good' : card.signal === '매도' ? 'bad' : 'warn';
+        return `
+            <div class="signal-card">
+                <div class="signal-label">${card.label}</div>
+                <div class="signal-value">${card.value}</div>
+                <div class="signal-note">${card.note}</div>
+                <div class="signal-note ${tone}">${card.signal}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderTechSummary() {
+    if (!state.technicals) return;
+    const signals = state.technicals.cards.map((card) => card.signal);
+    const buys = signals.filter((signal) => signal === '매수').length;
+    const sells = signals.filter((signal) => signal === '매도').length;
+    const neutrals = signals.length - buys - sells;
+    const verdict = buys > sells ? '매수 우세' : sells > buys ? '매도 우세' : '중립';
+
+    document.getElementById('tech-summary').innerHTML = `
+        <div class="summary-grid">
+            <div class="summary-tile">
+                <strong class="good">${buys}</strong>
+                <span>매수 의견</span>
+            </div>
+            <div class="summary-tile">
+                <strong class="bad">${sells}</strong>
+                <span>매도 의견</span>
+            </div>
+            <div class="summary-tile">
+                <strong>${neutrals}</strong>
+                <span>중립 의견</span>
+            </div>
+        </div>
+        <div class="signal-note" style="margin-top:14px;">기술적 종합 판단: <strong>${verdict}</strong></div>
+    `;
+}
+
+function onChartRangeClick(event) {
+    const button = event.target.closest('.seg-btn');
+    if (!button) return;
+    state.chartRange = button.dataset.range;
+    document.querySelectorAll('.seg-btn').forEach((item) => item.classList.toggle('active', item === button));
+    renderCharts();
+}
+
+function onIndicatorToggle(event) {
+    const button = event.target.closest('.indicator-chip');
+    if (!button) return;
+    const indicator = button.dataset.indicator;
+    if (state.selectedIndicators.has(indicator)) {
+        state.selectedIndicators.delete(indicator);
+    } else {
+        state.selectedIndicators.add(indicator);
+    }
+    button.classList.toggle('active', state.selectedIndicators.has(indicator));
+    renderCharts();
+}
+
+function renderCharts() {
+    state.chartVisible = getVisibleChartData(state.chartDaily, state.chartRange);
+    renderPriceChart(state.chartVisible);
+    renderIndicatorChart(state.chartVisible);
+    renderChartLegend();
+}
+
+function getVisibleChartData(dailyData, range) {
+    if (!dailyData.length) return [];
+    if (range === '1M') return dailyData.slice(-22);
+    if (range === '3M') return dailyData.slice(-66);
+    if (range === 'WEEK') return aggregateCandles(dailyData, 'week');
+    if (range === 'YTD') return dailyData.slice();
+    return dailyData.slice(-22);
+}
+
+function aggregateCandles(data, mode) {
+    const groups = new Map();
+    data.forEach((point) => {
+        const key = mode === 'week' ? weekKey(point.date) : point.date.slice(0, 6);
+        if (!groups.has(key)) {
+            groups.set(key, { key, date: point.date, open: point.open, high: point.high, low: point.low, close: point.close, volume: point.volume });
+            return;
+        }
+        const bucket = groups.get(key);
+        bucket.high = Math.max(bucket.high, point.high);
+        bucket.low = Math.min(bucket.low, point.low);
+        bucket.close = point.close;
+        bucket.volume += point.volume;
+        bucket.date = point.date;
+    });
+
+    const aggregated = Array.from(groups.values());
+    aggregated.forEach((point) => {
+        point.change = point.close - point.open;
+        point.changePct = percentage(point.change, point.open);
+    });
+    return aggregated;
+}
+
+function renderPriceChart(data) {
+    const canvas = document.getElementById('candle-chart');
+    const context = canvas.getContext('2d');
+    const wrapperWidth = canvas.parentElement.clientWidth - 36;
+    canvas.width = Math.max(wrapperWidth, 320);
+    canvas.height = 380;
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (!data.length) {
+        context.fillStyle = '#94a3b8';
+        context.font = '14px Inter';
+        context.fillText('차트 데이터가 없습니다.', 24, 32);
+        return;
+    }
+
+    const padding = { top: 18, right: 86, bottom: 38, left: 18 };
+    const width = canvas.width - padding.left - padding.right;
+    const height = canvas.height - padding.top - padding.bottom;
+    const prices = data.flatMap((point) => [point.high, point.low]);
+    const maxPrice = Math.max(...prices) * 1.02;
+    const minPrice = Math.min(...prices) * 0.98;
+    const xGap = width / data.length;
+    const candleWidth = Math.max(4, xGap * 0.6);
+    const hovered = priceHoverIndex;
+
+    const closeSeries = data.map((point) => point.close);
+    const ma5 = computeSMA(closeSeries, 5);
+    const ma20 = computeSMA(closeSeries, 20);
+    const boll = computeBollingerSeries(closeSeries, 20, 2);
+    const localRsi = computeRSISeries(closeSeries, 14);
+
+    const xAt = (index) => padding.left + xGap * index + xGap / 2;
+    const yAt = (value) => padding.top + height - ((value - minPrice) / (maxPrice - minPrice || 1)) * height;
+
+    context.strokeStyle = 'rgba(255,255,255,0.08)';
+    context.lineWidth = 1;
+    for (let index = 0; index <= 5; index += 1) {
+        const y = padding.top + (height / 5) * index;
+        context.beginPath();
+        context.moveTo(padding.left, y);
+        context.lineTo(canvas.width - padding.right, y);
+        context.stroke();
+
+        const price = maxPrice - ((maxPrice - minPrice) / 5) * index;
+        context.fillStyle = '#94a3b8';
+        context.font = '12px Inter';
+        context.textAlign = 'left';
+        context.fillText(Math.round(price).toLocaleString(), canvas.width - padding.right + 12, y + 4);
+    }
+
+    data.forEach((point, index) => {
+        const x = xAt(index);
+        const openY = yAt(point.open);
+        const closeY = yAt(point.close);
+        const highY = yAt(point.high);
+        const lowY = yAt(point.low);
+        const rising = point.close >= point.open;
+        const color = rising ? '#22c55e' : '#ef4444';
+
+        context.strokeStyle = color;
+        context.lineWidth = 1.2;
+        context.beginPath();
+        context.moveTo(x, highY);
+        context.lineTo(x, lowY);
+        context.stroke();
+
+        context.fillStyle = color;
+        context.fillRect(x - candleWidth / 2, Math.min(openY, closeY), candleWidth, Math.max(2, Math.abs(closeY - openY)));
+    });
+
+    if (state.selectedIndicators.has('MA')) {
+        drawOverlayLine(context, ma5, xAt, yAt, '#8fd3ff');
+        drawOverlayLine(context, ma20, xAt, yAt, '#f59e0b');
+    }
+
+    if (state.selectedIndicators.has('BOLL')) {
+        drawOverlayLine(context, boll.map((item) => item?.upper ?? null), xAt, yAt, 'rgba(34,211,238,0.9)');
+        drawOverlayLine(context, boll.map((item) => item?.lower ?? null), xAt, yAt, 'rgba(124,108,255,0.9)');
+    }
+
+    const markers = buildSignalMarkers(data, ma5, ma20, localRsi);
+    markers.forEach((marker) => {
+        const x = xAt(marker.index);
+        const y = marker.type === 'buy' ? yAt(data[marker.index].low) + 14 : yAt(data[marker.index].high) - 14;
+        context.fillStyle = marker.type === 'buy' ? '#22c55e' : '#ef4444';
+        context.beginPath();
+        if (marker.type === 'buy') {
+            context.moveTo(x, y + 8);
+            context.lineTo(x - 6, y - 4);
+            context.lineTo(x + 6, y - 4);
+        } else {
+            context.moveTo(x, y - 8);
+            context.lineTo(x - 6, y + 4);
+            context.lineTo(x + 6, y + 4);
+        }
+        context.closePath();
+        context.fill();
+    });
+
+    const labelStep = Math.max(1, Math.floor(data.length / 6));
+    context.fillStyle = '#64748b';
+    context.textAlign = 'center';
+    context.font = '11px Inter';
+    data.forEach((point, index) => {
+        if (index % labelStep !== 0 && index !== data.length - 1) return;
+        context.fillText(formatAxisDate(point.date, state.chartRange === 'WEEK'), xAt(index), canvas.height - 12);
+    });
+
+    if (hovered !== null && data[hovered]) {
+        const point = data[hovered];
+        const x = xAt(hovered);
+        context.strokeStyle = 'rgba(255,255,255,0.22)';
+        context.beginPath();
+        context.moveTo(x, padding.top);
+        context.lineTo(x, canvas.height - padding.bottom);
+        context.stroke();
+
+        const lines = [
+            formatDateToken(point.date),
+            `시가 ${point.open.toLocaleString()}원`,
+            `고가 ${point.high.toLocaleString()}원`,
+            `저가 ${point.low.toLocaleString()}원`,
+            `종가 ${point.close.toLocaleString()}원`,
+            `등락 ${point.changePct.toFixed(2)}%`
+        ];
+        drawTooltip(context, x + 16, padding.top + 12, lines, canvas.width - 200, canvas.height - 120);
+    }
+
+    canvas.onmousemove = (event) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left - padding.left;
+        if (x < 0 || x > width) {
+            priceHoverIndex = null;
+            renderPriceChart(data);
+            return;
+        }
+        priceHoverIndex = Math.min(data.length - 1, Math.max(0, Math.floor(x / xGap)));
+        renderPriceChart(data);
+    };
+
+    canvas.onmouseleave = () => {
+        priceHoverIndex = null;
+        renderPriceChart(data);
+    };
+}
+
+function renderIndicatorChart(data) {
+    const canvas = document.getElementById('indicator-chart');
+    const context = canvas.getContext('2d');
+    const wrapperWidth = canvas.parentElement.clientWidth - 36;
+    canvas.width = Math.max(wrapperWidth, 320);
+    canvas.height = 280;
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (!data.length || !state.technicals) {
+        return;
+    }
+
+    const selectedOscillators = [
+        state.selectedIndicators.has('RSI') || state.selectedIndicators.has('STOCH') ? 'OSC' : null,
+        state.selectedIndicators.has('MACD') ? 'MACD' : null
+    ].filter(Boolean);
+
+    if (!selectedOscillators.length) {
+        context.fillStyle = '#94a3b8';
+        context.font = '13px Inter';
+        context.fillText('RSI, 스토캐스틱, MACD 중 하나를 선택하면 보조 차트가 표시됩니다.', 18, 30);
+        return;
+    }
+
+    const padding = { top: 16, right: 24, bottom: 22, left: 24 };
+    const panelHeight = (canvas.height - padding.top - padding.bottom - 12 * (selectedOscillators.length - 1)) / selectedOscillators.length;
+    const width = canvas.width - padding.left - padding.right;
+    const xGap = width / data.length;
+    const xAt = (index) => padding.left + xGap * index + xGap / 2;
+    const localTechnicals = computeTechnicals(data);
+
+    selectedOscillators.forEach((panel, panelIndex) => {
+        const top = padding.top + panelIndex * (panelHeight + 12);
+        const bottom = top + panelHeight;
+        context.strokeStyle = 'rgba(255,255,255,0.08)';
+        context.strokeRect(padding.left, top, width, panelHeight);
+
+        if (panel === 'OSC') {
+            const yAt = (value) => bottom - (value / 100) * panelHeight;
+            if (state.selectedIndicators.has('RSI')) {
+                drawLineSeries(context, localTechnicals.rsi, xAt, yAt, '#8fd3ff', 2);
+            }
+            if (state.selectedIndicators.has('STOCH')) {
+                drawLineSeries(context, localTechnicals.stoch.k, xAt, yAt, '#f59e0b', 1.6);
+                drawLineSeries(context, localTechnicals.stoch.d, xAt, yAt, '#a855f7', 1.4);
+            }
+            context.fillStyle = '#94a3b8';
+            context.font = '11px Inter';
+            context.fillText('RSI / Stochastic', padding.left + 8, top + 14);
+            context.fillText('70', canvas.width - 18, yAt(70) + 4);
+            context.fillText('30', canvas.width - 18, yAt(30) + 4);
+        } else {
+            const series = localTechnicals.macd.macd;
+            const signal = localTechnicals.macd.signal;
+            const hist = localTechnicals.macd.histogram;
+            const values = hist.filter((value) => value !== null);
+            const maxAbs = Math.max(...values.map((value) => Math.abs(value)), 1);
+            const yAt = (value) => top + panelHeight / 2 - (value / maxAbs) * (panelHeight / 2 - 16);
+
+            hist.forEach((value, index) => {
+                if (value === null) return;
+                const x = xAt(index);
+                context.strokeStyle = value >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.8)';
+                context.lineWidth = Math.max(2, xGap * 0.45);
+                context.beginPath();
+                context.moveTo(x, yAt(0));
+                context.lineTo(x, yAt(value));
+                context.stroke();
+            });
+            drawLineSeries(context, series, xAt, yAt, '#8fd3ff', 2);
+            drawLineSeries(context, signal, xAt, yAt, '#f59e0b', 1.6);
+            context.fillStyle = '#94a3b8';
+            context.font = '11px Inter';
+            context.fillText('MACD', padding.left + 8, top + 14);
+        }
+    });
+}
+
+function renderChartLegend() {
+    const items = [
+        { type: 'dot', color: '#22c55e', label: '상승 봉' },
+        { type: 'dot', color: '#ef4444', label: '하락 봉' }
+    ];
+
+    if (state.selectedIndicators.has('MA')) {
+        items.push({ type: 'line', color: '#8fd3ff', label: 'MA5' });
+        items.push({ type: 'line', color: '#f59e0b', label: 'MA20' });
+    }
+    if (state.selectedIndicators.has('BOLL')) {
+        items.push({ type: 'line', color: 'rgba(34,211,238,0.9)', label: '볼린저 상단' });
+        items.push({ type: 'line', color: 'rgba(124,108,255,0.9)', label: '볼린저 하단' });
+    }
+    items.push({ type: 'dot', color: '#22c55e', label: '매수 시그널' });
+    items.push({ type: 'dot', color: '#ef4444', label: '매도 시그널' });
+
+    document.getElementById('chart-legend').innerHTML = items.map((item) => `
+        <span class="legend-chip">
+            <span class="${item.type === 'line' ? 'legend-line' : 'legend-dot'}" style="background:${item.color}"></span>
+            <span>${item.label}</span>
+        </span>
+    `).join('');
+}
+
 async function generateBriefing() {
-    const briefing = document.getElementById('briefing-content');
-    const f = lastAnalysis.fin;
-    const pct = lastAnalysis.totalPct || 0;
-    
-    const prompt = `주식 투자 전문가로서 ${companyName}에 대한 3D 재무 및 기술 분석 브리핑을 작성하세요.
-    - 현재 점수: 가치투자 부합도 ${pct}%
-    - 재무상태: 매출액 ${fmtNum(f.rev)}, 영업이익 ${fmtNum(f.op)}, 순이익 ${fmtNum(f.net)}, 부채비율 ${lastAnalysis.metrics.debtR.toFixed(0)}%
-    - 투자 매력도: 수익성(${lastAnalysis.scores.profit}/5), 성장성(${lastAnalysis.scores.growth}/5), 안전성(${lastAnalysis.scores.safety}/5)
-    - 상승여력: ${lastAnalysis.metrics.upside.toFixed(1)}% (적정주가 ${Math.round(lastAnalysis.metrics.targetPrice).toLocaleString()}원 대비)
-    
-    작성 가이드:
-    1. 분석 요약 (한 문장)
-    2. 강점 및 약점 포인트 (불렛 포인트)
-    3. 최종 매수/매도/관망 의견과 근거
-    4. 한국어로 작성하며 신뢰감 있는 톤을 유지하세요.`;
+    if (!state.company || !state.ratings || !state.metrics) return;
+
+    const company = state.company.name;
+    const technicalCards = state.technicals?.cards || [];
+    const summary = state.summaries[0]?.summary;
+    const totalPct = state.lastAnalysis.totalPct || 0;
+
+    const prompt = `
+${company}에 대한 한국어 투자 브리핑을 작성하세요.
+
+[입력 데이터]
+- 가치투자 부합도: ${totalPct}%
+- 매출액: ${formatMetricValue(summary?.revenue, 'money')}
+- 영업이익: ${formatMetricValue(summary?.operatingIncome, 'money')}
+- 순이익: ${formatMetricValue(summary?.netIncome, 'money')}
+- ROE: ${summary?.roe?.toFixed(1) ?? '-'}%
+- 부채비율: ${summary?.debtRatio?.toFixed(1) ?? '-'}%
+- 적정주가: ${state.metrics.targetPrice ? `${state.metrics.targetPrice.toLocaleString()}원` : '-'}
+- 상승여력: ${state.metrics.upside?.toFixed(1) ?? '-'}%
+- 수익성 점수: ${state.ratings.profitability.score}/5
+- 건전성 점수: ${state.ratings.stability.score}/5
+- 효율성 점수: ${state.ratings.efficiency.score}/5
+- 기술적 판단: ${technicalCards.map((card) => `${card.label} ${card.signal}`).join(', ')}
+- 차트 소스: ${state.chartSource === 'live' ? 'KRX Open API' : 'KRX 대체 차트'}
+
+[출력 형식]
+1. 한 줄 요약
+2. 강점 3가지
+3. 리스크 3가지
+4. 최종 의견(매수/관망/주의 중 하나)과 근거
+5. 너무 길지 않게 작성
+    `.trim();
 
     try {
-        const res = await fetch(GEMINI_URL, {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+        const response = await fetchJson(GEMINI_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                    temperature: 0.4,
+                    maxOutputTokens: 850
+                }
+            })
         });
-        if (!res.ok) throw new Error('API Response Error');
-        const data = await res.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "분석 결과를 출력할 수 없습니다.";
-        briefing.innerHTML = `
-            <div style="background:var(--accent-gradient); color:white; padding:12px 20px; border-radius:10px; font-weight:800; display:inline-block; margin-bottom:20px;">
-                INVESTMENT NAVIGATOR 부합도 ${pct}%
-            </div>
-            <div style="font-size:1rem; line-height:1.7; color:var(--text-main); white-space:pre-wrap;">${text}</div>
-        `;
-    } catch (e) {
-        console.error(e);
-        briefing.innerHTML = `<div style="padding:40px; text-align:center; color:var(--danger);">Gemini AI 브리핑 생성 실패. 프록시 서버나 API 설정을 확인하세요.</div>`;
+        const text = response?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) {
+            throw new Error('Gemini 응답에 브리핑 본문이 없습니다.');
+        }
+        renderBriefing(text, 'Gemini Live', 'Gemini 응답으로 브리핑을 생성했습니다.');
+        setSourceBadge('source-gemini', 'Gemini 응답 완료', 'success');
+    } catch (error) {
+        console.warn('Gemini briefing fallback', error);
+        renderBriefing(buildLocalBriefing(), 'Fallback Briefing', 'Gemini 할당량 또는 인증 이슈로 로컬 브리핑으로 전환했습니다.', true);
+        setSourceBadge('source-gemini', 'Gemini 대체 브리핑', 'warn');
     }
 }
 
-document.getElementById('pdf-btn').addEventListener('click', () => {
-    const el = document.getElementById('dashboard');
-    const opt = { 
-        margin: 10, 
-        filename: `Navigator_${companyName}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#080a0f' },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
-    html2pdf().from(el).set(opt).save();
-});
+function renderBriefing(content, badge, meta, isLocal = false) {
+    document.getElementById('briefing-meta').textContent = meta;
+    const badgeTone = isLocal ? 'rgba(245,158,11,0.14)' : 'rgba(79,140,255,0.14)';
+    const bodyHtml = isLocal ? content : formatBriefingText(content);
+    document.getElementById('briefing-content').innerHTML = `
+        <div class="briefing-badge" style="background:${badgeTone}">${badge}</div>
+        ${bodyHtml}
+    `;
+}
 
-function fmtNum(n) {
-    if (!n) return '0';
-    if (n >= 1e12) return (n/1e12).toFixed(1) + '조';
-    if (n >= 1e8) return (n/1e8).toFixed(1) + '억';
-    return n.toLocaleString();
+function buildLocalBriefing() {
+    const summary = state.summaries[0]?.summary;
+    const strengthLines = [
+        `수익성 점수 ${state.ratings.profitability.score}/5, 영업이익률 ${summary.operatingMargin.toFixed(1)}%`,
+        `건전성 점수 ${state.ratings.stability.score}/5, 부채비율 ${summary.debtRatio.toFixed(1)}%`,
+        `효율성 점수 ${state.ratings.efficiency.score}/5, ROA ${summary.roa.toFixed(1)}%`
+    ];
+    const riskLines = [
+        `상승여력 ${state.metrics.upside.toFixed(1)}%는 입력한 목표 PER 가정에 민감합니다.`,
+        `KRX 차트 소스는 현재 ${state.chartSource === 'live' ? '실데이터' : '대체 YTD 차트'}입니다.`,
+        `최근 분기 데이터가 부족한 경우 분기 성장률 평가는 보수적으로 해석해야 합니다.`
+    ];
+    const finalOpinion = state.lastAnalysis.totalPct >= 80 ? '매수 후보' : state.lastAnalysis.totalPct >= 60 ? '관망 우위' : '주의 구간';
+
+    return `
+        <div class="briefing-section">
+            <h3>한 줄 요약</h3>
+            <div class="briefing-body">${state.company.name}은 현재 가치지표와 재무 점수상 ${finalOpinion}에 가까우며, 기술적 지표는 ${document.getElementById('tech-summary').innerText.trim()} 상태입니다.</div>
+        </div>
+        <div class="briefing-section">
+            <h3>강점</h3>
+            <ul class="briefing-list">${strengthLines.map((item) => `<li>${item}</li>`).join('')}</ul>
+        </div>
+        <div class="briefing-section">
+            <h3>리스크</h3>
+            <ul class="briefing-list">${riskLines.map((item) => `<li>${item}</li>`).join('')}</ul>
+        </div>
+        <div class="briefing-section">
+            <h3>최종 의견</h3>
+            <div class="briefing-body">${finalOpinion}입니다. 재무 점수, 적정주가, 기술적 집계 결과를 함께 확인하면서 DART 원문과 최신 공시까지 교차 검증하는 접근이 적합합니다.</div>
+        </div>
+    `;
+}
+
+function formatBriefingText(text) {
+    const escaped = escapeHtml(text);
+    const sections = escaped.split(/\n{2,}/).map((chunk) => chunk.trim()).filter(Boolean);
+    return sections.map((section) => {
+        const lines = section.split('\n').map((line) => line.trim()).filter(Boolean);
+        const title = lines[0];
+        const body = lines.slice(1);
+        const heading = /^\d+\./.test(title) || title.endsWith(':');
+        if (!heading) {
+            return `<div class="briefing-section"><div class="briefing-body">${lines.join('<br>')}</div></div>`;
+        }
+
+        const cleanTitle = title.replace(/^\d+\.\s*/, '').replace(/:$/, '');
+        const listLike = body.every((line) => /^[-•]/.test(line));
+        return `
+            <div class="briefing-section">
+                <h3>${cleanTitle}</h3>
+                ${listLike
+                    ? `<ul class="briefing-list">${body.map((line) => `<li>${line.replace(/^[-•]\s*/, '')}</li>`).join('')}</ul>`
+                    : `<div class="briefing-body">${body.join('<br>')}</div>`}
+            </div>
+        `;
+    }).join('');
+}
+
+function exportPdf() {
+    if (!state.company) return;
+    html2pdf().from(document.getElementById('dashboard')).set({
+        margin: 10,
+        filename: `InvestmentNavigator_${state.company.name}_${getCurrentYearKst()}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#080a10' },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    }).save();
+}
+
+function computeSMA(values, period) {
+    const result = [];
+    let sum = 0;
+    for (let index = 0; index < values.length; index += 1) {
+        sum += values[index];
+        if (index >= period) sum -= values[index - period];
+        result.push(index >= period - 1 ? sum / period : null);
+    }
+    return result;
+}
+
+function computeEMA(values, period) {
+    const multiplier = 2 / (period + 1);
+    const result = [];
+    let ema = null;
+    values.forEach((value, index) => {
+        if (index === period - 1) {
+            const slice = values.slice(0, period);
+            ema = slice.reduce((sum, item) => sum + item, 0) / period;
+            result.push(ema);
+            return;
+        }
+        if (index < period - 1) {
+            result.push(null);
+            return;
+        }
+        ema = (value - ema) * multiplier + ema;
+        result.push(ema);
+    });
+    return result;
+}
+
+function computeRSISeries(values, period = 14) {
+    const rsi = Array(values.length).fill(null);
+    if (values.length <= period) return rsi;
+    let gains = 0;
+    let losses = 0;
+    for (let index = 1; index <= period; index += 1) {
+        const diff = values[index] - values[index - 1];
+        if (diff >= 0) gains += diff;
+        else losses -= diff;
+    }
+    let avgGain = gains / period;
+    let avgLoss = losses / period;
+    rsi[period] = 100 - (100 / (1 + avgGain / (avgLoss || 1)));
+    for (let index = period + 1; index < values.length; index += 1) {
+        const diff = values[index] - values[index - 1];
+        avgGain = ((avgGain * (period - 1)) + Math.max(diff, 0)) / period;
+        avgLoss = ((avgLoss * (period - 1)) + Math.max(-diff, 0)) / period;
+        rsi[index] = 100 - (100 / (1 + avgGain / (avgLoss || 1)));
+    }
+    return rsi;
+}
+
+function computeMACDSeries(values, shortPeriod = 12, longPeriod = 26, signalPeriod = 9) {
+    const shortEma = computeEMA(values, shortPeriod);
+    const longEma = computeEMA(values, longPeriod);
+    const macd = values.map((_, index) => (shortEma[index] !== null && longEma[index] !== null ? shortEma[index] - longEma[index] : null));
+    const filtered = macd.map((value) => value ?? 0);
+    const signal = computeEMA(filtered, signalPeriod).map((value, index) => (macd[index] === null ? null : value));
+    const histogram = macd.map((value, index) => (value !== null && signal[index] !== null ? value - signal[index] : null));
+    return { macd, signal, histogram };
+}
+
+function computeStochasticSeries(highs, lows, closes, period = 14, signalPeriod = 3) {
+    const k = closes.map((close, index) => {
+        if (index < period - 1) return null;
+        const high = Math.max(...highs.slice(index - period + 1, index + 1));
+        const low = Math.min(...lows.slice(index - period + 1, index + 1));
+        return high === low ? 50 : ((close - low) / (high - low)) * 100;
+    });
+    const d = computeSMA(k.map((value) => value ?? 0), signalPeriod).map((value, index) => (k[index] === null ? null : value));
+    return { k, d };
+}
+
+function computeBollingerSeries(values, period = 20, multiplier = 2) {
+    const middle = computeSMA(values, period);
+    return values.map((value, index) => {
+        if (index < period - 1 || middle[index] === null) return null;
+        const slice = values.slice(index - period + 1, index + 1);
+        const mean = middle[index];
+        const variance = slice.reduce((sum, item) => sum + ((item - mean) ** 2), 0) / period;
+        const std = Math.sqrt(variance);
+        return {
+            middle: mean,
+            upper: mean + std * multiplier,
+            lower: mean - std * multiplier
+        };
+    });
+}
+
+function drawOverlayLine(context, series, xAt, yAt, color) {
+    context.beginPath();
+    context.strokeStyle = color;
+    context.lineWidth = 1.8;
+    let started = false;
+    series.forEach((value, index) => {
+        if (value === null || value === undefined) return;
+        const x = xAt(index);
+        const y = yAt(value);
+        if (!started) {
+            context.moveTo(x, y);
+            started = true;
+        } else {
+            context.lineTo(x, y);
+        }
+    });
+    context.stroke();
+}
+
+function drawLineSeries(context, series, xAt, yAt, color, width = 1.8) {
+    context.beginPath();
+    context.strokeStyle = color;
+    context.lineWidth = width;
+    let started = false;
+    series.forEach((value, index) => {
+        if (value === null || value === undefined) return;
+        const x = xAt(index);
+        const y = yAt(value);
+        if (!started) {
+            context.moveTo(x, y);
+            started = true;
+        } else {
+            context.lineTo(x, y);
+        }
+    });
+    context.stroke();
+}
+
+function drawTooltip(context, x, y, lines, maxX, maxY) {
+    const boxWidth = 168;
+    const boxHeight = lines.length * 18 + 16;
+    const drawX = Math.min(x, maxX);
+    const drawY = Math.min(y, maxY);
+    context.fillStyle = 'rgba(8,10,16,0.92)';
+    context.strokeStyle = 'rgba(255,255,255,0.14)';
+    context.lineWidth = 1;
+    context.fillRect(drawX, drawY, boxWidth, boxHeight);
+    context.strokeRect(drawX, drawY, boxWidth, boxHeight);
+    context.fillStyle = '#f8fafc';
+    context.font = '11px Inter';
+    lines.forEach((line, index) => {
+        context.fillText(line, drawX + 10, drawY + 18 + index * 16);
+    });
+}
+
+function buildSignalMarkers(data, ma5, ma20, rsi) {
+    const markers = [];
+    for (let index = 1; index < data.length; index += 1) {
+        if (ma5[index - 1] !== null && ma20[index - 1] !== null && ma5[index] !== null && ma20[index] !== null) {
+            if (ma5[index - 1] <= ma20[index - 1] && ma5[index] > ma20[index]) {
+                markers.push({ index, type: 'buy' });
+            } else if (ma5[index - 1] >= ma20[index - 1] && ma5[index] < ma20[index]) {
+                markers.push({ index, type: 'sell' });
+            }
+        }
+        if (rsi[index] !== null && rsi[index] < 30) markers.push({ index, type: 'buy' });
+        if (rsi[index] !== null && rsi[index] > 70) markers.push({ index, type: 'sell' });
+    }
+    return markers.slice(-10);
+}
+
+function scoreByRules(rules) {
+    return Math.max(1, Math.min(5, rules.filter(Boolean).length));
+}
+
+function computeGrowth(current, previous) {
+    if (current === null || current === undefined || previous === null || previous === undefined) return null;
+    if (!previous) return null;
+    return ((current / previous) - 1) * 100;
+}
+
+function formatMetricValue(value, type) {
+    if (value === null || value === undefined || Number.isNaN(value)) return '-';
+    if (type === 'money') return formatKoreanMoney(value);
+    if (type === 'pct') return `${value.toFixed(1)}%`;
+    return String(value);
+}
+
+function formatKoreanMoney(value) {
+    if (!value) return '0';
+    const abs = Math.abs(value);
+    const sign = value < 0 ? '-' : '';
+    if (abs >= 1e12) return `${sign}${(abs / 1e12).toFixed(1)}조`;
+    if (abs >= 1e8) return `${sign}${(abs / 1e8).toFixed(1)}억`;
+    return `${sign}${Math.round(abs).toLocaleString()}`;
+}
+
+function formatCompact(value) {
+    if (!value) return '0';
+    if (value >= 1e8) return `${(value / 1e8).toFixed(1)}억`;
+    if (value >= 1e4) return `${(value / 1e4).toFixed(1)}만`;
+    return value.toLocaleString();
+}
+
+function formatNullablePct(value) {
+    if (value === null || value === undefined) return '-';
+    return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+}
+
+function formatDateToken(token) {
+    if (!token || token.length !== 8) return token || '-';
+    return `${token.slice(0, 4)}.${token.slice(4, 6)}.${token.slice(6, 8)}`;
+}
+
+function formatAxisDate(token, weekly = false) {
+    if (!token || token.length !== 8) return '';
+    return weekly ? `${token.slice(4, 6)}/${token.slice(6, 8)}` : `${token.slice(4, 6)}.${token.slice(6, 8)}`;
+}
+
+function getCurrentYearKst() {
+    return Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric' }).format(new Date()));
+}
+
+function getCurrentDateTokenKst() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).formatToParts(new Date());
+    const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${map.year}${map.month}${map.day}`;
+}
+
+function buildBusinessDateTokens(startToken, endToken) {
+    const result = [];
+    const cursor = toDate(startToken);
+    const end = toDate(endToken);
+    while (cursor <= end) {
+        const day = cursor.getDay();
+        if (day !== 0 && day !== 6) {
+            result.push(fromDate(cursor));
+        }
+        cursor.setDate(cursor.getDate() + 1);
+    }
+    return result;
+}
+
+function toDate(token) {
+    return new Date(Number(token.slice(0, 4)), Number(token.slice(4, 6)) - 1, Number(token.slice(6, 8)));
+}
+
+function fromDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}${month}${day}`;
+}
+
+function numericSeed(value) {
+    return Array.from(String(value)).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+}
+
+function percentage(part, total) {
+    if (!total) return 0;
+    return (part / total) * 100;
+}
+
+function safeDivide(a, b) {
+    if (!b) return 0;
+    return a / b;
+}
+
+function lastDefined(series) {
+    for (let index = series.length - 1; index >= 0; index -= 1) {
+        if (series[index] !== null && series[index] !== undefined) return series[index];
+    }
+    return null;
+}
+
+function lastDefinedObject(series) {
+    for (let index = series.length - 1; index >= 0; index -= 1) {
+        if (series[index]) return series[index];
+    }
+    return null;
+}
+
+function weekKey(token) {
+    const date = toDate(token);
+    const day = date.getDay() || 7;
+    date.setDate(date.getDate() + 4 - day);
+    const yearStart = new Date(date.getFullYear(), 0, 1);
+    const week = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+    return `${date.getFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function debounce(fn, wait) {
+    let timer = null;
+    return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), wait);
+    };
 }
