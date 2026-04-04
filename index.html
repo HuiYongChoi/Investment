@@ -51,7 +51,8 @@
         <div class="search-row">
             <div class="search-input-wrap">
                 <i data-lucide="search" class="search-icon"></i>
-                <input type="text" id="company-input" placeholder="기업명 또는 종목코드 (ex: 삼성전자, 005930)">
+                <input type="text" id="company-input" list="company-list" placeholder="기업명 또는 종목코드 (ex: 삼성전자, 005930)">
+                <datalist id="company-list"></datalist>
             </div>
             <button class="btn-search" id="search-btn">
                 <span>분석 시작</span>
@@ -204,9 +205,9 @@
                 </div>
             </div>
             <div id="briefing-content">
-                <div style="text-align:center; padding:60px; color:var(--text-muted);">
+                <div class="loading-area" style="text-align:center; padding:60px; color:var(--text-muted);">
                     <i data-lucide="loader-2" class="spin" style="margin-bottom:16px; width:32px; height:32px;"></i>
-                    <p>분석을 시작하면 AI 브리핑이 이곳에 생성됩니다.</p>
+                    <p>분석 데이터를 실시간으로 동기화 중입니다...</p>
                 </div>
             </div>
         </div>

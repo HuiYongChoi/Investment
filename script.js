@@ -29,6 +29,14 @@ function drawXP() {
 }
 drawXP();
 
+// Autocomplete Population
+function populateAutocomplete() {
+    const list = document.getElementById('company-list');
+    const companies = Object.keys(KNOWN_STK);
+    list.innerHTML = companies.map(c => `<option value="${c}">`).join('');
+}
+populateAutocomplete();
+
 // Global State
 let companyName = '';
 let currentCorpCode = '';
@@ -111,6 +119,9 @@ async function startSearch() {
 
     try {
         // 1. Fetch 3rd-party Data
+        status.innerHTML = '<i data-lucide="loader-2" class="spin"></i> DART/KRX 데이터 동기화 중...';
+        lucide.createIcons();
+
         const [dartRes, krxRes] = await Promise.all([
             fetchMultiYearDART(currentCorpCode, year),
             fetchKRXChart(currentStkCode)
@@ -119,7 +130,8 @@ async function startSearch() {
         multiYearData = dartRes;
         chartOHLCV = krxRes;
         
-        if (multiYearData.length === 0) throw new Error('DART 데이터를 찾을 수 없습니다.');
+        if (!multiYearData || multiYearData.length === 0) throw new Error('DART 공시 정보를 불러올 수 없습니다.');
+        if (!chartOHLCV || chartOHLCV.length === 0) throw new Error('KRX 주가 정보를 불러올 수 없습니다.');
 
         // 2. Render UI Components
         document.getElementById('dashboard').classList.remove('hidden');
@@ -130,10 +142,9 @@ async function startSearch() {
         renderStockStrip(chartOHLCV[chartOHLCV.length - 1]);
         renderCandleChart(chartOHLCV);
         
-        // Split data into Annual and Quarterly (Mocking Quarterly for now if not available)
         renderHistoricalTables(multiYearData, 'annual');
         const qData = await fetchQuarterlyDART(currentCorpCode, year);
-        renderHistoricalTables(qData, 'quarterly');
+        if (qData) renderHistoricalTables(qData, 'quarterly');
         
         // 3. Analytics & Rating
         autoFillMetrics(multiYearData[0].list, chartOHLCV[chartOHLCV.length-1]);
@@ -191,17 +202,12 @@ async function fetchMultiYearDART(corp, year) {
         }
     }
     if (results.length === 0) {
-        return [
-            { year: 2024, list: mockDART(1.1) },
-            { year: 2023, list: mockDART(1.0) },
-            { year: 2022, list: mockDART(0.95) }
-        ];
+        throw new Error(`${year}개년 DART 공시 데이터가 존재하지 않거나 호출 한도를 초과했습니다.`);
     }
     return results;
 }
 
 async function fetchQuarterlyDART(corp, year) {
-    // Simplified: just fetch latest quarters for the grid
     const reportCodes = [{c:'11013', n:'1분기'}, {c:'11012', n:'반기'}, {c:'11014', n:'3분기'}];
     const results = [];
     for (const item of reportCodes) {
@@ -213,14 +219,7 @@ async function fetchQuarterlyDART(corp, year) {
             }
         } catch(e) {}
     }
-    if (results.length === 0) {
-        return [
-            { year: '1분기', list: mockDART(0.25) },
-            { year: '2분기', list: mockDART(0.52) },
-            { year: '3분기', list: mockDART(0.78) }
-        ];
-    }
-    return results;
+    return results.length > 0 ? results : null;
 }
 
 function mockDART(factor) {
@@ -238,10 +237,25 @@ function mockDART(factor) {
 async function fetchKRXChart(stk) {
     try {
         const today = new Date().toISOString().slice(0,10).replace(/-/g,'');
-        const res = await fetch(`${PROXY}/krx/chart?isu_cd=${stk}&bas_dd=${today}`);
+        const res = await fetch(`${KR_URL}/chart?isu_cd=${stk}&bas_dd=${today}`);
         const data = await res.json();
-        return generateAccurateOHLCV(stk);
-    } catch (e) { return generateAccurateOHLCV(stk); }
+        
+        if (data.OutBlock_1 && data.OutBlock_1.length > 0) {
+            // Mapping real KRX data to internal OHLCV format
+            return data.OutBlock_1.map(item => ({
+                date: item.bas_dd,
+                open: parseInt(item.opnprc_prtt),
+                high: parseInt(item.hgprc_prtt),
+                low: parseInt(item.lwprc_prtt),
+                close: parseInt(item.clsprc_prtt),
+                volume: parseInt(item.trqu_prtt)
+            })).reverse(); // KRX usually returns desc, we need asc
+        }
+        throw new Error('KRX 데이터 응답 형식이 올바르지 않습니다.');
+    } catch (e) { 
+        console.error('KRX Fetch Error:', e);
+        return null; 
+    }
 }
 
 function generateAccurateOHLCV(stk) {
