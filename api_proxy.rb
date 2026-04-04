@@ -12,10 +12,10 @@ DART_BASE = 'https://opendart.fss.or.kr/api'
 KRX_BASE = 'https://data-dbg.krx.co.kr/svc/apis/sto'
 GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
 
-# Keys from Environment Variables (Recommended for Production/GitHub)
-DART_KEY = ENV['DART_API_KEY'] || ''
-KRX_KEY = ENV['KRX_AUTH_KEY'] || ''
-GEMINI_KEY = ENV['GEMINI_API_KEY'] || ''
+# Keys from AWS.txt
+DART_KEY = '514cd3e14517d866beb2f548754bb57863abc166'
+KRX_KEY = '812F15DFD36448AF932465ADC001FB12556DFA38'
+GEMINI_KEY = 'AIzaSyAjGEtSEmZDBsqkJZIn66Jte5H8v2lq6OM'
 
 def api_call(base_url, endpoint, params, headers = {})
   uri = URI.parse("#{base_url}#{endpoint}")

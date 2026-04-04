@@ -3,10 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FinLit — 투자 네비게이터</title>
+    <title>INVESTMENT NAVIGATOR — Premium Guide</title>
     <meta name="description" content="DART 재무제표 기반 기업 분석, 자동 투자 평가, 기술적 분석, AI 브리핑">
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <!-- Kakao JS SDK -->
@@ -17,175 +16,193 @@
     <!-- HEADER -->
     <header id="header">
         <div class="header-left">
-            <div class="logo-icon"><i data-lucide="bar-chart-3"></i></div>
+            <div class="logo-icon"><i data-lucide="compass"></i></div>
             <div class="logo-text">
-                <span class="logo-name">FinLit</span>
-                <span class="logo-sub">Investment Navigator</span>
+                <span class="logo-name">INVESTMENT NAVIGATOR</span>
+                <span class="logo-sub">Premium Investment Guide v2.0</span>
             </div>
         </div>
-        <div class="header-right">
-            <!-- Kakao Login Area -->
-            <div id="kakao-auth-area" style="display:flex; gap:12px; align-items:center;">
+        <div class="header-right" style="display:flex; gap:20px; align-items:center;">
+            <div id="kakao-auth-area">
                 <button id="btn-kakao-login" class="btn-kakao">
                     <svg viewBox="0 0 24 24" fill="currentColor" style="width:16px; height:16px;"><path d="M12 2c-5.52 0-10 3.58-10 8 0 2.87 1.83 5.39 4.61 6.84L5.3 21.03l4.63-2.61c.67.11 1.36.17 2.07.17 5.52 0 10-3.58 10-8s-4.48-8-10-8z"/></svg>
                     <span>카카오 로그인</span>
                 </button>
-                <div id="kakao-user-profile" class="hidden" style="display:flex; align-items:center; gap:8px;">
-                    <img id="kakao-profile-img" src="" alt="profile" style="width:32px; height:32px; border-radius:50%; border:1px solid var(--border);">
-                    <span id="kakao-nickname" style="font-size:0.85rem; font-weight:600;"></span>
-                    <button id="btn-kakao-logout" class="btn-outline" style="padding:4px 10px; height:32px; font-size:0.75rem;">로그아웃</button>
+                <div id="kakao-user-profile" class="hidden" style="display:flex; align-items:center; gap:12px;">
+                    <img id="kakao-profile-img" src="" alt="Avatar" style="width:36px; height:36px; border-radius:50%; border:2px solid var(--accent-blue);">
+                    <span id="kakao-nickname" style="font-size:0.9rem; font-weight:700;"></span>
+                    <button id="btn-kakao-logout" class="btn-outline" style="padding:6px 12px; height:36px; font-size:0.8rem;">로그아웃</button>
                 </div>
             </div>
             
             <div class="xp-pill">
-                <i data-lucide="zap" class="xp-icon"></i>
-                <span id="level-badge">Lv.1</span>
+                <i data-lucide="zap" style="color:var(--warning); width:18px;"></i>
+                <span id="level-badge" style="font-weight:800; color:var(--accent-blue);">Lv.1</span>
                 <div class="xp-track"><div class="xp-fill" id="xp-bar"></div></div>
-                <span class="xp-label" id="xp-text">0/100</span>
+                <span id="xp-text" style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">0/100</span>
             </div>
         </div>
     </header>
 
     <!-- SEARCH HERO -->
     <section id="search-hero">
-        <h1>기업을 검색하세요</h1>
-        <p>DART 재무제표 기반으로 투자 분석이 자동 생성됩니다</p>
+        <h1>Navigate Your <span style="background:var(--accent-gradient); background-clip:text; -webkit-background-clip:text; -webkit-text-fill-color:transparent;">Investments</span></h1>
+        <p>DART 공시와 KRX 실시간 데이터를 결합한 차세대 기업 분석 솔루션</p>
         <div class="search-row">
             <div class="search-input-wrap">
                 <i data-lucide="search" class="search-icon"></i>
-                <input type="text" id="company-input" placeholder="기업명 입력 (예: 삼성전자, 카카오, 네이버...)">
+                <input type="text" id="company-input" placeholder="기업명 또는 종목코드 (ex: 삼성전자, 005930)">
             </div>
             <select id="year-select" class="select-pill">
-                <option value="2024">2024년</option>
-                <option value="2023">2023년</option>
-                <option value="2022">2022년</option>
+                <option value="2025">2025년 기준</option>
+                <option value="2024">2024년 기준</option>
+                <option value="2023">2023년 기준</option>
             </select>
             <button class="btn-search" id="search-btn">
-                <i data-lucide="arrow-right"></i>
                 <span>분석 시작</span>
+                <i data-lucide="arrow-right"></i>
             </button>
         </div>
-        <div id="search-status"></div>
+        <div id="search-status" style="margin-top:16px; font-weight:600;"></div>
     </section>
 
-    <!-- DASHBOARD (hidden until search) -->
+    </section>
+
+    <!-- DASHBOARD -->
     <div id="dashboard" class="dashboard hidden">
 
-        <!-- 1. Company Overview -->
+        <!-- 1. Overview -->
         <div class="card" id="card-overview">
             <div class="card-header">
-                <div class="card-icon blue"><i data-lucide="building-2"></i></div>
-                <div>
-                    <h2 id="company-name">—</h2>
-                    <p class="card-sub" id="company-meta">기업 개요</p>
+                <div class="card-icon" style="background:var(--accent-gradient);"><i data-lucide="building"></i></div>
+                <div style="flex:1">
+                    <h2 id="company-name" style="font-size:1.8rem; letter-spacing:-0.03em;">—</h2>
+                    <p class="card-sub" id="company-meta">데이터 분석 준비 중</p>
                 </div>
                 <a class="btn-outline" id="dart-link" href="#" target="_blank">
-                    <i data-lucide="external-link"></i> DART 공시
+                    <i data-lucide="external-link"></i> DART 공시 시스템
                 </a>
             </div>
             <div id="stock-realtime" class="stock-strip hidden"></div>
         </div>
 
-        <!-- 1.5 Candlestick Chart -->
+        <!-- 2. Chart -->
         <div class="card" id="card-chart">
             <div class="card-header">
-                <div class="card-icon orange"><i data-lucide="bar-chart-3"></i></div>
-                <h2>주가 차트</h2>
-                <p class="card-sub" id="chart-meta">KRX Open API 일봉 데이터</p>
+                <div class="card-icon" style="background:linear-gradient(135deg, #f97316, #ef4444);"><i data-lucide="line-chart"></i></div>
+                <div>
+                    <h2>주가 흐름 및 추세</h2>
+                    <p class="card-sub" id="chart-meta">KRX Open API 실시간 시세 및 OHLCV 데이터</p>
+                </div>
             </div>
-            <div class="chart-wrap">
-                <canvas id="candle-chart" width="850" height="320"></canvas>
+            <div style="background:rgba(0,0,0,0.2); border-radius:var(--radius-md); padding:20px;">
+                <canvas id="candle-chart" width="1000" height="360"></canvas>
             </div>
-            <div id="chart-legend" class="chart-legend"></div>
+            <div id="chart-legend" class="chart-legend" style="margin-top:16px; display:flex; gap:20px; font-size:0.8rem; color:var(--text-muted);"></div>
         </div>
 
-        <!-- 2. Financial Statements -->
+        <!-- 3. Financials -->
         <div class="card" id="card-financials">
             <div class="card-header">
-                <div class="card-icon green"><i data-lucide="table-2"></i></div>
-                <h2>재무제표</h2>
+                <div class="card-icon" style="background:linear-gradient(135deg, #10b981, #059669);"><i data-lucide="pie-chart"></i></div>
+                <h2>핵심 재무제표 (3개년)</h2>
             </div>
-            <div id="fin-tables"></div>
+            <div id="fin-tables" style="overflow-x:auto"></div>
         </div>
 
-        <!-- 3. Key Metrics Grid -->
+        <!-- 4. Metrics -->
         <div class="card" id="card-metrics">
             <div class="card-header">
-                <div class="card-icon purple"><i data-lucide="calculator"></i></div>
-                <h2>핵심 투자 지표</h2>
-                <p class="card-sub">증권사 리포트 값을 입력하면 지표가 자동 계산됩니다</p>
+                <div class="card-icon" style="background:linear-gradient(135deg, #8b5cf6, #6366f1);"><i data-lucide="calculator"></i></div>
+                <h2>투자 가치 지표</h2>
             </div>
-            <div class="metrics-input-row">
-                <div class="mi"><label>현재 주가 (원)</label><input type="number" id="m-price" placeholder="68,000"></div>
-                <div class="mi"><label>발행주식수 (만주)</label><input type="number" id="m-shares" placeholder="5,969"></div>
-                <div class="mi"><label>목표 PER (증권사)</label><input type="number" id="m-target-per" placeholder="12" step="0.1"></div>
+            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-bottom:24px;">
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">현재 주가</label>
+                    <input type="number" id="m-price" class="tech-in" style="margin:0" placeholder="0">
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">상장주식수</label>
+                    <input type="number" id="m-shares" class="tech-in" style="margin:0" placeholder="0">
+                </div>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <label style="font-size:0.75rem; font-weight:700; color:var(--text-muted);">목표 PER</label>
+                    <input type="number" id="m-target-per" class="tech-in" style="margin:0" placeholder="15">
+                </div>
             </div>
-            <button class="btn-primary wide" id="calc-btn"><i data-lucide="calculator"></i> 지표 계산</button>
-            <div class="metrics-grid" id="metrics-grid"></div>
+            <button class="btn-primary" style="width:100%" id="calc-btn"><i data-lucide="refresh-cw"></i> 지표 재계산</button>
+            <div class="metrics-grid" id="metrics-grid" style="margin-top:24px;"></div>
         </div>
 
-        <!-- 4. Three-Dimension Rating -->
+        <!-- 5. Rating -->
         <div class="card" id="card-rating">
             <div class="card-header">
-                <div class="card-icon yellow"><i data-lucide="star"></i></div>
+                <div class="card-icon" style="background:linear-gradient(135deg, #f59e0b, #d97706);"><i data-lucide="award"></i></div>
                 <h2>3차원 종합 평가</h2>
-                <p class="card-sub">재무제표 기반 자동 평가</p>
             </div>
             <div class="rating-overview" id="rating-overview"></div>
-            <div class="rating-details" id="rating-details"></div>
+            <div id="rating-details" style="margin-top:16px;"></div>
         </div>
 
-        <!-- 5. Technical Analysis -->
+        <!-- 6. Technical Analysis -->
         <div class="card" id="card-technical">
             <div class="card-header">
-                <div class="card-icon orange"><i data-lucide="trending-up"></i></div>
-                <h2>기술적 분석</h2>
-                <p class="card-sub">차트 데이터로 자동 계산 또는 수동 입력</p>
-            </div>
-            <div class="tech-grid" id="tech-grid">
-                <div class="tech-item">
-                    <div class="tech-label"><strong>RSI</strong><span>30↓ 매수 / 70↑ 매도</span></div>
-                    <input type="number" id="t-rsi" class="tech-in" placeholder="0~100" min="0" max="100" step="0.1">
-                    <div class="tech-sig" id="sig-rsi"></div>
-                </div>
-                <div class="tech-item">
-                    <div class="tech-label"><strong>MACD</strong><span>MACD > Signal = 매수</span></div>
-                    <div class="tech-dbl"><input type="number" id="t-macd" class="tech-in" placeholder="MACD" step="0.01"><input type="number" id="t-macd-sig" class="tech-in" placeholder="Signal" step="0.01"></div>
-                    <div class="tech-sig" id="sig-macd"></div>
-                </div>
-                <div class="tech-item">
-                    <div class="tech-label"><strong>스토캐스틱</strong><span>%K↔%D 교차 분석</span></div>
-                    <div class="tech-dbl"><input type="number" id="t-sk" class="tech-in" placeholder="%K" min="0" max="100" step="0.1"><input type="number" id="t-sd" class="tech-in" placeholder="%D" min="0" max="100" step="0.1"></div>
-                    <div class="tech-sig" id="sig-stoch"></div>
-                </div>
-                <div class="tech-item">
-                    <div class="tech-label"><strong>이동평균 크로스</strong><span>골든/데드크로스</span></div>
-                    <div class="tech-dbl"><input type="number" id="t-mas" class="tech-in" placeholder="단기MA" step="0.01"><input type="number" id="t-mal" class="tech-in" placeholder="장기MA" step="0.01"></div>
-                    <div class="tech-sig" id="sig-cross"></div>
-                </div>
-                <div class="tech-item">
-                    <div class="tech-label"><strong>볼린저 밴드</strong><span>하단↓매수 / 상단↑매도</span></div>
-                    <div class="tech-tri"><input type="number" id="t-bp" class="tech-in" placeholder="현재가"><input type="number" id="t-bl" class="tech-in" placeholder="하단"><input type="number" id="t-bu" class="tech-in" placeholder="상단"></div>
-                    <div class="tech-sig" id="sig-bb"></div>
+                <div class="card-icon" style="background:linear-gradient(135deg, #3b82f6, #06b6d4);"><i data-lucide="activity"></i></div>
+                <h2>기술적 지표 분석</h2>
+                <div style="margin-left:auto; display:flex; gap:10px;">
+                    <button class="btn-outline" id="tech-auto-btn"><i data-lucide="cpu"></i> 자동 추출</button>
+                    <button class="btn-primary" id="tech-btn" style="height:40px; padding:0 20px;">판단 실행</button>
                 </div>
             </div>
-            <div style="display:flex;gap:10px">
-                <button class="btn-primary" id="tech-auto-btn" style="flex:1"><i data-lucide="cpu"></i> 차트 데이터로 자동 계산</button>
-                <button class="btn-primary" id="tech-btn" style="flex:1;background:linear-gradient(135deg,var(--purple),#6366f1)"><i data-lucide="activity"></i> 수동 입력 판단</button>
+            <div class="tech-grid">
+                <div class="tech-item">
+                    <div style="display:flex; justify-content:space-between; align-items:center;"><strong>RSI</strong> <span style="font-size:0.7rem; color:var(--text-muted)">14일</span></div>
+                    <input type="number" id="t-rsi" class="tech-in" placeholder="0">
+                    <div id="sig-rsi" class="tech-sig"></div>
+                </div>
+                <div class="tech-item">
+                    <strong>MACD</strong>
+                    <div style="display:flex; gap:8px;"><input type="number" id="t-macd" class="tech-in" placeholder="MACD"><input type="number" id="t-macd-sig" class="tech-in" placeholder="Sig"></div>
+                    <div id="sig-macd" class="tech-sig"></div>
+                </div>
+                <div class="tech-item">
+                    <strong>Stochastic</strong>
+                    <div style="display:flex; gap:8px;"><input type="number" id="t-sk" class="tech-in" placeholder="%K"><input type="number" id="t-sd" class="tech-in" placeholder="%D"></div>
+                    <div id="sig-stoch" class="tech-sig"></div>
+                </div>
+                <div class="tech-item">
+                    <strong>MA Cross</strong>
+                    <div style="display:flex; gap:8px;"><input type="number" id="t-mas" class="tech-in" placeholder="단기"><input type="number" id="t-mal" class="tech-in" placeholder="장기"></div>
+                    <div id="sig-cross" class="tech-sig"></div>
+                </div>
+                <div class="tech-item">
+                    <strong>Bollinger</strong>
+                    <div style="display:flex; gap:8px;"><input type="number" id="t-bp" class="tech-in" style="width:34%" placeholder="가"><input type="number" id="t-bl" class="tech-in" style="width:33%" placeholder="하"><input type="number" id="t-bu" class="tech-in" style="width:33%" placeholder="상"></div>
+                    <div id="sig-bb" class="tech-sig"></div>
+                </div>
             </div>
-            <div id="tech-summary"></div>
+            <div id="tech-summary" style="margin-top:24px; text-align:center;"></div>
         </div>
 
-        <!-- 6. AI Briefing -->
+        <!-- 7. Briefing -->
         <div class="card" id="card-briefing">
             <div class="card-header">
-                <div class="card-icon cyan"><i data-lucide="bot"></i></div>
-                <h2>AI 투자 브리핑</h2>
+                <div class="card-icon" style="background:var(--accent-gradient);"><i data-lucide="bot"></i></div>
+                <h2>Gemini AI 투자 브리핑</h2>
+                <div style="margin-left:auto; display:flex; gap:12px;">
+                    <button class="btn-outline" id="kakao-send-btn">
+                        <svg viewBox="0 0 24 24" fill="currentColor" style="width:16px; height:16px; margin-right:4px;"><path d="M12 2c-5.52 0-10 3.58-10 8 0 2.87 1.83 5.39 4.61 6.84L5.3 21.03l4.63-2.61c.67.11 1.36.17 2.07.17 5.52 0 10-3.58 10-8s-4.48-8-10-8z"/></svg>
+                        나에게 보내기
+                    </button>
+                    <button class="btn-primary" id="pdf-btn" style="height:44px;"><i data-lucide="download"></i> PDF 리포트</button>
+                </div>
             </div>
-            <div id="briefing-content"></div>
-            <button class="btn-outline wide" id="pdf-btn" style="margin-top:16px">
-                <i data-lucide="download"></i> PDF 리포트 다운로드
-            </button>
+            <div id="briefing-content">
+                <div style="text-align:center; padding:60px; color:var(--text-muted);">
+                    <i data-lucide="loader-2" class="spin" style="margin-bottom:16px; width:32px; height:32px;"></i>
+                    <p>분석을 시작하면 AI 브리핑이 이곳에 생성됩니다.</p>
+                </div>
+            </div>
         </div>
 
     </div>
