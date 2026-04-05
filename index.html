@@ -116,9 +116,43 @@
                     </div>
                     <span class="market-note" id="vix-note">공포·탐욕 지수</span>
                 </div>
+                <div class="market-pill market-pill-cost">
+                    <div class="market-label-row">
+                        <span class="market-label">WTI 유가</span>
+                        <span class="help-icon" tabindex="0" aria-label="WTI 유가 안내">
+                            ?
+                            <div class="market-tooltip" role="tooltip">
+                                <div class="vix-tooltip-title">WTI 유가</div>
+                                <div class="market-tooltip-copy">서부 텍사스산 원유(WTI). 글로벌 금융 시장의 심리적 기준이 되는 유가입니다. 미국 증시와 동조화되는 경향이 강합니다.</div>
+                            </div>
+                        </span>
+                    </div>
+                    <div class="market-val-row">
+                        <strong id="wti-value">-</strong>
+                        <span class="market-chg" id="wti-chg"></span>
+                    </div>
+                    <span class="market-note" id="wti-note">미국 원유 벤치마크</span>
+                </div>
+                <div class="market-pill market-pill-cost">
+                    <div class="market-label-row">
+                        <span class="market-label">브렌트유</span>
+                        <span class="help-icon" tabindex="0" aria-label="브렌트유 안내">
+                            ?
+                            <div class="market-tooltip" role="tooltip">
+                                <div class="vix-tooltip-title">브렌트유</div>
+                                <div class="market-tooltip-copy">북해산 원유(Brent). 글로벌 실물 원유 거래의 2/3 기준이 됩니다. 한국이 수입하는 중동유 가격과 직결되어, 국내 인플레이션 및 기업 원가 비용에 직접적인 영향을 줍니다.</div>
+                            </div>
+                        </span>
+                    </div>
+                    <div class="market-val-row">
+                        <strong id="brent-value">-</strong>
+                        <span class="market-chg" id="brent-chg"></span>
+                    </div>
+                    <span class="market-note" id="brent-note">글로벌 실물 원유 기준</span>
+                </div>
             </div>
             <div class="market-card-group market-domestic-group">
-                <div class="market-pill">
+                <div class="market-pill market-pill-domestic">
                     <span class="market-label">KOSPI 종합</span>
                     <div class="market-val-row">
                         <strong id="kospi-value">-</strong>
@@ -126,7 +160,7 @@
                     </div>
                     <span class="market-note" id="kospi-note">코스피 종합지수</span>
                 </div>
-                <div class="market-pill">
+                <div class="market-pill market-pill-domestic">
                     <span class="market-label">KOSDAQ 종합</span>
                     <div class="market-val-row">
                         <strong id="kosdaq-value">-</strong>

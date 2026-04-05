@@ -344,7 +344,7 @@ function updateClock() {
     document.getElementById('market-datetime').textContent = dateLabel;
 }
 
-function setMarketChg(id, changePct) {
+function setMarketChg(id, changePct, options = {}) {
     const el = document.getElementById(id);
     if (!el) return;
     if (changePct === null || changePct === undefined) {
@@ -352,8 +352,13 @@ function setMarketChg(id, changePct) {
         el.className = 'market-chg';
         return;
     }
+    const inverse = options.inverse === true;
     const sign = changePct > 0 ? '+' : '';
     el.textContent = `${sign}${changePct.toFixed(2)}%`;
+    if (inverse) {
+        el.className = `market-chg ${changePct > 0 ? 'cost-up' : changePct < 0 ? 'cost-down' : ''}`;
+        return;
+    }
     el.className = `market-chg ${changePct > 0 ? 'up' : changePct < 0 ? 'down' : ''}`;
 }
 
@@ -364,6 +369,15 @@ function formatMarketIndexValue(value) {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
     });
+}
+
+function formatCommodityUsd(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return '-';
+    return `$${numeric.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    })}`;
 }
 
 async function loadMarketSummary() {
@@ -392,6 +406,16 @@ async function loadMarketSummary() {
             const vixLevel = data.vix < 15 ? '극도 낙관' : data.vix < 20 ? '안정' : data.vix < 30 ? '경계' : data.vix < 40 ? '공포' : '극도 공포';
             document.getElementById('vix-note').textContent = vixLevel;
         }
+        if (data.wti) {
+            document.getElementById('wti-value').textContent = formatCommodityUsd(data.wti);
+            document.getElementById('wti-note').textContent = '미국 원유 벤치마크';
+            setMarketChg('wti-chg', data.wtiChangePct ?? null, { inverse: true });
+        }
+        if (data.brent) {
+            document.getElementById('brent-value').textContent = formatCommodityUsd(data.brent);
+            document.getElementById('brent-note').textContent = '글로벌 실물 원유 기준';
+            setMarketChg('brent-chg', data.brentChangePct ?? null, { inverse: true });
+        }
         if (data.kospi) {
             document.getElementById('kospi-value').textContent = formatMarketIndexValue(data.kospi);
             document.getElementById('kospi-note').textContent = '코스피 종합지수';
@@ -407,6 +431,8 @@ async function loadMarketSummary() {
         document.getElementById('fx-jpykrw-note').textContent = '연동 실패';
         document.getElementById('gold-note').textContent = '연동 실패';
         document.getElementById('vix-note').textContent = '연동 실패';
+        document.getElementById('wti-note').textContent = '연동 실패';
+        document.getElementById('brent-note').textContent = '연동 실패';
         document.getElementById('kospi-note').textContent = '연동 실패';
         document.getElementById('kosdaq-note').textContent = '연동 실패';
     }

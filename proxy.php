@@ -1005,6 +1005,10 @@ try {
             'goldChangePct'   => null,
             'vix'             => null,
             'vixChangePct'    => null,
+            'wti'             => null,
+            'wtiChangePct'    => null,
+            'brent'           => null,
+            'brentChangePct'  => null,
             'kospi'           => null,
             'kospiChangePct'  => null,
             'kosdaq'          => null,
@@ -1078,6 +1082,25 @@ try {
             if ($vixCur > 0) {
                 $summary['vix'] = round($vixCur, 2);
                 $summary['vixChangePct'] = $calcChangePct($vixQ);
+            }
+        } catch (Throwable $ignored) {}
+
+        // ── WTI / Brent 유가: Yahoo Finance COMMODITY quote ──
+        try {
+            $wtiQ = request_yfinance_bridge('quote', ['stock_code' => 'CL=F', 'market' => 'COMMODITY']);
+            $wtiCur = (float) ($wtiQ['currentPrice'] ?? 0);
+            if ($wtiCur > 0) {
+                $summary['wti'] = round($wtiCur, 2);
+                $summary['wtiChangePct'] = $calcChangePct($wtiQ);
+            }
+        } catch (Throwable $ignored) {}
+
+        try {
+            $brentQ = request_yfinance_bridge('quote', ['stock_code' => 'BZ=F', 'market' => 'COMMODITY']);
+            $brentCur = (float) ($brentQ['currentPrice'] ?? 0);
+            if ($brentCur > 0) {
+                $summary['brent'] = round($brentCur, 2);
+                $summary['brentChangePct'] = $calcChangePct($brentQ);
             }
         } catch (Throwable $ignored) {}
 

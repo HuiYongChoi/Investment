@@ -551,6 +551,10 @@ assert(scriptSource.includes("document.getElementById('kospi-note').textContent 
 assert(scriptSource.includes("document.getElementById('kosdaq-value').textContent"), 'Market summary rendering should populate the KOSDAQ card value');
 assert(scriptSource.includes("setMarketChg('kosdaq-chg'"), 'Market summary rendering should populate the KOSDAQ change badge');
 assert(scriptSource.includes("document.getElementById('kosdaq-note').textContent = '코스닥 종합지수';"), 'KOSDAQ card note should describe the composite index');
+assert(scriptSource.includes("document.getElementById('wti-value').textContent"), 'Market summary rendering should populate the WTI card value');
+assert(scriptSource.includes("document.getElementById('brent-value').textContent"), 'Market summary rendering should populate the Brent card value');
+assert(scriptSource.includes("setMarketChg('wti-chg', data.wtiChangePct ?? null, { inverse: true })"), 'WTI card should invert change colors so higher oil reads as cost pressure');
+assert(scriptSource.includes("setMarketChg('brent-chg', data.brentChangePct ?? null, { inverse: true })"), 'Brent card should invert change colors so higher oil reads as cost pressure');
 assert(scriptSource.includes("event.key === 'ArrowDown'"), 'Search input should support arrow-down autocomplete navigation');
 assert(scriptSource.includes('syncCompanyInputValue(company);'), 'Search should synchronize the input text with the resolved autocomplete match');
 assert(!scriptSource.includes('companyInput.value = selected.displayLabel;'), 'Arrow-key navigation should not overwrite the typed input before the selection is committed');
@@ -590,6 +594,10 @@ assert(styleSource.includes('.market-groups'), 'Styles should include the groupe
 assert(styleSource.includes('.market-global-group'), 'Styles should include the global market-card group');
 assert(styleSource.includes('.market-domestic-group'), 'Styles should include the domestic index-card group');
 assert(styleSource.includes('repeat(auto-fit, minmax(160px, 1fr))'), 'Market card groups should use auto-fit minmax responsive columns');
+assert(styleSource.includes('.market-bar > *'), 'Market bar should flatten child wrappers so every card participates in the same compact grid');
+assert(styleSource.includes('.market-tooltip'), 'Styles should include the shared market tooltip surface for oil cards');
+assert(styleSource.includes('.market-chg.cost-up'), 'Styles should include the inverse commodity-up change tone');
+assert(styleSource.includes('.market-chg.cost-down'), 'Styles should include the inverse commodity-down change tone');
 assert(styleSource.includes('border-left: 1px solid'), 'Domestic market group should be visually separated from the global group on wide screens');
 assert(styleSource.includes('.valuation-preset-row'), 'Styles should include the sector preset row treatment');
 assert(styleSource.includes('.sector-badge'), 'Styles should include the premium badge treatment');
@@ -618,6 +626,17 @@ assert(htmlSource.includes('지능형 기계 (AI/반도체/로봇)'), 'Valuation
 assert(htmlSource.includes('바이오/혁신신약'), 'Valuation form should include the biotech preset option');
 assert(htmlSource.includes('일반 성장주/플랫폼'), 'Valuation form should include the growth-platform preset option');
 assert(htmlSource.includes('가치주/배당주'), 'Valuation form should include the value-dividend preset option');
+assert(htmlSource.includes('WTI 유가'), 'Market bar should include the WTI oil card');
+assert(htmlSource.includes('브렌트유'), 'Market bar should include the Brent oil card');
+assert(htmlSource.includes('서부 텍사스산 원유(WTI). 글로벌 금융 시장의 심리적 기준이 되는 유가입니다.'), 'WTI card should include the requested tooltip copy');
+assert(htmlSource.includes('북해산 원유(Brent). 글로벌 실물 원유 거래의 2/3 기준이 됩니다.'), 'Brent card should include the requested tooltip copy');
+
+assert(phpProxySource.includes("'wti'             => null"), 'Market summary payload should expose WTI price');
+assert(phpProxySource.includes("'wtiChangePct'    => null"), 'Market summary payload should expose WTI change percentage');
+assert(phpProxySource.includes("'brent'           => null"), 'Market summary payload should expose Brent price');
+assert(phpProxySource.includes("'brentChangePct'  => null"), 'Market summary payload should expose Brent change percentage');
+assert(phpProxySource.includes("request_yfinance_bridge('quote', ['stock_code' => 'CL=F', 'market' => 'COMMODITY'])"), 'Market summary should fetch WTI quotes from Yahoo Finance');
+assert(phpProxySource.includes("request_yfinance_bridge('quote', ['stock_code' => 'BZ=F', 'market' => 'COMMODITY'])"), 'Market summary should fetch Brent quotes from Yahoo Finance');
 assert(htmlSource.includes('일반 제조'), 'Valuation form should include the general-manufacturing preset option');
 assert(htmlSource.includes('id="metrics-guide"'), 'Valuation section should include the dynamic guide container');
 assert(htmlSource.includes('id="sector-premium-badge"'), 'Valuation section should include the premium badge slot');
