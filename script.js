@@ -108,6 +108,7 @@ const state = {
     metrics: null,
     summaries: [],
     briefingMode: 'idle',
+    mobileTab: 'chart-finance',
     lastAnalysis: { fin: {}, scores: {}, totalPct: 0, metrics: {} },
     selectedIndicators: new Set(['RSI', 'MACD', 'STOCH', 'BOLL', 'MA']),
     analysisToken: 0
@@ -126,6 +127,7 @@ restoreKakaoSession();
 consumeKakaoMessage();
 loadMarketSummary();
 loadCompanyDirectory();
+syncMobileTabUI();
 
 function bindEvents() {
     const companyInput = document.getElementById('company-input');
@@ -183,6 +185,9 @@ function bindEvents() {
         input.addEventListener('input', onWonInputFormat);
         input.addEventListener('blur', onWonInputFormat);
     });
+    document.querySelectorAll('[data-mobile-tab-target]').forEach((button) => {
+        button.addEventListener('click', onMobileTabClick);
+    });
     ['m-adjusted-eps', 'm-target-per', 'm-eps-growth', 'm-required-return'].forEach((id) => {
         const input = document.getElementById(id);
         if (!input) return;
@@ -190,6 +195,7 @@ function bindEvents() {
         input.addEventListener('blur', onValuationManualInput);
     });
     window.addEventListener('resize', debounce(() => {
+        syncMobileTabUI();
         if (!document.getElementById('dashboard').classList.contains('hidden')) {
             renderCharts();
         }
@@ -342,6 +348,48 @@ function updateClock() {
         hour12: false
     }).format(now);
     document.getElementById('market-datetime').textContent = dateLabel;
+}
+
+function isMobileHybridViewport() {
+    return window.matchMedia('(max-width: 768px)').matches;
+}
+
+function setMobileTab(tab, options = {}) {
+    const dashboard = document.getElementById('dashboard');
+    const tabbar = document.getElementById('mobile-tabbar');
+    if (!dashboard || !tabbar) return;
+    const allowedTabs = new Set(['chart-finance', 'valuation', 'briefing']);
+    tab = allowedTabs.has(tab) ? tab : 'chart-finance';
+    state.mobileTab = tab;
+    dashboard.dataset.mobileTab = tab;
+    tabbar.querySelectorAll('[data-mobile-tab-target]').forEach((button) => {
+        const active = button.dataset.mobileTabTarget === tab;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    if (tab === 'chart-finance' && !dashboard.classList.contains('hidden')) {
+        requestAnimationFrame(() => {
+            renderCharts();
+        });
+    }
+    if (options.scroll && isMobileHybridViewport()) {
+        dashboard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+function syncMobileTabUI() {
+    const dashboard = document.getElementById('dashboard');
+    const tabbar = document.getElementById('mobile-tabbar');
+    if (!dashboard || !tabbar) return;
+    const shouldShowTabbar = isMobileHybridViewport() && !dashboard.classList.contains('hidden');
+    tabbar.classList.toggle('hidden', !shouldShowTabbar);
+    setMobileTab(state.mobileTab || dashboard.dataset.mobileTab || 'chart-finance');
+}
+
+function onMobileTabClick(event) {
+    const button = event.target.closest('[data-mobile-tab-target]');
+    if (!button) return;
+    setMobileTab(button.dataset.mobileTabTarget, { scroll: true });
 }
 
 function setMarketChg(id, changePct, options = {}) {
@@ -589,6 +637,8 @@ async function startSearch() {
     document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 Yahoo Finance (yfinance Python) 일·주·월·연/YTD 가격 흐름을 분석합니다.`;
     document.getElementById('dart-link').href = buildDartCompanySearchUrl(company);
     document.getElementById('dashboard').classList.remove('hidden');
+    setMobileTab('chart-finance');
+    syncMobileTabUI();
     document.getElementById('stock-realtime').classList.add('hidden');
     document.getElementById('stock-realtime').innerHTML = '';
     resetMetricManualInputs();

@@ -195,8 +195,8 @@
         <div id="search-status" class="search-status">기업명 또는 종목코드를 입력하면 자동완성으로 검색할 수 있습니다.</div>
     </section>
 
-    <main id="dashboard" class="dashboard hidden">
-        <section class="card" id="card-overview">
+    <main id="dashboard" class="dashboard hidden" data-mobile-tab="chart-finance">
+        <section class="card" id="card-overview" data-mobile-panel="chart-finance">
             <div class="card-header">
                 <div class="card-icon brand-gradient"><i data-lucide="building-2"></i></div>
                 <div class="card-copy">
@@ -216,7 +216,7 @@
             <div id="stock-realtime" class="stock-strip hidden"></div>
         </section>
 
-        <section class="card" id="card-chart">
+        <section class="card" id="card-chart" data-mobile-panel="chart-finance">
             <div class="card-header">
                 <div class="card-icon chart-gradient"><i data-lucide="chart-candlestick"></i></div>
                 <div class="card-copy">
@@ -243,7 +243,7 @@
             <div id="chart-legend" class="chart-legend"></div>
         </section>
 
-        <section class="card" id="card-reports">
+        <section class="card" id="card-reports" data-mobile-panel="chart-finance">
             <div class="card-header">
                 <div class="card-icon report-gradient"><i data-lucide="files"></i></div>
                 <div class="card-copy">
@@ -254,7 +254,7 @@
             <div id="report-list" class="report-list"></div>
         </section>
 
-        <section class="card" id="card-financials">
+        <section class="card" id="card-financials" data-mobile-panel="chart-finance">
             <div class="card-header">
                 <div class="card-icon financial-gradient"><i data-lucide="table-properties"></i></div>
                 <div class="card-copy">
@@ -270,7 +270,7 @@
             </div>
         </section>
 
-        <section class="card" id="card-metrics">
+        <section class="card" id="card-metrics" data-mobile-panel="valuation">
             <div class="card-header">
                 <div class="card-icon metric-gradient"><i data-lucide="calculator"></i></div>
                 <div class="card-copy">
@@ -364,7 +364,7 @@
             <div class="metrics-grid" id="metrics-grid"></div>
         </section>
 
-        <section class="card" id="card-rating">
+        <section class="card" id="card-rating" data-mobile-panel="chart-finance">
             <div class="card-header">
                 <div class="card-icon rating-gradient"><i data-lucide="award"></i></div>
                 <div class="card-copy">
@@ -376,7 +376,7 @@
             <div id="rating-details" class="rating-details"></div>
         </section>
 
-        <section class="card" id="card-technical">
+        <section class="card" id="card-technical" data-mobile-panel="chart-finance">
             <div class="card-header">
                 <div class="card-icon tech-gradient"><i data-lucide="activity"></i></div>
                 <div class="card-copy">
@@ -424,7 +424,7 @@
             <div id="tech-summary" class="tech-summary"></div>
         </section>
 
-        <section class="card" id="card-briefing">
+        <section class="card" id="card-briefing" data-mobile-panel="briefing">
             <div class="card-header">
                 <div class="card-icon brand-gradient"><i data-lucide="bot"></i></div>
                 <div class="card-copy">
@@ -452,6 +452,21 @@
             </div>
         </section>
     </main>
+
+    <nav id="mobile-tabbar" class="mobile-tabbar hidden" aria-label="모바일 섹션 전환">
+        <button class="mobile-tab-btn active" type="button" data-mobile-tab-target="chart-finance" aria-pressed="true">
+            <i data-lucide="panels-top-left"></i>
+            <span>차트/재무</span>
+        </button>
+        <button class="mobile-tab-btn" type="button" data-mobile-tab-target="valuation" aria-pressed="false">
+            <i data-lucide="badge-won"></i>
+            <span>가치 평가</span>
+        </button>
+        <button class="mobile-tab-btn" type="button" data-mobile-tab-target="briefing" aria-pressed="false">
+            <i data-lucide="bot"></i>
+            <span>AI 리포트</span>
+        </button>
+    </nav>
 
     <script src="dashboard_logic.js"></script>
     <script src="script.js"></script>
