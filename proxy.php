@@ -20,6 +20,8 @@ const KRX_BASE = 'https://data-dbg.krx.co.kr/svc/apis/sto';
 const NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock';
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 const KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token';
+const KIWOOM_BASE = 'https://api.kiwoom.com';
+const KIWOOM_TOKEN_FILE = sys_get_temp_dir() . '/kiwoom_token_cache.json';
 
 function json_response(int $status, array $payload): void
 {
@@ -123,6 +125,100 @@ function gemini_key(): string
 function kakao_rest_key(): string
 {
     return get_secret('KAKAO_REST_API_KEY', 'kakao_rest_api_key', aws_inline_value('Rest API:'));
+}
+
+function kiwoom_appkey(): string
+{
+    return get_secret('KIWOOM_APPKEY', 'kiwoom_appkey', aws_next_value('키움 AppKey'));
+}
+
+function kiwoom_secretkey(): string
+{
+    return get_secret('KIWOOM_SECRETKEY', 'kiwoom_secretkey', aws_next_value('키움 SecretKey'));
+}
+
+function kiwoom_token(): string
+{
+    if (is_file(KIWOOM_TOKEN_FILE)) {
+        $cached = json_decode(file_get_contents(KIWOOM_TOKEN_FILE), true);
+        if (is_array($cached) && !empty($cached['token']) && !empty($cached['expires_dt'])) {
+            $expires = DateTimeImmutable::createFromFormat('YmdHis', $cached['expires_dt']);
+            if ($expires && $expires > new DateTimeImmutable('+5 minutes')) {
+                return $cached['token'];
+            }
+        }
+    }
+
+    $appkey = kiwoom_appkey();
+    $secretkey = kiwoom_secretkey();
+    if ($appkey === '' || $secretkey === '') return '';
+
+    $body = json_encode([
+        'grant_type' => 'client_credentials',
+        'appkey' => $appkey,
+        'secretkey' => $secretkey,
+    ]);
+
+    $upstream = request_upstream(
+        KIWOOM_BASE . '/oauth2/token',
+        ['Content-Type: application/json;charset=UTF-8', 'api-id: au10001'],
+        $body,
+        'POST'
+    );
+
+    $payload = safe_json_decode($upstream['body']);
+    if (empty($payload['token'])) return '';
+
+    file_put_contents(KIWOOM_TOKEN_FILE, json_encode([
+        'token' => $payload['token'],
+        'expires_dt' => $payload['expires_dt'] ?? '',
+    ]));
+    chmod(KIWOOM_TOKEN_FILE, 0600);
+
+    return $payload['token'];
+}
+
+function kiwoom_request(string $apiId, array $bodyData, string $url): array
+{
+    $token = kiwoom_token();
+    if ($token === '') {
+        return ['error' => 'Kiwoom API credentials not configured'];
+    }
+
+    $headers = [
+        'Content-Type: application/json;charset=UTF-8',
+        'api-id: ' . $apiId,
+        'authorization: Bearer ' . $token,
+    ];
+
+    $upstream = request_upstream($url, $headers, json_encode($bodyData), 'POST');
+    return safe_json_decode($upstream['body']);
+}
+
+function normalize_kiwoom_chart_row(array $item): array
+{
+    $curPrc = abs((int) str_replace(['+', '-', ','], '', $item['cur_prc'] ?? '0'));
+    $openPric = abs((int) str_replace(['+', '-', ','], '', $item['open_pric'] ?? '0'));
+    $highPric = abs((int) str_replace(['+', '-', ','], '', $item['high_pric'] ?? '0'));
+    $lowPric = abs((int) str_replace(['+', '-', ','], '', $item['low_pric'] ?? '0'));
+    $predPre = (int) str_replace(['+', ','], '', $item['pred_pre'] ?? '0');
+    $volume = abs((int) str_replace(['+', '-', ','], '', $item['trde_qty'] ?? '0'));
+
+    $close = $curPrc ?: $openPric;
+    $prevClose = $close - $predPre;
+    $changePct = $prevClose > 0 ? round(($predPre / $prevClose) * 100, 2) : 0;
+
+    return [
+        'date' => $item['dt'] ?? '',
+        'open' => $openPric,
+        'high' => $highPric,
+        'low' => $lowPric,
+        'close' => $close,
+        'volume' => $volume,
+        'change' => $predPre,
+        'changePct' => $changePct,
+        'listedShares' => 0,
+    ];
 }
 
 function resolve_redirect_url(string $currentUrl, string $location): string
@@ -370,6 +466,125 @@ try {
         exit;
     }
 
+    if ($action === 'kiwoom_quote') {
+        $stockCode = trim((string) ($_GET['stock_code'] ?? ''));
+        if ($stockCode === '' || !preg_match('/^\d{6}$/', $stockCode)) json_response(400, ['error' => 'valid 6-digit stock_code is required']);
+
+        $result = kiwoom_request('ka10001', ['stk_cd' => $stockCode], KIWOOM_BASE . '/api/dostk/stkinfo');
+        if (!empty($result['error'])) {
+            json_response(200, ['live' => false, 'error' => $result['error']]);
+        }
+
+        $curPrc = abs((int) str_replace(['+', '-', ','], '', $result['cur_prc'] ?? '0'));
+        $openPric = abs((int) str_replace(['+', '-', ','], '', $result['open_pric'] ?? '0'));
+        $highPric = abs((int) str_replace(['+', '-', ','], '', $result['high_pric'] ?? '0'));
+        $lowPric = abs((int) str_replace(['+', '-', ','], '', $result['low_pric'] ?? '0'));
+        $predPre = (int) str_replace(['+', ','], '', $result['pred_pre'] ?? '0');
+        $fluRt = (float) str_replace(['+', ','], '', $result['flu_rt'] ?? '0');
+        $trdeQty = abs((int) str_replace(['+', '-', ','], '', $result['trde_qty'] ?? '0'));
+        $floStk = abs((int) str_replace(['+', '-', ','], '', $result['flo_stk'] ?? '0'));
+
+        json_response(200, [
+            'live' => $curPrc > 0,
+            'source' => 'kiwoom',
+            'close' => $curPrc,
+            'open' => $openPric,
+            'high' => $highPric,
+            'low' => $lowPric,
+            'change' => $predPre,
+            'changePct' => $fluRt,
+            'volume' => $trdeQty,
+            'listedShares' => $floStk,
+            'name' => $result['stk_nm'] ?? '',
+            'per' => $result['per'] ?? '',
+            'eps' => $result['eps'] ?? '',
+            'roe' => $result['roe'] ?? '',
+            'pbr' => $result['pbr'] ?? '',
+        ]);
+    }
+
+    if ($action === 'kiwoom_chart') {
+        $stockCode = trim((string) ($_GET['stock_code'] ?? ''));
+        $chartType = trim((string) ($_GET['chart_type'] ?? 'daily'));
+        $baseDate = trim((string) ($_GET['base_dt'] ?? date('Ymd')));
+        if ($stockCode === '' || !preg_match('/^\d{6}$/', $stockCode)) json_response(400, ['error' => 'valid 6-digit stock_code is required', 'points' => []]);
+        if (!in_array($chartType, ['daily', 'weekly', 'monthly'], true)) $chartType = 'daily';
+
+        $apiIdMap = [
+            'daily' => 'ka10081',
+            'weekly' => 'ka10082',
+            'monthly' => 'ka10083',
+        ];
+        $listKeyMap = [
+            'daily' => 'stk_dt_pole_chart_qry',
+            'weekly' => 'stk_stk_pole_chart_qry',
+            'monthly' => 'stk_mth_pole_chart_qry',
+        ];
+
+        $apiId = $apiIdMap[$chartType] ?? 'ka10081';
+        $listKey = $listKeyMap[$chartType] ?? 'stk_dt_pole_chart_qry';
+
+        $allPoints = [];
+        $contYn = 'N';
+        $nextKey = '';
+        $maxPages = 5;
+
+        for ($page = 0; $page < $maxPages; $page += 1) {
+            $headers = [
+                'Content-Type: application/json;charset=UTF-8',
+                'api-id: ' . $apiId,
+                'authorization: Bearer ' . kiwoom_token(),
+            ];
+            if ($contYn === 'Y' && $nextKey !== '') {
+                $headers[] = 'cont-yn: ' . $contYn;
+                $headers[] = 'next-key: ' . $nextKey;
+            }
+
+            $body = json_encode([
+                'stk_cd' => $stockCode,
+                'base_dt' => $baseDate,
+                'upd_stkpc_tp' => '1',
+            ]);
+
+            $upstream = request_upstream(KIWOOM_BASE . '/api/dostk/chart', $headers, $body, 'POST');
+            $respHeaders = [];
+            $rawBody = $upstream['body'];
+
+            $payload = safe_json_decode($rawBody);
+            if (!empty($payload['error']) || ($payload['return_code'] ?? 0) !== 0) {
+                if (empty($allPoints)) {
+                    json_response(200, [
+                        'live' => false,
+                        'error' => $payload['return_msg'] ?? $payload['error'] ?? 'Kiwoom chart request failed',
+                        'points' => [],
+                    ]);
+                }
+                break;
+            }
+
+            $rows = $payload[$listKey] ?? [];
+            foreach ($rows as $row) {
+                $normalized = normalize_kiwoom_chart_row($row);
+                if ($normalized['date'] !== '' && $normalized['close'] > 0) {
+                    $allPoints[] = $normalized;
+                }
+            }
+
+            break;
+        }
+
+        usort($allPoints, function ($a, $b) {
+            return strcmp($a['date'], $b['date']);
+        });
+
+        json_response(200, [
+            'live' => !empty($allPoints),
+            'source' => 'kiwoom',
+            'error' => null,
+            'points' => $allPoints,
+        ]);
+    }
+
     if ($action === 'market') {
         $summary = [
             'usdKrw' => null,
@@ -416,6 +631,7 @@ try {
         'status' => 'ok',
         'dart' => dart_key() !== '',
         'krx' => krx_key() !== '',
+        'kiwoom' => kiwoom_appkey() !== '',
         'gemini' => gemini_key() !== '',
         'kakao' => kakao_rest_key() !== '',
     ]);

@@ -3,6 +3,7 @@ import http.server
 import json
 import os
 import pathlib
+import re
 import urllib.parse
 import urllib.request
 
@@ -56,6 +57,77 @@ DART_KEY = env_or_aws("DART_API_KEY", next_label="DART 오픈 API")
 KRX_KEY = env_or_aws("KRX_AUTH_KEY", next_label="KRX Open API")
 GEMINI_KEY = env_or_aws("GEMINI_API_KEY", next_label="Gemini API KEY")
 KAKAO_REST_KEY = env_or_aws("KAKAO_REST_API_KEY", inline_prefix="Rest API:")
+KIWOOM_APPKEY = env_or_aws("KIWOOM_APPKEY", next_label="키움 AppKey")
+KIWOOM_SECRETKEY = env_or_aws("KIWOOM_SECRETKEY", next_label="키움 SecretKey")
+KIWOOM_BASE = "https://api.kiwoom.com"
+
+import tempfile
+KIWOOM_TOKEN_FILE = os.path.join(tempfile.gettempdir(), "kiwoom_token_cache.json")
+
+def kiwoom_token() -> str:
+    if os.path.isfile(KIWOOM_TOKEN_FILE):
+        try:
+            with open(KIWOOM_TOKEN_FILE) as f:
+                cached = json.load(f)
+            if cached.get("token") and cached.get("expires_dt"):
+                expires = dt.datetime.strptime(cached["expires_dt"], "%Y%m%d%H%M%S")
+                if expires > dt.datetime.now() + dt.timedelta(minutes=5):
+                    return cached["token"]
+        except Exception:
+            pass
+
+    if not KIWOOM_APPKEY or not KIWOOM_SECRETKEY:
+        return ""
+
+    try:
+        status, raw = request_json(
+            f"{KIWOOM_BASE}/oauth2/token",
+            method="POST",
+            headers={"api-id": "au10001"},
+            json_body={"grant_type": "client_credentials", "appkey": KIWOOM_APPKEY, "secretkey": KIWOOM_SECRETKEY},
+        )
+        payload = safe_json(raw)
+        token = payload.get("token", "")
+        if token:
+            with open(KIWOOM_TOKEN_FILE, "w") as f:
+                json.dump({"token": token, "expires_dt": payload.get("expires_dt", "")}, f)
+            os.chmod(KIWOOM_TOKEN_FILE, 0o600)
+        return token
+    except Exception:
+        return ""
+
+def kiwoom_request(api_id: str, body: dict, url: str):
+    token = kiwoom_token()
+    if not token:
+        return {"error": "Kiwoom API credentials not configured"}
+
+    status, raw = request_json(
+        url,
+        method="POST",
+        headers={
+            "api-id": api_id,
+            "authorization": f"Bearer {token}",
+            "Content-Type": "application/json;charset=UTF-8",
+        },
+        json_body=body,
+    )
+    return safe_json(raw)
+
+def normalize_kiwoom_chart(item):
+    cur = abs(int(str(item.get("cur_prc", "0")).replace("+", "").replace("-", "").replace(",", "") or "0"))
+    op = abs(int(str(item.get("open_pric", "0")).replace("+", "").replace("-", "").replace(",", "") or "0"))
+    hi = abs(int(str(item.get("high_pric", "0")).replace("+", "").replace("-", "").replace(",", "") or "0"))
+    lo = abs(int(str(item.get("low_pric", "0")).replace("+", "").replace("-", "").replace(",", "") or "0"))
+    pred = int(str(item.get("pred_pre", "0")).replace("+", "").replace(",", "") or "0")
+    vol = abs(int(str(item.get("trde_qty", "0")).replace("+", "").replace("-", "").replace(",", "") or "0"))
+    close = cur or op
+    prev_close = close - pred
+    pct = round((pred / prev_close) * 100, 2) if prev_close > 0 else 0
+    return {
+        "date": item.get("dt", ""),
+        "open": op, "high": hi, "low": lo, "close": close,
+        "volume": vol, "change": pred, "changePct": pct, "listedShares": 0,
+    }
 
 
 def request_json(url: str, method: str = "GET", params=None, headers=None, json_body=None, form_body=None):
@@ -173,11 +245,18 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         if path == "/market/quote":
             self.handle_market_quote(params)
             return
+        if path == "/kiwoom_quote":
+            self.handle_kiwoom_quote(params)
+            return
+        if path == "/kiwoom_chart":
+            self.handle_kiwoom_chart(params)
+            return
 
         self.send_json(200, {
             "service": "Investment Navigator proxy",
             "dart": bool(DART_KEY),
             "krx": bool(KRX_KEY),
+            "kiwoom": bool(KIWOOM_APPKEY),
             "gemini": bool(GEMINI_KEY),
             "kakao": bool(KAKAO_REST_KEY),
         })
@@ -347,6 +426,65 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             pass
 
         self.send_json(200, summary)
+
+    def handle_kiwoom_quote(self, params):
+        stock_code = params.get("stock_code", "").strip()
+        if not stock_code or not re.fullmatch(r"\d{6}", stock_code):
+            self.send_json(400, {"error": "valid 6-digit stock_code is required"})
+            return
+
+        result = kiwoom_request("ka10001", {"stk_cd": stock_code}, f"{KIWOOM_BASE}/api/dostk/stkinfo")
+        if "error" in result and result["error"]:
+            self.send_json(200, {"live": False, "error": result["error"]})
+            return
+
+        def abs_int(v):
+            return abs(int(str(v or "0").replace("+", "").replace("-", "").replace(",", "") or "0"))
+
+        cur = abs_int(result.get("cur_prc"))
+        self.send_json(200, {
+            "live": cur > 0,
+            "source": "kiwoom",
+            "close": cur,
+            "open": abs_int(result.get("open_pric")),
+            "high": abs_int(result.get("high_pric")),
+            "low": abs_int(result.get("low_pric")),
+            "change": int(str(result.get("pred_pre", "0")).replace("+", "").replace(",", "") or "0"),
+            "changePct": float(str(result.get("flu_rt", "0")).replace("+", "").replace(",", "") or "0"),
+            "volume": abs_int(result.get("trde_qty")),
+            "listedShares": abs_int(result.get("flo_stk")),
+            "name": result.get("stk_nm", ""),
+        })
+
+    def handle_kiwoom_chart(self, params):
+        stock_code = params.get("stock_code", "").strip()
+        chart_type = params.get("chart_type", "daily").strip()
+        base_dt = params.get("base_dt", date_token(dt.date.today())).strip()
+        if not stock_code or not re.fullmatch(r"\d{6}", stock_code):
+            self.send_json(400, {"error": "valid 6-digit stock_code is required", "points": []})
+            return
+        if chart_type not in ("daily", "weekly", "monthly"):
+            chart_type = "daily"
+
+        api_map = {"daily": "ka10081", "weekly": "ka10082", "monthly": "ka10083"}
+        list_map = {"daily": "stk_dt_pole_chart_qry", "weekly": "stk_stk_pole_chart_qry", "monthly": "stk_mth_pole_chart_qry"}
+        api_id = api_map.get(chart_type, "ka10081")
+        list_key = list_map.get(chart_type, "stk_dt_pole_chart_qry")
+
+        result = kiwoom_request(api_id, {"stk_cd": stock_code, "base_dt": base_dt, "upd_stkpc_tp": "1"}, f"{KIWOOM_BASE}/api/dostk/chart")
+        if "error" in result and result["error"]:
+            self.send_json(200, {"live": False, "error": result["error"], "points": []})
+            return
+
+        rows = result.get(list_key, [])
+        points = []
+        for row in rows:
+            n = normalize_kiwoom_chart(row)
+            if n["date"] and n["close"] > 0:
+                points.append(n)
+
+        points.sort(key=lambda p: p["date"])
+        self.send_json(200, {"live": bool(points), "source": "kiwoom", "error": None, "points": points})
 
     def handle_market_quote(self, params):
         stock_code = params.get("stock_code", "").strip()

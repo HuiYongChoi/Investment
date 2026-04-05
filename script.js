@@ -68,9 +68,13 @@ const state = {
     quarterlies: [],
     reports: [],
     publicQuote: null,
+    kiwoomQuote: null,
     chartDaily: [],
+    chartWeekly: [],
+    chartMonthly: [],
     chartVisible: [],
-    chartRange: '1M',
+    chartRange: 'DAILY',
+    chartYtdYear: getCurrentYearKst(),
     chartSource: 'idle',
     searchMatches: [],
     technicals: null,
@@ -133,6 +137,15 @@ function bindEvents() {
     document.getElementById('kakao-send-btn').addEventListener('click', sendBriefingToKakao);
     document.getElementById('chart-range-controls').addEventListener('click', onChartRangeClick);
     document.getElementById('indicator-toggle').addEventListener('click', onIndicatorToggle);
+
+    const ytdSelect = document.getElementById('ytd-year-select');
+    if (ytdSelect) {
+        ytdSelect.addEventListener('change', (event) => {
+            state.chartYtdYear = Number(event.target.value);
+            renderCharts();
+        });
+    }
+
     window.addEventListener('resize', debounce(() => {
         if (!document.getElementById('dashboard').classList.contains('hidden')) {
             renderCharts();
@@ -367,23 +380,24 @@ async function startSearch() {
 
     hideCompanySuggestions();
     state.company = company;
-    state.chartRange = '1M';
-    setStatus(`${company.name} 분석을 시작합니다. DART, KRX, 공시 리포트를 동기화하는 중입니다.`);
+    state.chartRange = 'DAILY';
+    state.chartYtdYear = getCurrentYearKst();
+    setStatus(`${company.name} 분석을 시작합니다. DART, 키움증권, 공시 리포트를 동기화하는 중입니다.`);
     setSourceBadge('source-dart', 'DART 동기화 중');
-    setSourceBadge('source-krx', 'KRX 동기화 중');
+    setSourceBadge('source-krx', '시세 동기화 중');
     setSourceBadge('source-gemini', 'Gemini 대기 중');
 
     document.getElementById('company-name').textContent = company.name;
-    document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 2026년 YTD 차트를 분석합니다.`;
+    document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 주가 차트를 분석합니다.`;
     document.getElementById('dart-link').href = `https://dart.fss.or.kr/dsaf001/main.do?corpCode=${company.corpCode}`;
     document.getElementById('dashboard').classList.remove('hidden');
 
     try {
-        const [annualsResult, quarterliesResult, reportsResult, chartResult, quoteResult] = await Promise.allSettled([
+        const [annualsResult, quarterliesResult, reportsResult, kiwoomQuoteResult, naverQuoteResult] = await Promise.allSettled([
             fetchMultiYearDart(company.corpCode),
             fetchQuarterlyHistory(company.corpCode),
             fetchDartReportList(company.corpCode),
-            fetchKrxChart(company.stockCode, company.market),
+            fetchKiwoomQuote(company.stockCode),
             fetchPublicQuote(company.stockCode)
         ]);
 
@@ -394,25 +408,41 @@ async function startSearch() {
         state.annuals = annualsResult.value;
         state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
         state.reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
-        state.publicQuote = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
+        state.kiwoomQuote = kiwoomQuoteResult.status === 'fulfilled' ? kiwoomQuoteResult.value : null;
+        state.publicQuote = naverQuoteResult.status === 'fulfilled' ? naverQuoteResult.value : null;
 
-        const chartPayload = chartResult.status === 'fulfilled' ? chartResult.value : { live: false, points: [], error: 'KRX 차트 요청 실패' };
-        const livePoints = Array.isArray(chartPayload.points) ? chartPayload.points : [];
-        if (chartPayload.live && livePoints.length) {
-            state.chartDaily = livePoints;
-            state.chartSource = 'live';
-            setSourceBadge('source-krx', 'KRX Open API 연동됨', 'success');
+        const kiwoomLive = state.kiwoomQuote?.live === true;
+        const quoteForStrip = kiwoomLive ? state.kiwoomQuote : state.publicQuote;
+
+        const [dailyResult, weeklyResult, monthlyResult] = await Promise.allSettled([
+            fetchKiwoomChart(company.stockCode, 'daily'),
+            fetchKiwoomChart(company.stockCode, 'weekly'),
+            fetchKiwoomChart(company.stockCode, 'monthly')
+        ]);
+
+        const dailyPayload = dailyResult.status === 'fulfilled' ? dailyResult.value : { live: false, points: [] };
+        const weeklyPayload = weeklyResult.status === 'fulfilled' ? weeklyResult.value : { live: false, points: [] };
+        const monthlyPayload = monthlyResult.status === 'fulfilled' ? monthlyResult.value : { live: false, points: [] };
+
+        if (dailyPayload.live && dailyPayload.points.length) {
+            state.chartDaily = dailyPayload.points;
+            state.chartSource = 'kiwoom';
+            setSourceBadge('source-krx', '키움증권 REST API 연동됨', 'success');
         } else {
             state.chartDaily = generateSyntheticChart(company.stockCode, state.publicQuote);
             state.chartSource = state.publicQuote?.close ? 'public_quote' : 'synthetic';
+            const errorMsg = dailyPayload.error || '';
             setSourceBadge(
                 'source-krx',
-                chartPayload.error
-                    ? `KRX 제한: ${chartPayload.error}${state.publicQuote?.close ? ' · 공개 시세 보정 차트 사용' : ''}`
-                    : (state.publicQuote?.close ? '공개 시세 보정 차트 사용' : 'KRX 대체 차트 사용'),
+                errorMsg
+                    ? `키움 제한: ${errorMsg}${state.publicQuote?.close ? ' · 공개 시세 보정 차트 사용' : ''}`
+                    : (state.publicQuote?.close ? '공개 시세 보정 차트 사용' : '대체 차트 사용'),
                 'warn'
             );
         }
+
+        state.chartWeekly = weeklyPayload.live ? weeklyPayload.points : aggregateCandles(state.chartDaily, 'week');
+        state.chartMonthly = monthlyPayload.live ? monthlyPayload.points : aggregateCandles(state.chartDaily, 'month');
 
         state.summaries = state.annuals.map((item) => ({
             ...item,
@@ -424,19 +454,19 @@ async function startSearch() {
         renderFinancialTable('fin-quarterly-table', state.quarterlies);
 
         const latestQuote = state.chartDaily[state.chartDaily.length - 1];
-        autoFillMetrics(state.summaries[0]?.summary || {}, latestQuote);
+        autoFillMetrics(state.summaries[0]?.summary || {}, latestQuote, quoteForStrip);
         calcMetrics();
-        renderStockStrip(latestQuote);
+        renderStockStrip(latestQuote, quoteForStrip, kiwoomLive);
         buildRatings();
         refreshTechnicals();
         renderCharts();
 
         setSourceBadge('source-dart', 'DART 공시 연동됨', 'success');
-        document.getElementById('chart-status').textContent = state.chartSource === 'live'
-            ? 'KRX 시세 기반 차트'
+        document.getElementById('chart-status').textContent = state.chartSource === 'kiwoom'
+            ? '키움증권 REST API 시세 기반 차트'
             : state.chartSource === 'public_quote'
-                ? 'KRX 인증 이슈로 공개 종가에 맞춘 대체 2026 차트를 표시 중입니다.'
-                : 'KRX 인증 이슈로 대체 YTD 차트를 표시 중입니다.';
+                ? '공개 종가에 맞춘 보정 차트를 표시 중입니다.'
+                : '대체 YTD 차트를 표시 중입니다.';
         addXP(18);
 
         await generateBriefing();
@@ -617,15 +647,28 @@ async function fetchPublicQuote(stockCode) {
     return InvestmentLogic.normalizePublicQuote(payload);
 }
 
-async function fetchKrxChart(stockCode, market) {
-    const currentYear = getCurrentYearKst();
-    const today = getCurrentDateTokenKst();
-    return fetchJson(buildProxyUrl('krx', '/chart', {
-        stock_code: stockCode,
-        market,
-        start_date: `${currentYear}0101`,
-        end_date: today
-    }, 'krx_chart'));
+async function fetchKiwoomQuote(stockCode) {
+    try {
+        const data = await fetchJson(buildProxyUrl('kiwoom_quote', '', {
+            stock_code: stockCode
+        }, 'kiwoom_quote'));
+        return data;
+    } catch (error) {
+        return { live: false, error: error.message };
+    }
+}
+
+async function fetchKiwoomChart(stockCode, chartType = 'daily') {
+    try {
+        const data = await fetchJson(buildProxyUrl('kiwoom_chart', '', {
+            stock_code: stockCode,
+            chart_type: chartType,
+            base_dt: getCurrentDateTokenKst()
+        }, 'kiwoom_chart'));
+        return data;
+    } catch (error) {
+        return { live: false, error: error.message, points: [] };
+    }
 }
 
 function generateSyntheticChart(stockCode, quote = null) {
@@ -763,13 +806,14 @@ function renderFinancialTable(containerId, periods) {
 
     const headerCells = summaries.map((period) => `<th>${period.label}</th>`).join('');
     const body = rows.map((row) => {
-        const cells = summaries.map((period) => `<td>${formatMetricValue(period.summary[row.key], row.type)}</td>`).join('');
-        const latest = summaries[0]?.summary[row.key];
-        const previous = summaries[1]?.summary[row.key];
-        const growth = computeGrowth(latest, previous);
-        const className = growth > 0 ? 'good' : growth < 0 ? 'bad' : '';
-        const growthCell = growth === null ? '-' : `${growth > 0 ? '+' : ''}${growth.toFixed(1)}%`;
-        return `<tr><td>${row.label}</td>${cells}<td class="${className}">${growthCell}</td></tr>`;
+        const cells = summaries.map((period, colIndex) => {
+            const value = period.summary[row.key];
+            const prevValue = colIndex < summaries.length - 1 ? summaries[colIndex + 1]?.summary[row.key] : null;
+            const growth = computeGrowth(value, prevValue);
+            const growthHtml = growth === null ? '' : `<span class="inline-change ${growth > 0 ? 'good' : growth < 0 ? 'bad' : ''}">${growth > 0 ? '+' : ''}${growth.toFixed(1)}%</span>`;
+            return `<td>${formatMetricValue(value, row.type)}${growthHtml}</td>`;
+        }).join('');
+        return `<tr><td>${row.label}</td>${cells}</tr>`;
     }).join('');
 
     container.innerHTML = `
@@ -778,7 +822,6 @@ function renderFinancialTable(containerId, periods) {
                 <tr>
                     <th>항목</th>
                     ${headerCells}
-                    <th>최근 변화</th>
                 </tr>
             </thead>
             <tbody>${body}</tbody>
@@ -786,17 +829,21 @@ function renderFinancialTable(containerId, periods) {
     `;
 }
 
-function renderStockStrip(lastPoint) {
-    if (!lastPoint) return;
-    const isLiveKrx = state.chartSource === 'live';
-    const price = lastPoint.close;
-    const change = lastPoint.change ?? (lastPoint.close - lastPoint.open);
-    const changePct = lastPoint.changePct ?? percentage(change, lastPoint.open);
+function renderStockStrip(lastPoint, quoteData, kiwoomLive) {
+    if (!lastPoint && !quoteData) return;
+    const hasLiveData = kiwoomLive && quoteData?.close > 0;
+    const price = hasLiveData ? quoteData.close : (lastPoint?.close || 0);
+    const change = hasLiveData ? quoteData.change : (lastPoint?.change ?? (lastPoint ? lastPoint.close - lastPoint.open : 0));
+    const changePct = hasLiveData ? quoteData.changePct : (lastPoint?.changePct ?? percentage(change, lastPoint?.open || 1));
+    const openPrice = hasLiveData ? quoteData.open : (lastPoint?.open || 0);
+    const highPrice = hasLiveData ? quoteData.high : (lastPoint?.high || 0);
+    const lowPrice = hasLiveData ? quoteData.low : (lastPoint?.low || 0);
+    const volume = hasLiveData ? quoteData.volume : (lastPoint?.volume || 0);
+
     const className = change > 0 ? 'up' : change < 0 ? 'down' : '';
     const sign = change > 0 ? '+' : '';
-    const priceSub = isLiveKrx
-        ? `${sign}${change.toLocaleString()}원 (${changePct.toFixed(2)}%)`
-        : `${sign}${change.toLocaleString()}원 (${changePct.toFixed(2)}%) · ${formatQuoteTime(state.publicQuote?.asOf)}`;
+    const priceSub = `${sign}${change.toLocaleString()}원 (${Number(changePct).toFixed(2)}%)`;
+
     document.getElementById('stock-realtime').classList.remove('hidden');
     document.getElementById('stock-realtime').innerHTML = `
         <div class="ss-item">
@@ -806,30 +853,32 @@ function renderStockStrip(lastPoint) {
         </div>
         <div class="ss-item">
             <div class="ss-label">시가</div>
-            <div class="ss-val">${isLiveKrx ? `${lastPoint.open.toLocaleString()}원` : '-'}</div>
-            <div class="ss-sub">${isLiveKrx ? '당일 시작 가격' : 'KRX 실데이터 연동 시 표시'}</div>
+            <div class="ss-val">${openPrice > 0 ? `${openPrice.toLocaleString()}원` : '-'}</div>
+            <div class="ss-sub">${openPrice > 0 ? '당일 시작 가격' : '시세 데이터 대기'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">고가</div>
-            <div class="ss-val good">${isLiveKrx ? `${lastPoint.high.toLocaleString()}원` : '-'}</div>
-            <div class="ss-sub">${isLiveKrx ? '장중 최고가' : 'KRX 실데이터 연동 시 표시'}</div>
+            <div class="ss-val good">${highPrice > 0 ? `${highPrice.toLocaleString()}원` : '-'}</div>
+            <div class="ss-sub">${highPrice > 0 ? '장중 최고가' : '시세 데이터 대기'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">저가</div>
-            <div class="ss-val bad">${isLiveKrx ? `${lastPoint.low.toLocaleString()}원` : '-'}</div>
-            <div class="ss-sub">${isLiveKrx ? '장중 최저가' : 'KRX 실데이터 연동 시 표시'}</div>
+            <div class="ss-val bad">${lowPrice > 0 ? `${lowPrice.toLocaleString()}원` : '-'}</div>
+            <div class="ss-sub">${lowPrice > 0 ? '장중 최저가' : '시세 데이터 대기'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">거래량</div>
-            <div class="ss-val">${isLiveKrx ? formatCompact(lastPoint.volume) : '-'}</div>
-            <div class="ss-sub">${isLiveKrx ? '누적 거래량' : 'KRX 실데이터 연동 시 표시'}</div>
+            <div class="ss-val">${volume > 0 ? formatCompact(volume) : '-'}</div>
+            <div class="ss-sub">${volume > 0 ? '누적 거래량' : '시세 데이터 대기'}</div>
         </div>
     `;
 }
 
-function autoFillMetrics(summary, lastTrade) {
-    document.getElementById('m-price').value = lastTrade?.close || 0;
-    document.getElementById('m-shares').value = lastTrade?.listedShares || 0;
+function autoFillMetrics(summary, lastTrade, quoteData) {
+    const price = quoteData?.close || lastTrade?.close || 0;
+    const shares = quoteData?.listedShares || lastTrade?.listedShares || 0;
+    document.getElementById('m-price').value = price;
+    document.getElementById('m-shares').value = shares;
     document.getElementById('m-expected-op').value = Math.max(summary.operatingIncome || 0, 0);
     document.getElementById('m-target-per').value = 15;
     state.lastAnalysis.fin = {
@@ -1012,6 +1061,8 @@ function computeTechnicals(data) {
 
     const ma5 = computeSMA(closes, 5);
     const ma20 = computeSMA(closes, 20);
+    const ma60 = computeSMA(closes, 60);
+    const ma200 = computeSMA(closes, 200);
     const rsi = computeRSISeries(closes, 14);
     const macd = computeMACDSeries(closes, 12, 26, 9);
     const stoch = computeStochasticSeries(highs, lows, closes, 14, 3);
@@ -1065,7 +1116,7 @@ function computeTechnicals(data) {
         }
     ];
 
-    return { ma5, ma20, rsi, macd, stoch, boll, cards };
+    return { ma5, ma20, ma60, ma200, rsi, macd, stoch, boll, cards };
 }
 
 function renderTechnicalCards() {
@@ -1119,7 +1170,11 @@ function onChartRangeClick(event) {
     const button = event.target.closest('.seg-btn');
     if (!button) return;
     state.chartRange = button.dataset.range;
-    document.querySelectorAll('.seg-btn').forEach((item) => item.classList.toggle('active', item === button));
+    document.querySelectorAll('#chart-range-controls .seg-btn').forEach((item) => item.classList.toggle('active', item === button));
+    const ytdSelect = document.getElementById('ytd-year-select');
+    if (ytdSelect) {
+        ytdSelect.style.display = state.chartRange === 'YTD' ? 'inline-block' : 'none';
+    }
     renderCharts();
 }
 
@@ -1137,20 +1192,23 @@ function onIndicatorToggle(event) {
 }
 
 function renderCharts() {
-    state.chartVisible = getVisibleChartData(state.chartDaily, state.chartRange);
+    state.chartVisible = getVisibleChartData();
     renderPriceChart(state.chartVisible);
-    renderIndicatorChart(state.chartVisible);
+    renderSeparateIndicatorCharts(state.chartVisible);
     renderChartLegend();
     renderTechLegend();
 }
 
-function getVisibleChartData(dailyData, range) {
-    if (!dailyData.length) return [];
-    if (range === '1M') return dailyData.slice(-22);
-    if (range === '3M') return dailyData.slice(-66);
-    if (range === 'WEEK') return aggregateCandles(dailyData, 'week');
-    if (range === 'YTD') return dailyData.slice();
-    return dailyData.slice(-22);
+function getVisibleChartData() {
+    const range = state.chartRange;
+    if (range === 'DAILY') return state.chartDaily.slice(-60);
+    if (range === 'WEEKLY') return state.chartWeekly.length ? state.chartWeekly.slice(-52) : aggregateCandles(state.chartDaily, 'week');
+    if (range === 'MONTHLY') return state.chartMonthly.length ? state.chartMonthly.slice(-24) : aggregateCandles(state.chartDaily, 'month');
+    if (range === 'YTD') {
+        const yearStr = String(state.chartYtdYear);
+        return state.chartDaily.filter((p) => p.date.startsWith(yearStr));
+    }
+    return state.chartDaily.slice(-60);
 }
 
 function aggregateCandles(data, mode) {
@@ -1205,8 +1263,9 @@ function renderPriceChart(data) {
     const closeSeries = data.map((point) => point.close);
     const ma5 = computeSMA(closeSeries, 5);
     const ma20 = computeSMA(closeSeries, 20);
+    const ma60 = computeSMA(closeSeries, 60);
+    const ma200 = computeSMA(closeSeries, 200);
     const boll = computeBollingerSeries(closeSeries, 20, 2);
-    const localRsi = computeRSISeries(closeSeries, 14);
 
     const xAt = (index) => padding.left + xGap * index + xGap / 2;
     const yAt = (value) => padding.top + height - ((value - minPrice) / (maxPrice - minPrice || 1)) * height;
@@ -1250,6 +1309,8 @@ function renderPriceChart(data) {
     if (state.selectedIndicators.has('MA')) {
         drawOverlayLine(context, ma5, xAt, yAt, '#8fd3ff');
         drawOverlayLine(context, ma20, xAt, yAt, '#f59e0b');
+        drawOverlayLine(context, ma60, xAt, yAt, '#a855f7');
+        drawOverlayLine(context, ma200, xAt, yAt, '#ef4444', 1.2, [6, 3]);
     }
 
     if (state.selectedIndicators.has('BOLL')) {
@@ -1261,9 +1322,10 @@ function renderPriceChart(data) {
     context.fillStyle = '#64748b';
     context.textAlign = 'center';
     context.font = '11px Inter';
+    const isWeekly = state.chartRange === 'WEEKLY';
     data.forEach((point, index) => {
         if (index % labelStep !== 0 && index !== data.length - 1) return;
-        context.fillText(formatAxisDate(point.date, state.chartRange === 'WEEK'), xAt(index), canvas.height - 12);
+        context.fillText(formatAxisDate(point.date, isWeekly), xAt(index), canvas.height - 12);
     });
 
     if (hovered !== null && data[hovered]) {
@@ -1281,7 +1343,7 @@ function renderPriceChart(data) {
             `고가 ${point.high.toLocaleString()}원`,
             `저가 ${point.low.toLocaleString()}원`,
             `종가 ${point.close.toLocaleString()}원`,
-            `등락 ${point.changePct.toFixed(2)}%`
+            `등락 ${(point.changePct || 0).toFixed(2)}%`
         ];
         drawTooltip(context, x + 16, padding.top + 12, lines, canvas.width - 200, canvas.height - 120);
     }
@@ -1304,87 +1366,135 @@ function renderPriceChart(data) {
     };
 }
 
-function renderIndicatorChart(data) {
-    const canvas = document.getElementById('indicator-chart');
-    const context = canvas.getContext('2d');
-    const wrapperWidth = canvas.parentElement.clientWidth - 36;
-    canvas.width = Math.max(wrapperWidth, 320);
-    canvas.height = 280;
-
-    context.clearRect(0, 0, canvas.width, canvas.height);
+function renderSeparateIndicatorCharts(data) {
+    const container = document.getElementById('indicator-panels');
+    if (!container) return;
     if (!data.length || !state.technicals) {
+        container.innerHTML = '';
         return;
     }
 
-    const selectedOscillators = [
-        state.selectedIndicators.has('RSI') || state.selectedIndicators.has('STOCH') ? 'OSC' : null,
-        state.selectedIndicators.has('MACD') ? 'MACD' : null
-    ].filter(Boolean);
+    const localTech = computeTechnicals(data);
+    const panels = [];
 
-    if (!selectedOscillators.length) {
-        context.fillStyle = '#94a3b8';
-        context.font = '13px Inter';
-        context.fillText('RSI, 스토캐스틱, MACD 중 하나를 선택하면 보조 차트가 표시됩니다.', 18, 30);
+    if (state.selectedIndicators.has('RSI')) {
+        panels.push({ key: 'RSI', label: 'RSI (14)', render: (ctx, w, h, xAt) => {
+            const yAt = (v) => h - (v / 100) * (h - 32) - 16;
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.lineWidth = 1;
+            [30, 50, 70].forEach((level) => {
+                ctx.beginPath();
+                ctx.moveTo(0, yAt(level));
+                ctx.lineTo(w, yAt(level));
+                ctx.stroke();
+                ctx.fillStyle = '#64748b';
+                ctx.font = '10px Inter';
+                ctx.textAlign = 'right';
+                ctx.fillText(String(level), w - 4, yAt(level) - 3);
+            });
+            drawLineSeries(ctx, localTech.rsi, xAt, yAt, '#8fd3ff', 2);
+            buildRsiMarkers(localTech.rsi).forEach((m) => drawSignalMarker(ctx, xAt(m.index), yAt(m.value), m.type));
+        }});
+    }
+
+    if (state.selectedIndicators.has('MACD')) {
+        panels.push({ key: 'MACD', label: 'MACD (12, 26, 9)', render: (ctx, w, h, xAt) => {
+            const hist = localTech.macd.histogram;
+            const values = hist.filter((v) => v !== null);
+            const maxAbs = Math.max(...values.map((v) => Math.abs(v)), 1);
+            const yAt = (v) => h / 2 - (v / maxAbs) * (h / 2 - 16);
+            hist.forEach((v, i) => {
+                if (v === null) return;
+                ctx.strokeStyle = v >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.8)';
+                ctx.lineWidth = Math.max(2, (w / data.length) * 0.45);
+                ctx.beginPath();
+                ctx.moveTo(xAt(i), yAt(0));
+                ctx.lineTo(xAt(i), yAt(v));
+                ctx.stroke();
+            });
+            drawLineSeries(ctx, localTech.macd.macd, xAt, yAt, '#8fd3ff', 2);
+            drawLineSeries(ctx, localTech.macd.signal, xAt, yAt, '#f59e0b', 1.6);
+            buildMacdMarkers(localTech.macd).forEach((m) => drawSignalMarker(ctx, xAt(m.index), yAt(m.value), m.type));
+        }});
+    }
+
+    if (state.selectedIndicators.has('STOCH')) {
+        panels.push({ key: 'STOCH', label: '스토캐스틱 (14, 3)', render: (ctx, w, h, xAt) => {
+            const yAt = (v) => h - (v / 100) * (h - 32) - 16;
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.lineWidth = 1;
+            [20, 50, 80].forEach((level) => {
+                ctx.beginPath();
+                ctx.moveTo(0, yAt(level));
+                ctx.lineTo(w, yAt(level));
+                ctx.stroke();
+                ctx.fillStyle = '#64748b';
+                ctx.font = '10px Inter';
+                ctx.textAlign = 'right';
+                ctx.fillText(String(level), w - 4, yAt(level) - 3);
+            });
+            drawLineSeries(ctx, localTech.stoch.k, xAt, yAt, '#f59e0b', 2);
+            drawLineSeries(ctx, localTech.stoch.d, xAt, yAt, '#a855f7', 1.6);
+        }});
+    }
+
+    if (state.selectedIndicators.has('BOLL')) {
+        panels.push({ key: 'BOLL', label: '볼린저 밴드 (20, 2)', render: (ctx, w, h, xAt) => {
+            const closeSeries = data.map((p) => p.close);
+            const bollData = computeBollingerSeries(closeSeries, 20, 2);
+            const allVals = bollData.filter((b) => b).flatMap((b) => [b.upper, b.lower]);
+            if (!allVals.length) return;
+            const maxV = Math.max(...allVals) * 1.01;
+            const minV = Math.min(...allVals) * 0.99;
+            const yAt = (v) => 8 + (h - 24) - ((v - minV) / (maxV - minV || 1)) * (h - 24);
+            drawLineSeries(ctx, bollData.map((b) => b?.upper ?? null), xAt, yAt, 'rgba(34,211,238,0.9)', 1.6);
+            drawLineSeries(ctx, bollData.map((b) => b?.middle ?? null), xAt, yAt, '#94a3b8', 1.2);
+            drawLineSeries(ctx, bollData.map((b) => b?.lower ?? null), xAt, yAt, 'rgba(124,108,255,0.9)', 1.6);
+            drawLineSeries(ctx, closeSeries, xAt, yAt, '#8fd3ff', 1.4);
+        }});
+    }
+
+    if (state.selectedIndicators.has('MA')) {
+        panels.push({ key: 'MA', label: '이동평균선 (5, 20, 60, 200)', render: (ctx, w, h, xAt) => {
+            const closeSeries = data.map((p) => p.close);
+            const allVals = closeSeries.filter((v) => v > 0);
+            if (!allVals.length) return;
+            const maxV = Math.max(...allVals) * 1.02;
+            const minV = Math.min(...allVals) * 0.98;
+            const yAt = (v) => 8 + (h - 24) - ((v - minV) / (maxV - minV || 1)) * (h - 24);
+            drawLineSeries(ctx, closeSeries, xAt, yAt, 'rgba(255,255,255,0.25)', 1);
+            drawLineSeries(ctx, computeSMA(closeSeries, 5), xAt, yAt, '#8fd3ff', 2);
+            drawLineSeries(ctx, computeSMA(closeSeries, 20), xAt, yAt, '#f59e0b', 1.8);
+            drawLineSeries(ctx, computeSMA(closeSeries, 60), xAt, yAt, '#a855f7', 1.6);
+            drawOverlayLine(ctx, computeSMA(closeSeries, 200), xAt, yAt, '#ef4444', 1.4, [6, 3]);
+        }});
+    }
+
+    if (!panels.length) {
+        container.innerHTML = '<p style="color:#94a3b8;padding:18px;">지표를 선택하면 개별 차트가 표시됩니다.</p>';
         return;
     }
 
-    const padding = { top: 16, right: 24, bottom: 22, left: 24 };
-    const panelHeight = (canvas.height - padding.top - padding.bottom - 12 * (selectedOscillators.length - 1)) / selectedOscillators.length;
-    const width = canvas.width - padding.left - padding.right;
-    const xGap = width / data.length;
-    const xAt = (index) => padding.left + xGap * index + xGap / 2;
-    const localTechnicals = computeTechnicals(data);
+    container.innerHTML = panels.map((p) => `
+        <div class="indicator-panel-item">
+            <div class="indicator-panel-label">${p.label}</div>
+            <div class="indicator-shell-mini">
+                <canvas id="ind-canvas-${p.key}" width="1000" height="160"></canvas>
+            </div>
+        </div>
+    `).join('');
 
-    selectedOscillators.forEach((panel, panelIndex) => {
-        const top = padding.top + panelIndex * (panelHeight + 12);
-        const bottom = top + panelHeight;
-        context.strokeStyle = 'rgba(255,255,255,0.08)';
-        context.strokeRect(padding.left, top, width, panelHeight);
-
-        if (panel === 'OSC') {
-            const yAt = (value) => bottom - (value / 100) * panelHeight;
-            if (state.selectedIndicators.has('RSI')) {
-                drawLineSeries(context, localTechnicals.rsi, xAt, yAt, '#8fd3ff', 2);
-            }
-            if (state.selectedIndicators.has('STOCH')) {
-                drawLineSeries(context, localTechnicals.stoch.k, xAt, yAt, '#f59e0b', 1.6);
-                drawLineSeries(context, localTechnicals.stoch.d, xAt, yAt, '#a855f7', 1.4);
-            }
-            context.fillStyle = '#94a3b8';
-            context.font = '11px Inter';
-            context.fillText('RSI / Stochastic', padding.left + 8, top + 14);
-            context.fillText('70', canvas.width - 18, yAt(70) + 4);
-            context.fillText('30', canvas.width - 18, yAt(30) + 4);
-            buildOscillatorMarkers(localTechnicals, state.selectedIndicators).forEach((marker) => {
-                drawSignalMarker(context, xAt(marker.index), yAt(marker.value), marker.type);
-            });
-        } else {
-            const series = localTechnicals.macd.macd;
-            const signal = localTechnicals.macd.signal;
-            const hist = localTechnicals.macd.histogram;
-            const values = hist.filter((value) => value !== null);
-            const maxAbs = Math.max(...values.map((value) => Math.abs(value)), 1);
-            const yAt = (value) => top + panelHeight / 2 - (value / maxAbs) * (panelHeight / 2 - 16);
-
-            hist.forEach((value, index) => {
-                if (value === null) return;
-                const x = xAt(index);
-                context.strokeStyle = value >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.8)';
-                context.lineWidth = Math.max(2, xGap * 0.45);
-                context.beginPath();
-                context.moveTo(x, yAt(0));
-                context.lineTo(x, yAt(value));
-                context.stroke();
-            });
-            drawLineSeries(context, series, xAt, yAt, '#8fd3ff', 2);
-            drawLineSeries(context, signal, xAt, yAt, '#f59e0b', 1.6);
-            context.fillStyle = '#94a3b8';
-            context.font = '11px Inter';
-            context.fillText('MACD', padding.left + 8, top + 14);
-            buildMacdMarkers(localTechnicals.macd).forEach((marker) => {
-                drawSignalMarker(context, xAt(marker.index), yAt(marker.value), marker.type);
-            });
-        }
+    panels.forEach((panel) => {
+        const cvs = document.getElementById(`ind-canvas-${panel.key}`);
+        if (!cvs) return;
+        const ctx = cvs.getContext('2d');
+        const wrapperWidth = cvs.parentElement.clientWidth - 12;
+        cvs.width = Math.max(wrapperWidth, 320);
+        cvs.height = 160;
+        ctx.clearRect(0, 0, cvs.width, cvs.height);
+        const xGap = cvs.width / data.length;
+        const xAt = (i) => xGap * i + xGap / 2;
+        panel.render(ctx, cvs.width, cvs.height, xAt);
     });
 }
 
@@ -1397,6 +1507,8 @@ function renderChartLegend() {
     if (state.selectedIndicators.has('MA')) {
         items.push({ type: 'line', color: '#8fd3ff', label: 'MA5' });
         items.push({ type: 'line', color: '#f59e0b', label: 'MA20' });
+        items.push({ type: 'line', color: '#a855f7', label: 'MA60' });
+        items.push({ type: 'line', color: '#ef4444', label: 'MA200' });
     }
     if (state.selectedIndicators.has('BOLL')) {
         items.push({ type: 'line', color: 'rgba(34,211,238,0.9)', label: '볼린저 상단' });
@@ -1436,7 +1548,7 @@ async function generateBriefing() {
     const totalPct = state.lastAnalysis.totalPct || 0;
 
     const prompt = `
-${company}에 대한 한국어 투자 브리핑을 작성하세요.
+${company}에 대한 투자 브리핑을 아래 형식에 맞춰 한국어로 작성하세요.
 
 [입력 데이터]
 - 가치투자 부합도: ${totalPct}%
@@ -1451,14 +1563,26 @@ ${company}에 대한 한국어 투자 브리핑을 작성하세요.
 - 건전성 점수: ${state.ratings.stability.score}/5
 - 효율성 점수: ${state.ratings.efficiency.score}/5
 - 기술적 판단: ${technicalCards.map((card) => `${card.label} ${card.signal}`).join(', ')}
-- 차트 소스: ${state.chartSource === 'live' ? 'KRX Open API' : state.chartSource === 'public_quote' ? '공개 시세 보정 대체 차트' : 'KRX 대체 차트'}
+- 시세 소스: ${state.chartSource === 'kiwoom' ? '키움증권 REST API' : state.chartSource === 'public_quote' ? '공개 시세 보정' : '대체 차트'}
 
-[출력 형식]
-1. 한 줄 요약
-2. 강점 3가지
-3. 리스크 3가지
-4. 최종 의견(매수/관망/주의 중 하나)과 근거
-5. 너무 길지 않게 작성
+[출력 형식 — 반드시 아래 구조와 소제목을 사용하세요]
+## 한 줄 요약
+(1~2문장)
+
+## 핵심 강점
+- 강점1
+- 강점2
+- 강점3
+
+## 주요 리스크
+- 리스크1
+- 리스크2
+- 리스크3
+
+## 최종 의견
+(매수/관망/주의 중 택 1) + 근거 2~3줄
+
+** 간결하게 작성하되, 수치 근거를 반드시 포함하세요.
     `.trim();
 
     try {
@@ -1469,7 +1593,7 @@ ${company}에 대한 한국어 투자 브리핑을 작성하세요.
                 contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: {
                     temperature: 0.4,
-                    maxOutputTokens: 850
+                    maxOutputTokens: 1000
                 }
             })
         });
@@ -1505,7 +1629,7 @@ function buildLocalBriefing() {
     ];
     const riskLines = [
         `상승여력 ${state.metrics.upside.toFixed(1)}%는 입력한 목표 PER 가정에 민감합니다.`,
-        `KRX 차트 소스는 현재 ${state.chartSource === 'live' ? '실데이터' : state.chartSource === 'public_quote' ? '공개 시세 보정 차트' : '대체 YTD 차트'}입니다.`,
+        `시세 소스는 현재 ${state.chartSource === 'kiwoom' ? '키움증권 실데이터' : state.chartSource === 'public_quote' ? '공개 시세 보정 차트' : '대체 YTD 차트'}입니다.`,
         `최근 분기 데이터가 부족한 경우 분기 성장률 평가는 보수적으로 해석해야 합니다.`
     ];
     const finalOpinion = state.lastAnalysis.totalPct >= 80 ? '매수 후보' : state.lastAnalysis.totalPct >= 60 ? '관망 우위' : '주의 구간';
@@ -1513,46 +1637,68 @@ function buildLocalBriefing() {
     return `
         <div class="briefing-section">
             <h3>한 줄 요약</h3>
-            <div class="briefing-body">${state.company.name}은 현재 가치지표와 재무 점수상 ${finalOpinion}에 가까우며, 기술적 지표는 ${document.getElementById('tech-summary').innerText.trim()} 상태입니다.</div>
+            <div class="briefing-body">${state.company.name}은 현재 가치지표와 재무 점수상 <strong>${finalOpinion}</strong>에 가까우며, 기술적 지표는 ${document.getElementById('tech-summary').innerText.trim()} 상태입니다.</div>
         </div>
         <div class="briefing-section">
-            <h3>강점</h3>
+            <h3>핵심 강점</h3>
             <ul class="briefing-list">${strengthLines.map((item) => `<li>${item}</li>`).join('')}</ul>
         </div>
         <div class="briefing-section">
-            <h3>리스크</h3>
+            <h3>주요 리스크</h3>
             <ul class="briefing-list">${riskLines.map((item) => `<li>${item}</li>`).join('')}</ul>
         </div>
         <div class="briefing-section">
             <h3>최종 의견</h3>
-            <div class="briefing-body">${finalOpinion}입니다. 재무 점수, 적정주가, 기술적 집계 결과를 함께 확인하면서 DART 원문과 최신 공시까지 교차 검증하는 접근이 적합합니다.</div>
+            <div class="briefing-body"><strong>${finalOpinion}</strong>입니다. 재무 점수, 적정주가, 기술적 집계 결과를 함께 확인하면서 DART 원문과 최신 공시까지 교차 검증하는 접근이 적합합니다.</div>
         </div>
     `;
 }
 
 function formatBriefingText(text) {
     const escaped = escapeHtml(text);
-    const sections = escaped.split(/\n{2,}/).map((chunk) => chunk.trim()).filter(Boolean);
-    return sections.map((section) => {
-        const lines = section.split('\n').map((line) => line.trim()).filter(Boolean);
-        const title = lines[0];
-        const body = lines.slice(1);
-        const heading = /^\d+\./.test(title) || title.endsWith(':');
-        if (!heading) {
-            return `<div class="briefing-section"><div class="briefing-body">${lines.join('<br>')}</div></div>`;
+    const lines = escaped.split('\n');
+    let html = '';
+    let currentSection = null;
+    let listBuffer = [];
+
+    function flushList() {
+        if (listBuffer.length) {
+            html += `<ul class="briefing-list">${listBuffer.map((l) => `<li>${l}</li>`).join('')}</ul>`;
+            listBuffer = [];
+        }
+    }
+
+    lines.forEach((rawLine) => {
+        const line = rawLine.trim();
+        if (!line) return;
+
+        if (line.startsWith('## ') || line.startsWith('**') && line.endsWith('**')) {
+            flushList();
+            const heading = line.replace(/^##\s*/, '').replace(/^\*\*/, '').replace(/\*\*$/, '').trim();
+            html += `</div><div class="briefing-section"><h3>${heading}</h3>`;
+            currentSection = heading;
+            return;
         }
 
-        const cleanTitle = title.replace(/^\d+\.\s*/, '').replace(/:$/, '');
-        const listLike = body.every((line) => /^[-•]/.test(line));
-        return `
-            <div class="briefing-section">
-                <h3>${cleanTitle}</h3>
-                ${listLike
-                    ? `<ul class="briefing-list">${body.map((line) => `<li>${line.replace(/^[-•]\s*/, '')}</li>`).join('')}</ul>`
-                    : `<div class="briefing-body">${body.join('<br>')}</div>`}
-            </div>
-        `;
-    }).join('');
+        if (/^\d+\.\s/.test(line)) {
+            flushList();
+            const heading = line.replace(/^\d+\.\s*/, '').replace(/:$/, '').replace(/^\*\*/, '').replace(/\*\*$/, '').trim();
+            html += `</div><div class="briefing-section"><h3>${heading}</h3>`;
+            return;
+        }
+
+        if (/^[-•]\s/.test(line)) {
+            listBuffer.push(line.replace(/^[-•]\s*/, '').replace(/\*\*/g, ''));
+            return;
+        }
+
+        flushList();
+        const cleaned = line.replace(/\*\*/g, '');
+        html += `<div class="briefing-body">${cleaned}</div>`;
+    });
+
+    flushList();
+    return `<div>${html}</div>`;
 }
 
 function exportPdf() {
@@ -1657,10 +1803,12 @@ function computeBollingerSeries(values, period = 20, multiplier = 2) {
     });
 }
 
-function drawOverlayLine(context, series, xAt, yAt, color) {
+function drawOverlayLine(context, series, xAt, yAt, color, lineWidth = 1.8, dash = null) {
     context.beginPath();
     context.strokeStyle = color;
-    context.lineWidth = 1.8;
+    context.lineWidth = lineWidth;
+    if (dash) context.setLineDash(dash);
+    else context.setLineDash([]);
     let started = false;
     series.forEach((value, index) => {
         if (value === null || value === undefined) return;
@@ -1674,6 +1822,7 @@ function drawOverlayLine(context, series, xAt, yAt, color) {
         }
     });
     context.stroke();
+    context.setLineDash([]);
 }
 
 function drawLineSeries(context, series, xAt, yAt, color, width = 1.8) {
@@ -1712,27 +1861,12 @@ function drawTooltip(context, x, y, lines, maxX, maxY) {
     });
 }
 
-function buildOscillatorMarkers(technicals, selectedIndicators) {
+function buildRsiMarkers(rsiSeries) {
     const markers = [];
-    for (let index = 1; index < technicals.rsi.length; index += 1) {
-        if (selectedIndicators.has('RSI') && technicals.rsi[index] !== null) {
-            if (technicals.rsi[index] < 30) markers.push({ index, type: 'buy', value: technicals.rsi[index] });
-            if (technicals.rsi[index] > 70) markers.push({ index, type: 'sell', value: technicals.rsi[index] });
-        }
-
-        if (selectedIndicators.has('STOCH')) {
-            const previousK = technicals.stoch.k[index - 1];
-            const previousD = technicals.stoch.d[index - 1];
-            const currentK = technicals.stoch.k[index];
-            const currentD = technicals.stoch.d[index];
-            if (previousK !== null && previousD !== null && currentK !== null && currentD !== null) {
-                if (previousK <= previousD && currentK > currentD && currentK < 25) {
-                    markers.push({ index, type: 'buy', value: currentK });
-                } else if (previousK >= previousD && currentK < currentD && currentK > 75) {
-                    markers.push({ index, type: 'sell', value: currentK });
-                }
-            }
-        }
+    for (let i = 1; i < rsiSeries.length; i += 1) {
+        if (rsiSeries[i] === null) continue;
+        if (rsiSeries[i] < 30) markers.push({ index: i, type: 'buy', value: rsiSeries[i] });
+        if (rsiSeries[i] > 70) markers.push({ index: i, type: 'sell', value: rsiSeries[i] });
     }
     return markers.slice(-10);
 }
@@ -1852,20 +1986,6 @@ function getCurrentDateTokenKst() {
     return `${map.year}${map.month}${map.day}`;
 }
 
-function buildBusinessDateTokens(startToken, endToken) {
-    const result = [];
-    const cursor = toDate(startToken);
-    const end = toDate(endToken);
-    while (cursor <= end) {
-        const day = cursor.getDay();
-        if (day !== 0 && day !== 6) {
-            result.push(fromDate(cursor));
-        }
-        cursor.setDate(cursor.getDate() + 1);
-    }
-    return result;
-}
-
 function toDate(token) {
     return new Date(Number(token.slice(0, 4)), Number(token.slice(4, 6)) - 1, Number(token.slice(6, 8)));
 }
@@ -1875,10 +1995,6 @@ function fromDate(date) {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}${month}${day}`;
-}
-
-function numericSeed(value) {
-    return Array.from(String(value)).reduce((sum, char) => sum + char.charCodeAt(0), 0);
 }
 
 function percentage(part, total) {

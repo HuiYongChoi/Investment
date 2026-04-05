@@ -44,6 +44,74 @@ DART_KEY = env_or_aws('DART_API_KEY', next_label: 'DART 오픈 API')
 KRX_KEY = env_or_aws('KRX_AUTH_KEY', next_label: 'KRX Open API')
 GEMINI_KEY = env_or_aws('GEMINI_API_KEY', next_label: 'Gemini API KEY')
 KAKAO_REST_KEY = env_or_aws('KAKAO_REST_API_KEY', inline_prefix: 'Rest API:')
+KIWOOM_APPKEY = env_or_aws('KIWOOM_APPKEY', next_label: '키움 AppKey')
+KIWOOM_SECRETKEY = env_or_aws('KIWOOM_SECRETKEY', next_label: '키움 SecretKey')
+KIWOOM_BASE = 'https://api.kiwoom.com'
+KIWOOM_TOKEN_FILE = File.join(Dir.tmpdir, 'kiwoom_token_cache.json')
+
+require 'tmpdir'
+
+def kiwoom_token
+  if File.exist?(KIWOOM_TOKEN_FILE)
+    cached = JSON.parse(File.read(KIWOOM_TOKEN_FILE)) rescue {}
+    if cached['token'] && cached['expires_dt']
+      expires = DateTime.strptime(cached['expires_dt'], '%Y%m%d%H%M%S') rescue nil
+      return cached['token'] if expires && expires > DateTime.now + Rational(5, 24 * 60)
+    end
+  end
+
+  return '' if KIWOOM_APPKEY.empty? || KIWOOM_SECRETKEY.empty?
+
+  uri = URI("#{KIWOOM_BASE}/oauth2/token")
+  body = JSON.generate({ grant_type: 'client_credentials', appkey: KIWOOM_APPKEY, secretkey: KIWOOM_SECRETKEY })
+  resp = Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
+    req = Net::HTTP::Post.new(uri)
+    req['Content-Type'] = 'application/json;charset=UTF-8'
+    req['api-id'] = 'au10001'
+    req.body = body
+    http.request(req)
+  end
+  payload = JSON.parse(resp.body) rescue {}
+  token = payload['token'].to_s
+  unless token.empty?
+    File.write(KIWOOM_TOKEN_FILE, JSON.generate({ token: token, expires_dt: payload['expires_dt'] }))
+    File.chmod(0600, KIWOOM_TOKEN_FILE)
+  end
+  token
+rescue
+  ''
+end
+
+def kiwoom_request(api_id, body_hash, url_path)
+  token = kiwoom_token
+  return { 'error' => 'Kiwoom API credentials not configured' } if token.empty?
+
+  uri = URI(url_path)
+  resp = Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
+    req = Net::HTTP::Post.new(uri)
+    req['Content-Type'] = 'application/json;charset=UTF-8'
+    req['api-id'] = api_id
+    req['authorization'] = "Bearer #{token}"
+    req.body = JSON.generate(body_hash)
+    http.request(req)
+  end
+  JSON.parse(resp.body) rescue { 'error' => 'parse error' }
+end
+
+def normalize_kiwoom_chart(item)
+  abs_int = ->(v) { v.to_s.gsub(/[+\-,]/, '').to_i.abs }
+  cur = abs_int.call(item['cur_prc'])
+  op = abs_int.call(item['open_pric'])
+  hi = abs_int.call(item['high_pric'])
+  lo = abs_int.call(item['low_pric'])
+  pred = item['pred_pre'].to_s.gsub(/[+,]/, '').to_i
+  vol = abs_int.call(item['trde_qty'])
+  close_val = cur > 0 ? cur : op
+  prev = close_val - pred
+  pct = prev > 0 ? (pred.to_f / prev * 100).round(2) : 0
+  { 'date' => item['dt'].to_s, 'open' => op, 'high' => hi, 'low' => lo, 'close' => close_val,
+    'volume' => vol, 'change' => pred, 'changePct' => pct, 'listedShares' => 0 }
+end
 
 def json_response(res, status, payload)
   res.status = status
@@ -368,6 +436,75 @@ server.mount_proc '/market/quote' do |req, res|
   end
 end
 
+server.mount_proc '/kiwoom_quote' do |req, res|
+  next unless with_cors(req, res)
+
+  stock_code = (req.query['stock_code'] || '').strip
+  unless stock_code.match?(/\A\d{6}\z/)
+    json_response(res, 400, error: 'valid 6-digit stock_code is required')
+    next
+  end
+
+  begin
+    result = kiwoom_request('ka10001', { stk_cd: stock_code }, "#{KIWOOM_BASE}/api/dostk/stkinfo")
+    if result['error']
+      json_response(res, 200, live: false, error: result['error'])
+      next
+    end
+
+    abs_int = ->(v) { v.to_s.gsub(/[+\-,]/, '').to_i.abs }
+    cur = abs_int.call(result['cur_prc'])
+    json_response(res, 200, {
+      live: cur > 0, source: 'kiwoom', close: cur,
+      open: abs_int.call(result['open_pric']),
+      high: abs_int.call(result['high_pric']),
+      low: abs_int.call(result['low_pric']),
+      change: result['pred_pre'].to_s.gsub(/[+,]/, '').to_i,
+      changePct: result['flu_rt'].to_s.gsub(/[+,]/, '').to_f,
+      volume: abs_int.call(result['trde_qty']),
+      listedShares: abs_int.call(result['flo_stk']),
+      name: result['stk_nm'].to_s,
+    })
+  rescue StandardError => error
+    json_response(res, 200, live: false, error: error.message)
+  end
+end
+
+server.mount_proc '/kiwoom_chart' do |req, res|
+  next unless with_cors(req, res)
+
+  stock_code = (req.query['stock_code'] || '').strip
+  chart_type = (req.query['chart_type'] || 'daily').strip
+  base_dt = (req.query['base_dt'] || Date.today.strftime('%Y%m%d')).strip
+
+  unless stock_code.match?(/\A\d{6}\z/)
+    json_response(res, 400, error: 'valid 6-digit stock_code is required', points: [])
+    next
+  end
+  chart_type = 'daily' unless %w[daily weekly monthly].include?(chart_type)
+
+  begin
+    api_map = { 'daily' => 'ka10081', 'weekly' => 'ka10082', 'monthly' => 'ka10083' }
+    list_map = { 'daily' => 'stk_dt_pole_chart_qry', 'weekly' => 'stk_stk_pole_chart_qry', 'monthly' => 'stk_mth_pole_chart_qry' }
+    api_id = api_map[chart_type] || 'ka10081'
+    list_key = list_map[chart_type] || 'stk_dt_pole_chart_qry'
+
+    result = kiwoom_request(api_id, { stk_cd: stock_code, base_dt: base_dt, upd_stkpc_tp: '1' }, "#{KIWOOM_BASE}/api/dostk/chart")
+    if result['error']
+      json_response(res, 200, live: false, error: result['error'], points: [])
+      next
+    end
+
+    rows = result[list_key] || []
+    points = rows.map { |r| normalize_kiwoom_chart(r) }.select { |p| !p['date'].empty? && p['close'] > 0 }
+    points.sort_by! { |p| p['date'] }
+
+    json_response(res, 200, live: !points.empty?, source: 'kiwoom', error: nil, points: points)
+  rescue StandardError => error
+    json_response(res, 200, live: false, error: error.message, points: [])
+  end
+end
+
 server.mount_proc '/' do |req, res|
   next unless with_cors(req, res)
 
@@ -377,6 +514,7 @@ server.mount_proc '/' do |req, res|
     service: 'Investment Navigator proxy',
     dart: !DART_KEY.empty?,
     krx: !KRX_KEY.empty?,
+    kiwoom: !KIWOOM_APPKEY.empty?,
     gemini: !GEMINI_KEY.empty?,
     kakao: !KAKAO_REST_KEY.empty?
   )
@@ -389,6 +527,7 @@ puts 'Investment Navigator Unified Proxy'
 puts "Port: 8081"
 puts "DART key: #{DART_KEY.empty? ? 'MISSING' : 'OK'}"
 puts "KRX key: #{KRX_KEY.empty? ? 'MISSING' : 'OK'}"
+puts "Kiwoom key: #{KIWOOM_APPKEY.empty? ? 'MISSING' : 'OK'}"
 puts "Gemini key: #{GEMINI_KEY.empty? ? 'MISSING' : 'OK'}"
 puts "Kakao REST key: #{KAKAO_REST_KEY.empty? ? 'MISSING' : 'OK'}"
 puts '=' * 60
