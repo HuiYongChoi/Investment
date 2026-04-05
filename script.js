@@ -2621,6 +2621,13 @@ function renderPriceChart(data) {
         state.chartPinch = null;
         canvas.setPointerCapture?.(event.pointerId);
         canvas.style.cursor = 'grabbing';
+        // 터치: 누른 봉의 가격 정보를 즉시 표시 (hover 없는 모바일 대응)
+        if (event.pointerType === 'touch') {
+            const x = getCanvasLocalX(canvas, event.clientX) - padding.left;
+            const idx = Math.min(data.length - 1, Math.max(0, Math.floor(x / xGap)));
+            setHoveredCandleIndex(idx);
+            renderPriceChart(state.chartVisible);
+        }
     };
 
     canvas.onpointermove = (event) => {
@@ -2644,6 +2651,9 @@ function renderPriceChart(data) {
             return;
         }
         if (state.chartDrag && state.chartDrag.pointerId === event.pointerId) {
+            const dragDistance = Math.abs(event.clientX - state.chartDrag.startX);
+            // 터치 손떨림(8px 미만)은 탭으로 취급 – 패닝 무시
+            if (event.pointerType === 'touch' && dragDistance < 8) return;
             const dragWidth = getCanvasClientDrawWidth(canvas, padding.left, padding.right);
             const visiblePoints = Math.max(1, state.chartDrag.window.end - state.chartDrag.window.start);
             const deltaRatio = (event.clientX - state.chartDrag.startX) / dragWidth;
@@ -2680,6 +2690,8 @@ function renderPriceChart(data) {
 
     canvas.onpointerleave = (event) => {
         if (state.chartDrag && state.chartDrag.pointerId === event.pointerId) return;
+        // 터치는 손가락을 떼도 가격 정보 유지 (다음 탭/드래그 시 갱신)
+        if (event.pointerType === 'touch') return;
         clearHover();
     };
 }
@@ -2751,7 +2763,13 @@ function setupZoomPan(canvas, padLeft, padRight, onHoverMove, onHoverEnd) {
         state.techPinch = null;
         canvas.setPointerCapture?.(e.pointerId);
         canvas.style.cursor = 'grabbing';
-        endHover();
+        // 터치: 누른 위치의 지표값/날짜를 즉시 툴팁으로 표시
+        if (e.pointerType === 'touch' && onHoverMove) {
+            const rect = canvas.getBoundingClientRect();
+            onHoverMove(e, rect);
+        } else {
+            endHover();
+        }
     };
 
     canvas.onpointermove = (e) => {
@@ -2776,6 +2794,8 @@ function setupZoomPan(canvas, padLeft, padRight, onHoverMove, onHoverEnd) {
         }
         const drag = state.techDrag;
         if (drag && drag.canvas === canvas && drag.pointerId === e.pointerId) {
+            // 터치 손떨림(8px 미만)은 탭으로 취급 – 패닝 무시
+            if (e.pointerType === 'touch' && Math.abs(e.clientX - drag.startX) < 8) return;
             const drawWidth = getCanvasClientDrawWidth(canvas, padLeft, padRight);
             const visiblePoints = Math.max(1, drag.window.end - drag.window.start);
             const deltaRatio = (e.clientX - drag.startX) / Math.max(1, drawWidth);
@@ -2818,6 +2838,11 @@ function setupZoomPan(canvas, padLeft, padRight, onHoverMove, onHoverEnd) {
     canvas.onpointerleave = (e) => {
         const drag = state.techDrag;
         if (drag && drag.canvas === canvas && drag.pointerId === e.pointerId) return;
+        // 터치는 손가락을 떼도 툴팁 유지 (다음 탭/스와이프 시 갱신)
+        if (e.pointerType === 'touch') {
+            canvas.style.cursor = onHoverMove ? 'crosshair' : 'grab';
+            return;
+        }
         endHover();
         canvas.style.cursor = onHoverMove ? 'crosshair' : 'grab';
     };
