@@ -956,7 +956,26 @@ header#header {
 
 .fin-table td:last-child {
     border-radius: 0 14px 14px 0;
-    font-weight: 800;
+}
+
+.fin-val {
+    display: block;
+}
+
+.fin-chg {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    margin-top: 3px;
+    opacity: 0.9;
+}
+
+.fin-chg.good {
+    color: #4ade80;
+}
+
+.fin-chg.bad {
+    color: #f87171;
 }
 
 .input-grid {

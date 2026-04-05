@@ -1164,13 +1164,17 @@ function renderFinancialTable(containerId, periods) {
 
     const headerCells = summaries.map((period) => `<th>${period.label}</th>`).join('');
     const body = rows.map((row) => {
-        const cells = summaries.map((period) => `<td>${formatMetricValue(period.summary[row.key], row.type)}</td>`).join('');
-        const latest = summaries[0]?.summary[row.key];
-        const previous = summaries[1]?.summary[row.key];
-        const growth = computeGrowth(latest, previous);
-        const className = growth > 0 ? 'good' : growth < 0 ? 'bad' : '';
-        const growthCell = growth === null ? '-' : `${growth > 0 ? '+' : ''}${growth.toFixed(1)}%`;
-        return `<tr><td>${row.label}</td>${cells}<td class="${className}">${growthCell}</td></tr>`;
+        const cells = summaries.map((period, i) => {
+            const current = period.summary[row.key];
+            const prev = summaries[i + 1]?.summary[row.key];
+            const growth = computeGrowth(current, prev);
+            const chgClass = growth > 0 ? 'good' : growth < 0 ? 'bad' : '';
+            const chgText = growth === null
+                ? ''
+                : `<span class="fin-chg ${chgClass}">${growth > 0 ? '+' : ''}${growth.toFixed(1)}%</span>`;
+            return `<td><span class="fin-val">${formatMetricValue(current, row.type)}</span>${chgText}</td>`;
+        }).join('');
+        return `<tr><td>${row.label}</td>${cells}</tr>`;
     }).join('');
 
     container.innerHTML = `
@@ -1179,7 +1183,6 @@ function renderFinancialTable(containerId, periods) {
                 <tr>
                     <th>항목</th>
                     ${headerCells}
-                    <th>최근 변화</th>
                 </tr>
             </thead>
             <tbody>${body}</tbody>
