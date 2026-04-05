@@ -7,6 +7,13 @@ AWS.txt
 *.pem
 .env
 keys.json
+proxy.secrets.php
+investment-proxy-secrets.php
+deploy_key
+deploy_key_test
+write_key_final.py
+.claude/
+키움증권 AppKey, AppSecret/
 
 # Legacy / Backup Files
 dart_proxy.rb
