@@ -49,6 +49,25 @@
         return (numerator / denominator) * 100;
     }
 
+    function describePriceDelta(price, referencePrice) {
+        const current = parseNumberText(price);
+        const reference = parseNumberText(referencePrice);
+        if (current === null || reference === null || !reference) {
+            return {
+                change: null,
+                changePct: null,
+                direction: 'flat'
+            };
+        }
+
+        const change = current - reference;
+        return {
+            change,
+            changePct: percentage(change, reference),
+            direction: change > 0 ? 'up' : change < 0 ? 'down' : 'flat'
+        };
+    }
+
     function numericSeed(value) {
         return String(value).split('').reduce((seed, char, index) => seed + (char.charCodeAt(0) * (index + 11)), 0);
     }
@@ -405,6 +424,7 @@
         buildCompanyDirectory,
         buildYahooSymbol,
         clearKakaoSessionState,
+        describePriceDelta,
         generateAnchoredSyntheticChart,
         getQuarterlyReportConfigs,
         matchCompanies,

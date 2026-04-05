@@ -881,6 +881,10 @@ function renderStockStrip(quote, chartPoint) {
     const className = change > 0 ? 'up' : change < 0 ? 'down' : '';
     const sign = change > 0 ? '+' : '';
     const sourceText = formatQuoteSourceText();
+    const previousClose = snapshot.previousClose ?? (Number.isFinite(price) && Number.isFinite(change) ? price - change : null);
+    const openDelta = InvestmentLogic.describePriceDelta(open, previousClose);
+    const highDelta = InvestmentLogic.describePriceDelta(high, previousClose);
+    const lowDelta = InvestmentLogic.describePriceDelta(low, previousClose);
     const priceSub = `${sign}${change.toLocaleString()}원 (${changePct.toFixed(2)}%)${snapshot.asOf ? ` · ${formatQuoteTime(snapshot.asOf)}` : ''}`;
     document.getElementById('stock-realtime').classList.remove('hidden');
     document.getElementById('stock-realtime').innerHTML = `
@@ -892,17 +896,17 @@ function renderStockStrip(quote, chartPoint) {
         <div class="ss-item">
             <div class="ss-label">시가</div>
             <div class="ss-val">${open ? `${open.toLocaleString()}원` : '-'}</div>
-            <div class="ss-sub">${open ? sourceText : '시가 데이터 없음'}</div>
+            <div class="ss-sub ${openDelta.direction === 'up' ? 'up' : openDelta.direction === 'down' ? 'down' : ''}">${open ? formatStripDeltaText(openDelta) : '시가 데이터 없음'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">고가</div>
             <div class="ss-val good">${high ? `${high.toLocaleString()}원` : '-'}</div>
-            <div class="ss-sub">${high ? sourceText : '고가 데이터 없음'}</div>
+            <div class="ss-sub ${highDelta.direction === 'up' ? 'up' : highDelta.direction === 'down' ? 'down' : ''}">${high ? formatStripDeltaText(highDelta) : '고가 데이터 없음'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">저가</div>
             <div class="ss-val bad">${low ? `${low.toLocaleString()}원` : '-'}</div>
-            <div class="ss-sub">${low ? sourceText : '저가 데이터 없음'}</div>
+            <div class="ss-sub ${lowDelta.direction === 'up' ? 'up' : lowDelta.direction === 'down' ? 'down' : ''}">${low ? formatStripDeltaText(lowDelta) : '저가 데이터 없음'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">거래량</div>
@@ -910,6 +914,14 @@ function renderStockStrip(quote, chartPoint) {
             <div class="ss-sub">${volume ? sourceText : '거래량 데이터 없음'}</div>
         </div>
     `;
+}
+
+function formatStripDeltaText(delta) {
+    if (delta.change === null || delta.changePct === null) {
+        return '전일 대비 정보 없음';
+    }
+    const sign = delta.change > 0 ? '+' : '';
+    return `전일 대비 ${sign}${delta.change.toLocaleString()}원 (${sign}${delta.changePct.toFixed(2)}%)`;
 }
 
 function autoFillMetrics(summary, lastTrade) {

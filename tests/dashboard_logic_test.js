@@ -43,6 +43,16 @@ assert(quote.close === 186200, 'Quote close should parse numeric text');
 assert(quote.change === 7800, 'Quote change should parse numeric text');
 assert(quote.changePct === 4.37, 'Quote changePct should parse decimal text');
 
+const openDelta = InvestmentLogic.describePriceDelta(184200, 178400);
+assert(openDelta.change === 5800, 'Price delta helper should derive signed delta from the reference close');
+assert(Math.round(openDelta.changePct * 100) / 100 === 3.25, 'Price delta helper should derive signed percentage from the reference close');
+assert(openDelta.direction === 'up', 'Price delta helper should mark positive deltas as up');
+
+const lowDelta = InvestmentLogic.describePriceDelta(170500, 178400);
+assert(lowDelta.change === -7900, 'Price delta helper should preserve negative deltas');
+assert(Math.round(lowDelta.changePct * 100) / 100 === -4.43, 'Price delta helper should preserve negative percentage deltas');
+assert(lowDelta.direction === 'down', 'Price delta helper should mark negative deltas as down');
+
 const kiwoomQuote = InvestmentLogic.normalizeKiwoomQuote({
     stk_nm: '삼성전자',
     cur_prc: '171,200',
