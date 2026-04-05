@@ -1,6 +1,6 @@
-# 🧭 FinLit (Investment Navigator)
+# 🧭 Investment Navigator
 
-FinLit은 투자자의 건강한 가치투자 판단을 돕기 위해 `DART(전자공시시스템)`와 `Python yfinance (Yahoo Finance)`를 결합해 재무 분석, 가격 차트, 기술적 분석, AI 브리핑을 제공하는 웹 서비스입니다.
+Investment Navigator는 투자자의 건강한 가치투자 판단을 돕기 위해 `DART(전자공시시스템)`와 `Python yfinance (Yahoo Finance)`를 결합해 재무 분석, 가격 차트, 기술적 분석, AI 브리핑을 제공하는 웹 서비스입니다.
 
 현재 저장소에는 `Kiwoom REST API`와 `KRX Open API` 기반 레거시 코드가 일부 남아 있을 수 있습니다. 다만 앞으로의 기본 시세/차트 소스는 `Python yfinance`로 간주합니다.
 
