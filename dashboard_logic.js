@@ -63,6 +63,41 @@
         })
     });
 
+    const STATEMENT_ACCOUNT_ALIASES = Object.freeze({
+        revenue: Object.freeze(['매출액', '영업수익', '수익(매출액)', '보험영업수익']),
+        operatingIncome: Object.freeze(['영업이익', '영업손실']),
+        netIncome: Object.freeze(['당기순이익', '당기순손익', '분기순이익', '반기순이익', '연결당기순이익', '당기순이익(손실)']),
+        assets: Object.freeze(['자산총계']),
+        liabilities: Object.freeze(['부채총계']),
+        equity: Object.freeze(['자본총계']),
+        cash: Object.freeze(['현금및현금성자산', '현금성자산']),
+        currentAssets: Object.freeze(['유동자산']),
+        currentLiabilities: Object.freeze(['유동부채']),
+        inventory: Object.freeze(['재고자산']),
+        receivables: Object.freeze(['매출채권', '매출채권및기타채권', '매출채권 및 기타채권']),
+        financeCost: Object.freeze(['이자비용', '금융비용', '금융원가']),
+        operatingCashFlow: Object.freeze(['영업활동현금흐름', '영업활동으로인한현금흐름'])
+    });
+
+    const BALANCE_SHEET_KEYS = Object.freeze([
+        'assets',
+        'liabilities',
+        'equity',
+        'cash',
+        'currentAssets',
+        'currentLiabilities',
+        'inventory',
+        'receivables'
+    ]);
+
+    const FLOW_KEYS = Object.freeze([
+        'revenue',
+        'operatingIncome',
+        'netIncome',
+        'financeCost',
+        'operatingCashFlow'
+    ]);
+
     function parseNumberText(value) {
         if (value === null || value === undefined) return null;
         const normalized = String(value).replace(/,/g, '').trim();
@@ -73,6 +108,348 @@
 
     function parseFormattedNumber(value) {
         return parseNumberText(value) ?? 0;
+    }
+
+    function parseStatementAmount(value) {
+        if (value === null || value === undefined) return 0;
+        const normalized = String(value).replace(/,/g, '').trim();
+        if (!normalized || normalized === '-') return 0;
+        const negative = normalized.includes('(') && normalized.includes(')');
+        const numeric = Number(normalized.replace(/[()]/g, ''));
+        if (!Number.isFinite(numeric)) return 0;
+        return negative ? -numeric : numeric;
+    }
+
+    function normalizeAccountName(value) {
+        return String(value || '').replace(/\s+/g, '').replace(/[()]/g, '');
+    }
+
+    function getFsDiv(row) {
+        return String(row?.fs_div ?? row?.div_cd ?? '').trim().toUpperCase();
+    }
+
+    function getStatementSection(row) {
+        return String(row?.sj_div ?? '').trim().toUpperCase();
+    }
+
+    function getStatementName(row) {
+        return String(row?.sj_nm ?? '').trim();
+    }
+
+    function safeDivide(numerator, denominator) {
+        if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || !denominator) return null;
+        return numerator / denominator;
+    }
+
+    function findStatementAmount(list, aliases) {
+        const rows = Array.isArray(list) ? list : [];
+        const normalizedAliases = (aliases || []).map(normalizeAccountName);
+        const match = rows.find((item) => {
+            const accountName = normalizeAccountName(item?.account_nm || item?.accountName || '');
+            return normalizedAliases.some((alias) => accountName.includes(alias));
+        });
+        if (!match) return 0;
+        return parseStatementAmount(match.thstrm_amount ?? match.amount ?? match.value);
+    }
+
+    function selectPreferredFsRows(list) {
+        const rows = Array.isArray(list) ? list.filter(Boolean) : [];
+        const cfsRows = rows.filter((row) => getFsDiv(row) === 'CFS');
+        if (cfsRows.length) return cfsRows;
+
+        const ofsRows = rows.filter((row) => getFsDiv(row) === 'OFS');
+        if (ofsRows.length) return ofsRows;
+
+        return rows;
+    }
+
+    function filterStatementRowsByMetric(list, metricKey) {
+        const rows = selectPreferredFsRows(list);
+        const sectionPredicate = (() => {
+            if (metricKey === 'operatingCashFlow') {
+                return (row) => getStatementSection(row) === 'CF' || getStatementName(row).includes('현금흐름');
+            }
+            if (BALANCE_SHEET_KEYS.includes(metricKey)) {
+                return (row) => getStatementSection(row) === 'BS' || getStatementName(row).includes('재무상태표');
+            }
+            return (row) => ['IS', 'CIS'].includes(getStatementSection(row)) || /(손익계산서|포괄손익계산서)/.test(getStatementName(row));
+        })();
+
+        const filtered = rows.filter(sectionPredicate);
+        return filtered.length ? filtered : rows;
+    }
+
+    function summarizeStatement(list) {
+        const revenue = findStatementAmount(filterStatementRowsByMetric(list, 'revenue'), STATEMENT_ACCOUNT_ALIASES.revenue);
+        const operatingIncome = findStatementAmount(filterStatementRowsByMetric(list, 'operatingIncome'), STATEMENT_ACCOUNT_ALIASES.operatingIncome);
+        const netIncome = findStatementAmount(filterStatementRowsByMetric(list, 'netIncome'), STATEMENT_ACCOUNT_ALIASES.netIncome);
+        const assets = findStatementAmount(filterStatementRowsByMetric(list, 'assets'), STATEMENT_ACCOUNT_ALIASES.assets);
+        const liabilities = findStatementAmount(filterStatementRowsByMetric(list, 'liabilities'), STATEMENT_ACCOUNT_ALIASES.liabilities);
+        const equity = findStatementAmount(filterStatementRowsByMetric(list, 'equity'), STATEMENT_ACCOUNT_ALIASES.equity);
+        const cash = findStatementAmount(filterStatementRowsByMetric(list, 'cash'), STATEMENT_ACCOUNT_ALIASES.cash);
+        const currentAssets = findStatementAmount(filterStatementRowsByMetric(list, 'currentAssets'), STATEMENT_ACCOUNT_ALIASES.currentAssets);
+        const currentLiabilities = findStatementAmount(filterStatementRowsByMetric(list, 'currentLiabilities'), STATEMENT_ACCOUNT_ALIASES.currentLiabilities);
+        const inventory = findStatementAmount(filterStatementRowsByMetric(list, 'inventory'), STATEMENT_ACCOUNT_ALIASES.inventory);
+        const receivables = findStatementAmount(filterStatementRowsByMetric(list, 'receivables'), STATEMENT_ACCOUNT_ALIASES.receivables);
+        const financeCost = findStatementAmount(filterStatementRowsByMetric(list, 'financeCost'), STATEMENT_ACCOUNT_ALIASES.financeCost);
+        const operatingCashFlow = findStatementAmount(filterStatementRowsByMetric(list, 'operatingCashFlow'), STATEMENT_ACCOUNT_ALIASES.operatingCashFlow);
+
+        const operatingMargin = percentage(operatingIncome, revenue);
+        const netMargin = percentage(netIncome, revenue);
+        const debtRatio = percentage(liabilities, equity);
+        const roe = percentage(netIncome, equity);
+        const roa = percentage(netIncome, assets);
+        const assetTurnover = safeDivide(revenue, assets);
+        const currentRatio = percentage(currentAssets, currentLiabilities);
+        const inventoryTurnover = safeDivide(revenue, inventory);
+        const receivableTurnover = safeDivide(revenue, receivables);
+        const interestCoverage = financeCost ? safeDivide(operatingIncome, Math.abs(financeCost)) : null;
+
+        return {
+            revenue,
+            operatingIncome,
+            netIncome,
+            assets,
+            liabilities,
+            equity,
+            cash,
+            currentAssets,
+            currentLiabilities,
+            inventory,
+            receivables,
+            financeCost,
+            operatingCashFlow,
+            operatingMargin,
+            netMargin,
+            debtRatio,
+            roe,
+            roa,
+            assetTurnover,
+            currentRatio,
+            inventoryTurnover,
+            receivableTurnover,
+            interestCoverage
+        };
+    }
+
+    function recomputeSummaryRatios(summary) {
+        const source = summary || {};
+        const revenue = parseNumberText(source.revenue) ?? 0;
+        const operatingIncome = parseNumberText(source.operatingIncome) ?? 0;
+        const netIncome = parseNumberText(source.netIncome) ?? 0;
+        const assets = parseNumberText(source.assets) ?? 0;
+        const liabilities = parseNumberText(source.liabilities) ?? 0;
+        const equity = parseNumberText(source.equity) ?? 0;
+        const currentAssets = parseNumberText(source.currentAssets) ?? 0;
+        const currentLiabilities = parseNumberText(source.currentLiabilities) ?? 0;
+        const inventory = parseNumberText(source.inventory) ?? 0;
+        const receivables = parseNumberText(source.receivables) ?? 0;
+        const financeCost = parseNumberText(source.financeCost) ?? 0;
+
+        return {
+            ...source,
+            operatingMargin: percentage(operatingIncome, revenue),
+            netMargin: percentage(netIncome, revenue),
+            debtRatio: percentage(liabilities, equity),
+            roe: percentage(netIncome, equity),
+            roa: percentage(netIncome, assets),
+            assetTurnover: safeDivide(revenue, assets),
+            currentRatio: percentage(currentAssets, currentLiabilities),
+            inventoryTurnover: safeDivide(revenue, inventory),
+            receivableTurnover: safeDivide(revenue, receivables),
+            interestCoverage: financeCost ? safeDivide(operatingIncome, Math.abs(financeCost)) : null
+        };
+    }
+
+    function createSyntheticQuarterSummary(baseSummary, overrides) {
+        return recomputeSummaryRatios({
+            ...(baseSummary || {}),
+            ...(overrides || {})
+        });
+    }
+
+    function subtractQuarterValues(currentSummary, previousSummary, balanceSheetBaseSummary) {
+        const base = balanceSheetBaseSummary || currentSummary || {};
+        const overrides = {};
+        FLOW_KEYS.forEach((key) => {
+            const currentValue = parseNumberText(currentSummary?.[key]);
+            if (!Number.isFinite(currentValue)) return;
+            const previousValue = parseNumberText(previousSummary?.[key]) ?? 0;
+            overrides[key] = currentValue - previousValue;
+        });
+        return createSyntheticQuarterSummary(base, overrides);
+    }
+
+    function sumQuarterField(periods, key) {
+        return (periods || []).reduce((sum, period) => sum + (parseNumberText(period?.summary?.[key]) ?? 0), 0);
+    }
+
+    function normalizeQuarterlySummaries(rawQuarterPeriods, annualSummary) {
+        const q1 = rawQuarterPeriods.find((period) => period.period === 'Q1');
+        const q2 = rawQuarterPeriods.find((period) => period.period === 'Q2');
+        const q3 = rawQuarterPeriods.find((period) => period.period === 'Q3');
+        const available = [q1, q2, q3].filter(Boolean);
+
+        const annualRevenue = parseNumberText(annualSummary?.revenue) ?? 0;
+        const rawRevenueSum = sumQuarterField(available, 'revenue');
+        const cumulativeLabelDetected = available.some((period) => {
+            const label = String(period?.label || '').trim();
+            const reportLabel = String(period?.list?.[0]?.thstrm_nm || '').trim();
+            return /누적/.test(label) || /누적/.test(reportLabel);
+        });
+        const usesCumulativeMode = cumulativeLabelDetected || (annualRevenue > 0 && rawRevenueSum > annualRevenue * 1.05);
+
+        const normalized = [];
+        if (q1) {
+            normalized.push({ ...q1, summary: q1.summary });
+        }
+        if (q2) {
+            normalized.push({
+                ...q2,
+                summary: usesCumulativeMode && q1
+                    ? subtractQuarterValues(q2.summary, q1.summary, q2.summary)
+                    : q2.summary
+            });
+        }
+        if (q3) {
+            normalized.push({
+                ...q3,
+                summary: usesCumulativeMode && q2
+                    ? subtractQuarterValues(q3.summary, q2.summary, q3.summary)
+                    : q3.summary
+            });
+        }
+
+        return {
+            periods: normalized,
+            usesCumulativeMode
+        };
+    }
+
+    function buildDartAnnualPeriods(rawPeriods, limit = 3) {
+        return (Array.isArray(rawPeriods) ? rawPeriods : [])
+            .filter((period) => String(period?.reportCode || '').trim() === '11011' || period?.period === 'ANNUAL')
+            .map((period) => ({
+                ...period,
+                period: 'ANNUAL',
+                summary: period.summary || summarizeStatement(period.list)
+            }))
+            .sort((left, right) => (right.year || 0) - (left.year || 0))
+            .slice(0, limit);
+    }
+
+    function buildDartQuarterlyPeriods(rawPeriods) {
+        const grouped = new Map();
+        (Array.isArray(rawPeriods) ? rawPeriods : []).forEach((period) => {
+            if (!period || !period.year) return;
+            const prepared = {
+                ...period,
+                summary: period.summary || summarizeStatement(period.list)
+            };
+            if (!grouped.has(prepared.year)) {
+                grouped.set(prepared.year, []);
+            }
+            grouped.get(prepared.year).push(prepared);
+        });
+
+        const timeline = [];
+        Array.from(grouped.keys()).sort((left, right) => right - left).forEach((year) => {
+            const periods = grouped.get(year) || [];
+            const annualPeriod = periods.find((item) => String(item.reportCode || '').trim() === '11011' || item.period === 'Q4' || item.period === 'ANNUAL');
+            const rawQuarterPeriods = periods
+                .filter((item) => ['Q1', 'Q2', 'Q3'].includes(String(item.period || '')))
+                .sort((left, right) => (left.rank || 0) - (right.rank || 0));
+
+            const normalizedQuarterPack = normalizeQuarterlySummaries(rawQuarterPeriods, annualPeriod?.summary || null);
+            timeline.push(...normalizedQuarterPack.periods);
+
+            if (annualPeriod && normalizedQuarterPack.periods.length) {
+                const q4Summary = normalizedQuarterPack.usesCumulativeMode
+                    ? subtractQuarterValues(annualPeriod.summary, rawQuarterPeriods.find((item) => item.period === 'Q3')?.summary || null, annualPeriod.summary)
+                    : createSyntheticQuarterSummary(annualPeriod.summary, {
+                        revenue: (parseNumberText(annualPeriod.summary?.revenue) ?? 0) - sumQuarterField(normalizedQuarterPack.periods, 'revenue'),
+                        operatingIncome: (parseNumberText(annualPeriod.summary?.operatingIncome) ?? 0) - sumQuarterField(normalizedQuarterPack.periods, 'operatingIncome'),
+                        netIncome: (parseNumberText(annualPeriod.summary?.netIncome) ?? 0) - sumQuarterField(normalizedQuarterPack.periods, 'netIncome')
+                    });
+
+                timeline.push({
+                    ...annualPeriod,
+                    label: `${year} 4분기`,
+                    period: 'Q4',
+                    rank: 4,
+                    sortKey: year * 10 + 4,
+                    isAnnual: false,
+                    derived: true,
+                    summary: q4Summary
+                });
+            }
+        });
+
+        return sortPeriods(timeline.map((period) => ({
+            ...period,
+            sortKey: period.sortKey || ((period.year || 0) * 10 + (period.rank || 0))
+        })));
+    }
+
+    function mean(values) {
+        const numbers = (values || []).filter((value) => Number.isFinite(value));
+        if (!numbers.length) return null;
+        return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+    }
+
+    function stdDev(values, average) {
+        const numbers = (values || []).filter((value) => Number.isFinite(value));
+        if (numbers.length < 2 || !Number.isFinite(average)) return null;
+        const variance = numbers.reduce((sum, value) => sum + ((value - average) ** 2), 0) / numbers.length;
+        return variance > 0 ? Math.sqrt(variance) : null;
+    }
+
+    function zScore(value, values) {
+        if (!Number.isFinite(value)) return null;
+        const average = mean(values);
+        const deviation = stdDev(values, average);
+        if (!Number.isFinite(average) || !Number.isFinite(deviation) || deviation === 0) return null;
+        return (value - average) / deviation;
+    }
+
+    function detectAnomalies(currentSummary, pastSummariesArray) {
+        if (!currentSummary || typeof currentSummary !== 'object') return [];
+
+        const pastSummaries = (Array.isArray(pastSummariesArray) ? pastSummariesArray : [])
+            .filter((item) => item && typeof item === 'object');
+        const warnings = [];
+
+        const currentNetIncome = parseNumberText(currentSummary.netIncome);
+        const currentOperatingCashFlow = parseNumberText(currentSummary.operatingCashFlow);
+        const positiveNetIncome = Number.isFinite(currentNetIncome) && currentNetIncome > 0;
+
+        if (positiveNetIncome && Number.isFinite(currentOperatingCashFlow) && currentOperatingCashFlow < 0) {
+            warnings.push('흑자부도 위험: 순이익은 흑자이지만 영업활동현금흐름이 적자입니다. 이익의 현금화가 약합니다.');
+        }
+
+        const currentCashConversion = positiveNetIncome
+            ? safeDivide(currentOperatingCashFlow, currentNetIncome)
+            : null;
+        const pastCashConversions = pastSummaries
+            .filter((item) => Number.isFinite(item.netIncome) && item.netIncome > 0)
+            .map((item) => safeDivide(item.operatingCashFlow, item.netIncome))
+            .filter((value) => Number.isFinite(value));
+        const cashConversionZ = zScore(currentCashConversion, pastCashConversions);
+        if (cashConversionZ !== null && cashConversionZ < -1.5) {
+            warnings.push('흑자부도 위험: 영업현금흐름/순이익 비율이 과거 대비 급락했습니다. 이익의 질 저하를 점검해야 합니다.');
+        }
+
+        const inventoryTurnoverZ = zScore(parseNumberText(currentSummary.inventoryTurnover), pastSummaries.map((item) => item.inventoryTurnover));
+        if (inventoryTurnoverZ !== null && inventoryTurnoverZ < -1.5) {
+            warnings.push('악성 재고 위험: 재고자산회전율이 과거 평균 대비 급락했습니다. 재고 누적 가능성을 점검해야 합니다.');
+        }
+
+        const receivableTurnoverZ = zScore(parseNumberText(currentSummary.receivableTurnover), pastSummaries.map((item) => item.receivableTurnover));
+        if (receivableTurnoverZ !== null && receivableTurnoverZ < -1.5) {
+            warnings.push('가짜 매출 위험: 매출채권회전율이 과거 평균 대비 급락했습니다. 매출 인식과 회수 지연 여부를 점검해야 합니다.');
+        }
+
+        return warnings;
     }
 
     function formatWonInputValue(value) {
@@ -955,10 +1332,13 @@
         aggregateChartPoints,
         buildBusinessDateTokens,
         buildCompanyDirectory,
+        buildDartAnnualPeriods,
+        buildDartQuarterlyPeriods,
         buildYahooSymbol,
         chartBucketKey,
         clearKakaoSessionState,
         describePriceDelta,
+        detectAnomalies,
         extractKakaoProfile,
         generateAnchoredSyntheticChart,
         groupReportsBySection,
@@ -989,6 +1369,7 @@
         resolveKakaoRedirectUri,
         resolveKakaoReturnUrl,
         sortPeriods,
+        summarizeStatement,
         pickTrailingCompanyMatch,
         zoomChartWindow
     };

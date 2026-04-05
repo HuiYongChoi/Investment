@@ -64,21 +64,6 @@ const COMPANY_MAP = {
 
 const FALLBACK_COMPANY_DIRECTORY = InvestmentLogic.buildCompanyDirectory(COMPANY_MAP);
 
-const ACCOUNT_ALIASES = {
-    revenue: ['매출액', '영업수익', '수익(매출액)', '보험영업수익'],
-    operatingIncome: ['영업이익', '영업손실'],
-    netIncome: ['당기순이익', '당기순손익', '분기순이익', '반기순이익', '연결당기순이익', '당기순이익(손실)'],
-    assets: ['자산총계'],
-    liabilities: ['부채총계'],
-    equity: ['자본총계'],
-    cash: ['현금및현금성자산', '현금성자산'],
-    currentAssets: ['유동자산'],
-    currentLiabilities: ['유동부채'],
-    inventory: ['재고자산'],
-    receivables: ['매출채권', '매출채권및기타채권', '매출채권 및 기타채권'],
-    financeCost: ['이자비용', '금융비용', '금융원가']
-};
-
 const state = {
     company: null,
     annuals: [],
@@ -115,7 +100,7 @@ const state = {
     briefingMode: 'idle',
     mobileTab: 'home',
     mobileContentTab: 'chart',
-    lastAnalysis: { fin: {}, scores: {}, totalPct: 0, metrics: {} },
+    lastAnalysis: { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] },
     selectedIndicators: new Set(['RSI', 'MACD', 'STOCH', 'BOLL', 'MA']),
     analysisToken: 0
 };
@@ -321,6 +306,66 @@ function setSourceBadge(id, text, tone = 'neutral') {
     if (tone === 'success') el.classList.add('good');
     if (tone === 'error') el.classList.add('bad');
     if (tone === 'warn') el.classList.add('warn');
+}
+
+function renderCompanyHeading(name, anomalies = []) {
+    const heading = document.getElementById('company-name');
+    if (!heading) return;
+
+    heading.replaceChildren(document.createTextNode(name || '-'));
+
+    if (!Array.isArray(anomalies) || !anomalies.length) {
+        return;
+    }
+
+    const icon = document.createElement('span');
+    icon.className = 'anomaly-warning-icon';
+    icon.tabIndex = 0;
+    icon.setAttribute('role', 'img');
+    icon.setAttribute('aria-label', '재무 법의학 경고');
+
+    const symbol = document.createElement('span');
+    symbol.className = 'anomaly-warning-symbol';
+    symbol.setAttribute('aria-hidden', 'true');
+    symbol.textContent = '⚠️';
+    icon.appendChild(symbol);
+
+    const tooltip = document.createElement('div');
+    tooltip.className = 'anomaly-tooltip';
+
+    const title = document.createElement('div');
+    title.className = 'anomaly-tooltip-title';
+    title.textContent = '재무 법의학 Red Flags';
+    tooltip.appendChild(title);
+
+    const list = document.createElement('ul');
+    list.className = 'anomaly-tooltip-list';
+    anomalies.forEach((message) => {
+        const text = String(message || '').trim();
+        if (!text) return;
+        const item = document.createElement('li');
+        item.textContent = text;
+        list.appendChild(item);
+    });
+    tooltip.appendChild(list);
+    icon.appendChild(tooltip);
+    heading.appendChild(icon);
+}
+
+function applySummaryAnomalies() {
+    const currentSummary = state.summaries[0]?.summary || null;
+    const pastSummaries = state.summaries.slice(1)
+        .map((item) => item.summary)
+        .filter(Boolean);
+    const anomalies = currentSummary
+        ? InvestmentLogic.detectAnomalies(currentSummary, pastSummaries)
+        : [];
+
+    state.lastAnalysis.anomalies = anomalies;
+    if (currentSummary) {
+        currentSummary.anomalies = anomalies;
+    }
+    renderCompanyHeading(state.company?.name || '-', anomalies);
 }
 
 function startClock() {
@@ -824,13 +869,14 @@ async function startSearch() {
     state.ratings = null;
     state.metrics = null;
     state.summaries = [];
+    state.lastAnalysis = { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] };
     priceHoverIndex = null;
     setStatus(`${company.name} 분석을 시작합니다. DART, Yahoo Finance 시세와 다중 기간 차트를 동기화하는 중입니다.`);
     setSourceBadge('source-dart', 'DART 동기화 중');
     setSourceBadge('source-market', 'Yahoo Finance 동기화 중');
     setSourceBadge('source-gemini', 'Gemini 대기 중');
 
-    document.getElementById('company-name').textContent = company.name;
+    renderCompanyHeading(company.name, []);
     document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 Yahoo Finance (yfinance Python) 일·주·월·연/YTD 가격 흐름을 분석합니다.`;
     document.getElementById('dart-link').href = buildDartCompanySearchUrl(company);
     document.getElementById('dashboard').classList.remove('hidden');
@@ -910,8 +956,9 @@ async function startSearch() {
             state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
             state.summaries = state.annuals.map((item) => ({
                 ...item,
-                summary: summarizeStatement(item.list)
+                summary: item.summary || summarizeStatement(item.list)
             }));
+            applySummaryAnomalies();
             renderFinancialTable('fin-annual-table', state.annuals);
             renderFinancialTable('fin-quarterly-table', state.quarterlies);
             const valuationSnapshot = state.quote || latestChartPoint || null;
@@ -923,6 +970,7 @@ async function startSearch() {
             state.annuals = [];
             state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
             state.summaries = [];
+            applySummaryAnomalies();
             renderFinancialTable('fin-annual-table', []);
             renderFinancialTable('fin-quarterly-table', state.quarterlies);
             setSourceBadge('source-dart', 'DART 재무제표를 불러오지 못했습니다.', 'error');
@@ -1171,41 +1219,37 @@ function writeChartCache(stockCode, daily, weekly) {
 
 async function fetchMultiYearDart(corpCode) {
     const currentYear = getCurrentYearKst();
-    const years = [currentYear, currentYear - 1, currentYear - 2];
     const results = [];
 
-    for (const year of years) {
-        const candidates = [
-            { code: '11011', label: `${year} 사업보고서`, period: 'ANNUAL' },
-            { code: '11014', label: `${year} 3분기`, period: 'Q3' },
-            { code: '11012', label: `${year} 반기`, period: 'Q2' },
-            { code: '11013', label: `${year} 1분기`, period: 'Q1' }
-        ];
-
-        let found = null;
-        for (const candidate of candidates) {
-            try {
-                const data = await fetchJson(buildProxyUrl('dart', '/fnlttSinglAcnt.json', {
-                    corp_code: corpCode,
-                    bsns_year: year,
-                    reprt_code: candidate.code
-                }));
-                if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
-                    found = { year, label: candidate.label, period: candidate.period, list: data.list };
-                    break;
-                }
-            } catch (error) {
-                continue;
+    for (let year = currentYear - 1; year >= currentYear - 5 && results.length < 3; year -= 1) {
+        try {
+            const data = await fetchJson(buildProxyUrl('dart', '/fnlttSinglAcnt.json', {
+                corp_code: corpCode,
+                bsns_year: year,
+                reprt_code: '11011'
+            }));
+            if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
+                results.push({
+                    year,
+                    label: `${year} 사업보고서`,
+                    period: 'ANNUAL',
+                    reportCode: '11011',
+                    rank: 4,
+                    annual: true,
+                    list: data.list
+                });
             }
+        } catch (error) {
+            continue;
         }
-        if (found) results.push(found);
     }
-    return results;
+
+    return InvestmentLogic.buildDartAnnualPeriods(results, 3);
 }
 
 async function fetchQuarterlyHistory(corpCode) {
     const currentYear = getCurrentYearKst();
-    const results = [];
+    const rawPeriods = [];
     const reportCodes = InvestmentLogic.getQuarterlyReportConfigs();
 
     for (let year = currentYear; year >= currentYear - 2; year -= 1) {
@@ -1217,12 +1261,15 @@ async function fetchQuarterlyHistory(corpCode) {
                     reprt_code: report.code
                 }));
                 if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
-                    results.push({
+                    rawPeriods.push({
                         year,
                         label: `${year} ${report.annual ? '4분기(사업보고서)' : report.label}`,
                         period: `Q${report.rank}`,
                         sortKey: year * 10 + report.rank,
+                        rank: report.rank,
+                        reportCode: report.code,
                         isAnnual: Boolean(report.annual),
+                        annual: Boolean(report.annual),
                         list: data.list
                     });
                 }
@@ -1232,7 +1279,7 @@ async function fetchQuarterlyHistory(corpCode) {
         }
     }
 
-    return InvestmentLogic.sortPeriods(results);
+    return InvestmentLogic.buildDartQuarterlyPeriods(rawPeriods);
 }
 
 async function fetchDartReportList(corpCode) {
@@ -1353,83 +1400,12 @@ function buildDartCompanySearchUrl(company) {
 function buildFinancialRows(periods) {
     return periods.map((period) => ({
         ...period,
-        summary: summarizeStatement(period.list)
+        summary: period.summary || summarizeStatement(period.list)
     }));
 }
 
 function summarizeStatement(list) {
-    const revenue = findAmount(list, ACCOUNT_ALIASES.revenue);
-    const operatingIncome = findAmount(list, ACCOUNT_ALIASES.operatingIncome);
-    const netIncome = findAmount(list, ACCOUNT_ALIASES.netIncome);
-    const assets = findAmount(list, ACCOUNT_ALIASES.assets);
-    const liabilities = findAmount(list, ACCOUNT_ALIASES.liabilities);
-    const equity = findAmount(list, ACCOUNT_ALIASES.equity);
-    const cash = findAmount(list, ACCOUNT_ALIASES.cash);
-    const currentAssets = findAmount(list, ACCOUNT_ALIASES.currentAssets);
-    const currentLiabilities = findAmount(list, ACCOUNT_ALIASES.currentLiabilities);
-    const inventory = findAmount(list, ACCOUNT_ALIASES.inventory);
-    const receivables = findAmount(list, ACCOUNT_ALIASES.receivables);
-    const financeCost = findAmount(list, ACCOUNT_ALIASES.financeCost);
-
-    const operatingMargin = percentage(operatingIncome, revenue);
-    const netMargin = percentage(netIncome, revenue);
-    const debtRatio = percentage(liabilities, equity);
-    const roe = percentage(netIncome, equity);
-    const roa = percentage(netIncome, assets);
-    const assetTurnover = safeDivide(revenue, assets);
-    const currentRatio = percentage(currentAssets, currentLiabilities);
-    const inventoryTurnover = safeDivide(revenue, inventory);
-    const receivableTurnover = safeDivide(revenue, receivables);
-    const interestCoverage = financeCost ? safeDivide(operatingIncome, Math.abs(financeCost)) : null;
-
-    return {
-        revenue,
-        operatingIncome,
-        netIncome,
-        assets,
-        liabilities,
-        equity,
-        cash,
-        currentAssets,
-        currentLiabilities,
-        inventory,
-        receivables,
-        financeCost,
-        operatingMargin,
-        netMargin,
-        debtRatio,
-        roe,
-        roa,
-        assetTurnover,
-        currentRatio,
-        inventoryTurnover,
-        receivableTurnover,
-        interestCoverage
-    };
-}
-
-function findAmount(list, aliases) {
-    const normalizedAliases = aliases.map(normalizeAccountName);
-    const match = list.find((item) => {
-        const name = normalizeAccountName(item.account_nm || '');
-        return normalizedAliases.some((alias) => name.includes(alias));
-    });
-    if (!match) return 0;
-    return parseAmount(match.thstrm_amount);
-}
-
-function parseAmount(rawValue) {
-    if (rawValue === null || rawValue === undefined) return 0;
-    const value = String(rawValue).replace(/,/g, '').trim();
-    if (!value || value === '-') return 0;
-    const negative = value.includes('(') && value.includes(')');
-    const numeric = Number(value.replace(/[()]/g, ''));
-    if (Number.isNaN(numeric)) return 0;
-    return negative ? -numeric : numeric;
-}
-
-function normalizeAccountName(value) {
-    return String(value).replace(/\s+/g, '').replace(/[()]/g, '');
+    return InvestmentLogic.summarizeStatement(list);
 }
 
 function renderReports(reports) {
@@ -1916,8 +1892,12 @@ function buildRatings() {
     if (!current) return;
 
     const comparableQuarterlies = state.quarterlies.filter((item) => !item.isAnnual);
-    const latestQuarter = comparableQuarterlies[0] ? summarizeStatement(comparableQuarterlies[0].list) : null;
-    const previousQuarter = comparableQuarterlies[1] ? summarizeStatement(comparableQuarterlies[1].list) : null;
+    const latestQuarter = comparableQuarterlies[0]
+        ? (comparableQuarterlies[0].summary || summarizeStatement(comparableQuarterlies[0].list))
+        : null;
+    const previousQuarter = comparableQuarterlies[1]
+        ? (comparableQuarterlies[1].summary || summarizeStatement(comparableQuarterlies[1].list))
+        : null;
 
     const revenueGrowth = computeGrowth(current.revenue, previous?.revenue);
     const opGrowth = computeGrowth(current.operatingIncome, previous?.operatingIncome);
