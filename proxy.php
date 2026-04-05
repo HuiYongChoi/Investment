@@ -21,7 +21,7 @@ const NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock';
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 const KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token';
 const KIWOOM_BASE = 'https://api.kiwoom.com';
-const KIWOOM_TOKEN_FILE = sys_get_temp_dir() . '/kiwoom_token_cache.json';
+define('KIWOOM_TOKEN_FILE', sys_get_temp_dir() . '/kiwoom_token_cache.json');
 
 function json_response(int $status, array $payload): void
 {
@@ -129,12 +129,12 @@ function kakao_rest_key(): string
 
 function kiwoom_appkey(): string
 {
-    return get_secret('KIWOOM_APPKEY', 'kiwoom_appkey', aws_next_value('키움 AppKey'));
+    return get_secret('KIWOOM_APPKEY', 'kiwoom_appkey', aws_next_value('키움증권 AppKey'));
 }
 
 function kiwoom_secretkey(): string
 {
-    return get_secret('KIWOOM_SECRETKEY', 'kiwoom_secretkey', aws_next_value('키움 SecretKey'));
+    return get_secret('KIWOOM_SECRETKEY', 'kiwoom_secretkey', aws_next_value('키움증권 AppSecret'));
 }
 
 function kiwoom_token(): string

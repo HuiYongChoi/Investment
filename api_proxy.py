@@ -57,8 +57,8 @@ DART_KEY = env_or_aws("DART_API_KEY", next_label="DART 오픈 API")
 KRX_KEY = env_or_aws("KRX_AUTH_KEY", next_label="KRX Open API")
 GEMINI_KEY = env_or_aws("GEMINI_API_KEY", next_label="Gemini API KEY")
 KAKAO_REST_KEY = env_or_aws("KAKAO_REST_API_KEY", inline_prefix="Rest API:")
-KIWOOM_APPKEY = env_or_aws("KIWOOM_APPKEY", next_label="키움 AppKey")
-KIWOOM_SECRETKEY = env_or_aws("KIWOOM_SECRETKEY", next_label="키움 SecretKey")
+KIWOOM_APPKEY = env_or_aws("KIWOOM_APPKEY", next_label="키움증권 AppKey")
+KIWOOM_SECRETKEY = env_or_aws("KIWOOM_SECRETKEY", next_label="키움증권 AppSecret")
 KIWOOM_BASE = "https://api.kiwoom.com"
 
 import tempfile
