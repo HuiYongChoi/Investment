@@ -2,7 +2,7 @@ const isLocal = location.hostname === 'localhost' || location.hostname === '127.
 const LOCAL_PROXY = 'http://localhost:8081';
 const PROD_PROXY = '/proxy.php';
 const KAKAO_JS_KEY = '88cd449d612399a0219090bbcfc20b24';
-const KAKAO_REDIRECT_URI = new URL('/auth/kakao/callback', window.location.origin).toString();
+const KAKAO_REDIRECT_URI = 'https://hyfin.duckdns.org/auth/kakao/callback';
 const XP_MAX = 100;
 
 const COMPANY_MAP = {
@@ -36,15 +36,6 @@ const COMPANY_MAP = {
     '삼성SDI': { corpCode: '00126362', stockCode: '006400', market: 'KOSPI' }
 };
 
-const BASE_PRICE_HINTS = {
-    '005930': 186200,
-    '000660': 215000,
-    '035420': 205000,
-    '035720': 58000,
-    '005380': 255000,
-    '207940': 1120000
-};
-
 const COMPANY_DIRECTORY = InvestmentLogic.buildCompanyDirectory(COMPANY_MAP);
 
 const ACCOUNT_ALIASES = {
@@ -67,8 +58,10 @@ const state = {
     annuals: [],
     quarterlies: [],
     reports: [],
-    publicQuote: null,
+    quote: null,
+    quoteSource: 'idle',
     chartDaily: [],
+    chartWeekly: [],
     chartVisible: [],
     chartRange: '1M',
     chartSource: 'idle',
@@ -368,22 +361,28 @@ async function startSearch() {
     hideCompanySuggestions();
     state.company = company;
     state.chartRange = '1M';
-    setStatus(`${company.name} 분석을 시작합니다. DART, KRX, 공시 리포트를 동기화하는 중입니다.`);
+    setStatus(`${company.name} 분석을 시작합니다. DART, 키움 시세, 공시 리포트를 동기화하는 중입니다.`);
     setSourceBadge('source-dart', 'DART 동기화 중');
-    setSourceBadge('source-krx', 'KRX 동기화 중');
+    setSourceBadge('source-krx', '키움 시세 동기화 중');
     setSourceBadge('source-gemini', 'Gemini 대기 중');
 
     document.getElementById('company-name').textContent = company.name;
-    document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 2026년 YTD 차트를 분석합니다.`;
+    document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 키움 REST 일봉/주봉 차트를 분석합니다.`;
     document.getElementById('dart-link').href = `https://dart.fss.or.kr/dsaf001/main.do?corpCode=${company.corpCode}`;
     document.getElementById('dashboard').classList.remove('hidden');
+    document.getElementById('stock-realtime').classList.add('hidden');
+    document.getElementById('stock-realtime').innerHTML = '';
 
     try {
-        const [annualsResult, quarterliesResult, reportsResult, chartResult, quoteResult] = await Promise.allSettled([
+        const startDate = `${getCurrentYearKst()}0101`;
+        const endDate = getCurrentDateTokenKst();
+        const [annualsResult, quarterliesResult, reportsResult, dailyChartResult, weeklyChartResult, quoteResult, publicQuoteResult] = await Promise.allSettled([
             fetchMultiYearDart(company.corpCode),
             fetchQuarterlyHistory(company.corpCode),
             fetchDartReportList(company.corpCode),
-            fetchKrxChart(company.stockCode, company.market),
+            fetchKiwoomChart(company.stockCode, 'daily', startDate, endDate),
+            fetchKiwoomChart(company.stockCode, 'weekly', startDate, endDate),
+            fetchKiwoomQuote(company.stockCode),
             fetchPublicQuote(company.stockCode)
         ]);
 
@@ -394,24 +393,52 @@ async function startSearch() {
         state.annuals = annualsResult.value;
         state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
         state.reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
-        state.publicQuote = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
+        const kiwoomQuotePayload = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
+        const publicQuote = publicQuoteResult.status === 'fulfilled' ? publicQuoteResult.value : null;
+        state.quote = kiwoomQuotePayload?.live
+            ? InvestmentLogic.normalizeKiwoomQuote(kiwoomQuotePayload, kiwoomQuotePayload.fetched_at || '')
+            : publicQuote;
+        state.quoteSource = kiwoomQuotePayload?.live ? 'kiwoom_rest' : publicQuote ? 'naver_public_quote' : 'unavailable';
 
-        const chartPayload = chartResult.status === 'fulfilled' ? chartResult.value : { live: false, points: [], error: 'KRX 차트 요청 실패' };
-        const livePoints = Array.isArray(chartPayload.points) ? chartPayload.points : [];
-        if (chartPayload.live && livePoints.length) {
-            state.chartDaily = livePoints;
-            state.chartSource = 'live';
-            setSourceBadge('source-krx', 'KRX Open API 연동됨', 'success');
+        const dailyChartPayload = dailyChartResult.status === 'fulfilled'
+            ? dailyChartResult.value
+            : { live: false, rows: [], error: '키움 일봉 차트 요청 실패', date_key: 'dt', time_key: '' };
+        const weeklyChartPayload = weeklyChartResult.status === 'fulfilled'
+            ? weeklyChartResult.value
+            : { live: false, rows: [], error: '키움 주봉 차트 요청 실패', date_key: 'dt', time_key: '' };
+
+        const dailyPoints = dailyChartPayload.live
+            ? InvestmentLogic.normalizeKiwoomChartRows(dailyChartPayload.rows, {
+                dateKey: dailyChartPayload.date_key || 'dt',
+                timeKey: dailyChartPayload.time_key || '',
+                startDate
+            })
+            : [];
+        const weeklyPoints = weeklyChartPayload.live
+            ? InvestmentLogic.normalizeKiwoomChartRows(weeklyChartPayload.rows, {
+                dateKey: weeklyChartPayload.date_key || 'dt',
+                timeKey: weeklyChartPayload.time_key || '',
+                startDate
+            })
+            : [];
+        const cachedChart = readChartCache(company.stockCode);
+
+        if (dailyPoints.length) {
+            state.chartDaily = dailyPoints;
+            state.chartWeekly = weeklyPoints.length ? weeklyPoints : aggregateCandles(dailyPoints, 'week');
+            state.chartSource = 'kiwoom_rest';
+            writeChartCache(company.stockCode, state.chartDaily, state.chartWeekly);
+            setSourceBadge('source-krx', '키움 REST 시세 연동됨', 'success');
+        } else if (cachedChart) {
+            state.chartDaily = cachedChart.daily;
+            state.chartWeekly = cachedChart.weekly.length ? cachedChart.weekly : aggregateCandles(cachedChart.daily, 'week');
+            state.chartSource = 'cache';
+            setSourceBadge('source-krx', '키움 실패 · 저장된 마지막 차트 사용', 'warn');
         } else {
-            state.chartDaily = generateSyntheticChart(company.stockCode, state.publicQuote);
-            state.chartSource = state.publicQuote?.close ? 'public_quote' : 'synthetic';
-            setSourceBadge(
-                'source-krx',
-                chartPayload.error
-                    ? `KRX 제한: ${chartPayload.error}${state.publicQuote?.close ? ' · 공개 시세 보정 차트 사용' : ''}`
-                    : (state.publicQuote?.close ? '공개 시세 보정 차트 사용' : 'KRX 대체 차트 사용'),
-                'warn'
-            );
+            state.chartDaily = [];
+            state.chartWeekly = [];
+            state.chartSource = 'unavailable';
+            setSourceBadge('source-krx', dailyChartPayload.error || weeklyChartPayload.error || '키움 차트를 불러오지 못했습니다.', 'error');
         }
 
         state.summaries = state.annuals.map((item) => ({
@@ -423,20 +450,21 @@ async function startSearch() {
         renderFinancialTable('fin-annual-table', state.annuals);
         renderFinancialTable('fin-quarterly-table', state.quarterlies);
 
-        const latestQuote = state.chartDaily[state.chartDaily.length - 1];
-        autoFillMetrics(state.summaries[0]?.summary || {}, latestQuote);
+        const latestChartPoint = state.chartDaily[state.chartDaily.length - 1] || null;
+        const valuationSnapshot = latestChartPoint || state.quote || null;
+        autoFillMetrics(state.summaries[0]?.summary || {}, valuationSnapshot);
         calcMetrics();
-        renderStockStrip(latestQuote);
+        renderStockStrip(state.quote, latestChartPoint);
         buildRatings();
         refreshTechnicals();
         renderCharts();
 
         setSourceBadge('source-dart', 'DART 공시 연동됨', 'success');
-        document.getElementById('chart-status').textContent = state.chartSource === 'live'
-            ? 'KRX 시세 기반 차트'
-            : state.chartSource === 'public_quote'
-                ? 'KRX 인증 이슈로 공개 종가에 맞춘 대체 2026 차트를 표시 중입니다.'
-                : 'KRX 인증 이슈로 대체 YTD 차트를 표시 중입니다.';
+        document.getElementById('chart-status').textContent = state.chartSource === 'kiwoom_rest'
+            ? '키움 REST 일봉/주봉 차트'
+            : state.chartSource === 'cache'
+                ? '키움 응답 지연으로 저장된 마지막 차트를 표시 중입니다.'
+                : '키움 차트가 연결되지 않아 가격 차트를 표시하지 못하고 있습니다.';
         addXP(18);
 
         await generateBriefing();
@@ -518,6 +546,38 @@ function buildProxyPostUrl(service, endpoint = '', productionAction = service) {
     const query = new URLSearchParams({ action: productionAction });
     if (endpoint) query.set('endpoint', endpoint);
     return `${PROD_PROXY}?${query.toString()}`;
+}
+
+function chartCacheKey(stockCode) {
+    return `invest_nav_chart_cache_v40_${getCurrentYearKst()}_${stockCode}`;
+}
+
+function readChartCache(stockCode) {
+    try {
+        const raw = localStorage.getItem(chartCacheKey(stockCode));
+        if (!raw) return null;
+        const payload = JSON.parse(raw);
+        if (!Array.isArray(payload?.daily) || !payload.daily.length) return null;
+        return {
+            daily: payload.daily,
+            weekly: Array.isArray(payload.weekly) ? payload.weekly : [],
+            savedAt: payload.savedAt || ''
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+function writeChartCache(stockCode, daily, weekly) {
+    try {
+        localStorage.setItem(chartCacheKey(stockCode), JSON.stringify({
+            savedAt: new Date().toISOString(),
+            daily,
+            weekly
+        }));
+    } catch (error) {
+        console.warn('chart cache write failed', error);
+    }
 }
 
 async function fetchMultiYearDart(corpCode) {
@@ -617,26 +677,20 @@ async function fetchPublicQuote(stockCode) {
     return InvestmentLogic.normalizePublicQuote(payload);
 }
 
-async function fetchKrxChart(stockCode, market) {
-    const currentYear = getCurrentYearKst();
-    const today = getCurrentDateTokenKst();
-    return fetchJson(buildProxyUrl('krx', '/chart', {
-        stock_code: stockCode,
-        market,
-        start_date: `${currentYear}0101`,
-        end_date: today
-    }, 'krx_chart'));
+async function fetchKiwoomQuote(stockCode) {
+    return fetchJson(buildProxyUrl('kiwoom', '/quote', {
+        stock_code: stockCode
+    }, 'kiwoom_quote'));
 }
 
-function generateSyntheticChart(stockCode, quote = null) {
-    return InvestmentLogic.generateAnchoredSyntheticChart({
-        stockCode,
-        startDate: `${getCurrentYearKst()}0101`,
-        endDate: getCurrentDateTokenKst(),
-        anchorClose: quote?.close || 0,
-        anchorChange: quote?.change ?? null,
-        baseHints: BASE_PRICE_HINTS
-    });
+async function fetchKiwoomChart(stockCode, interval, startDate, endDate) {
+    return fetchJson(buildProxyUrl('kiwoom', '/chart', {
+        stock_code: stockCode,
+        interval,
+        start_date: startDate,
+        end_date: endDate,
+        adjusted: '1'
+    }, 'kiwoom_chart'));
 }
 
 function buildFinancialRows(periods) {
@@ -786,17 +840,22 @@ function renderFinancialTable(containerId, periods) {
     `;
 }
 
-function renderStockStrip(lastPoint) {
-    if (!lastPoint) return;
-    const isLiveKrx = state.chartSource === 'live';
-    const price = lastPoint.close;
-    const change = lastPoint.change ?? (lastPoint.close - lastPoint.open);
-    const changePct = lastPoint.changePct ?? percentage(change, lastPoint.open);
+function renderStockStrip(quote, chartPoint) {
+    const snapshot = quote || chartPoint;
+    if (!snapshot) return;
+    const hasLiveQuote = state.quoteSource === 'kiwoom_rest';
+    const price = snapshot.close;
+    const open = snapshot.open ?? chartPoint?.open ?? 0;
+    const high = snapshot.high ?? chartPoint?.high ?? 0;
+    const low = snapshot.low ?? chartPoint?.low ?? 0;
+    const volume = snapshot.volume ?? chartPoint?.volume ?? 0;
+    const change = snapshot.change ?? (snapshot.close - (snapshot.open || chartPoint?.open || snapshot.close));
+    const basePrice = snapshot.open || chartPoint?.open || snapshot.close;
+    const changePct = snapshot.changePct ?? percentage(change, basePrice);
     const className = change > 0 ? 'up' : change < 0 ? 'down' : '';
     const sign = change > 0 ? '+' : '';
-    const priceSub = isLiveKrx
-        ? `${sign}${change.toLocaleString()}원 (${changePct.toFixed(2)}%)`
-        : `${sign}${change.toLocaleString()}원 (${changePct.toFixed(2)}%) · ${formatQuoteTime(state.publicQuote?.asOf)}`;
+    const sourceText = hasLiveQuote ? '키움 REST 현재가 기준' : state.quoteSource === 'naver_public_quote' ? '공개 시세 보조 기준' : '최근 차트 기준';
+    const priceSub = `${sign}${change.toLocaleString()}원 (${changePct.toFixed(2)}%)${snapshot.asOf ? ` · ${formatQuoteTime(snapshot.asOf)}` : ''}`;
     document.getElementById('stock-realtime').classList.remove('hidden');
     document.getElementById('stock-realtime').innerHTML = `
         <div class="ss-item">
@@ -806,23 +865,23 @@ function renderStockStrip(lastPoint) {
         </div>
         <div class="ss-item">
             <div class="ss-label">시가</div>
-            <div class="ss-val">${isLiveKrx ? `${lastPoint.open.toLocaleString()}원` : '-'}</div>
-            <div class="ss-sub">${isLiveKrx ? '당일 시작 가격' : 'KRX 실데이터 연동 시 표시'}</div>
+            <div class="ss-val">${open ? `${open.toLocaleString()}원` : '-'}</div>
+            <div class="ss-sub">${open ? sourceText : '시가 데이터 없음'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">고가</div>
-            <div class="ss-val good">${isLiveKrx ? `${lastPoint.high.toLocaleString()}원` : '-'}</div>
-            <div class="ss-sub">${isLiveKrx ? '장중 최고가' : 'KRX 실데이터 연동 시 표시'}</div>
+            <div class="ss-val good">${high ? `${high.toLocaleString()}원` : '-'}</div>
+            <div class="ss-sub">${high ? sourceText : '고가 데이터 없음'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">저가</div>
-            <div class="ss-val bad">${isLiveKrx ? `${lastPoint.low.toLocaleString()}원` : '-'}</div>
-            <div class="ss-sub">${isLiveKrx ? '장중 최저가' : 'KRX 실데이터 연동 시 표시'}</div>
+            <div class="ss-val bad">${low ? `${low.toLocaleString()}원` : '-'}</div>
+            <div class="ss-sub">${low ? sourceText : '저가 데이터 없음'}</div>
         </div>
         <div class="ss-item">
             <div class="ss-label">거래량</div>
-            <div class="ss-val">${isLiveKrx ? formatCompact(lastPoint.volume) : '-'}</div>
-            <div class="ss-sub">${isLiveKrx ? '누적 거래량' : 'KRX 실데이터 연동 시 표시'}</div>
+            <div class="ss-val">${volume ? formatCompact(volume) : '-'}</div>
+            <div class="ss-sub">${volume ? sourceText : '거래량 데이터 없음'}</div>
         </div>
     `;
 }
@@ -1006,6 +1065,10 @@ function refreshTechnicals() {
 }
 
 function computeTechnicals(data) {
+    if (!Array.isArray(data) || data.length < 20) {
+        return null;
+    }
+
     const closes = data.map((point) => point.close);
     const highs = data.map((point) => point.high);
     const lows = data.map((point) => point.low);
@@ -1071,7 +1134,7 @@ function computeTechnicals(data) {
 function renderTechnicalCards() {
     const container = document.getElementById('technical-grid');
     if (!state.technicals) {
-        container.innerHTML = '';
+        container.innerHTML = '<div class="report-item">키움 차트 데이터가 충분할 때 기술적 분석 카드가 표시됩니다.</div>';
         return;
     }
 
@@ -1089,7 +1152,10 @@ function renderTechnicalCards() {
 }
 
 function renderTechSummary() {
-    if (!state.technicals) return;
+    if (!state.technicals) {
+        document.getElementById('tech-summary').innerHTML = '<div class="signal-note">차트 데이터가 충분할 때 매수/매도 집계를 계산합니다.</div>';
+        return;
+    }
     const signals = state.technicals.cards.map((card) => card.signal);
     const buys = signals.filter((signal) => signal === '매수').length;
     const sells = signals.filter((signal) => signal === '매도').length;
@@ -1137,18 +1203,18 @@ function onIndicatorToggle(event) {
 }
 
 function renderCharts() {
-    state.chartVisible = getVisibleChartData(state.chartDaily, state.chartRange);
+    state.chartVisible = getVisibleChartData(state.chartDaily, state.chartWeekly, state.chartRange);
     renderPriceChart(state.chartVisible);
     renderIndicatorChart(state.chartVisible);
     renderChartLegend();
     renderTechLegend();
 }
 
-function getVisibleChartData(dailyData, range) {
+function getVisibleChartData(dailyData, weeklyData, range) {
     if (!dailyData.length) return [];
     if (range === '1M') return dailyData.slice(-22);
     if (range === '3M') return dailyData.slice(-66);
-    if (range === 'WEEK') return aggregateCandles(dailyData, 'week');
+    if (range === 'WEEK') return weeklyData.length ? weeklyData : aggregateCandles(dailyData, 'week');
     if (range === 'YTD') return dailyData.slice();
     return dailyData.slice(-22);
 }
@@ -1451,7 +1517,7 @@ ${company}에 대한 한국어 투자 브리핑을 작성하세요.
 - 건전성 점수: ${state.ratings.stability.score}/5
 - 효율성 점수: ${state.ratings.efficiency.score}/5
 - 기술적 판단: ${technicalCards.map((card) => `${card.label} ${card.signal}`).join(', ')}
-- 차트 소스: ${state.chartSource === 'live' ? 'KRX Open API' : state.chartSource === 'public_quote' ? '공개 시세 보정 대체 차트' : 'KRX 대체 차트'}
+- 차트 소스: ${state.chartSource === 'kiwoom_rest' ? 'Kiwoom REST API' : state.chartSource === 'cache' ? '저장된 마지막 키움 차트' : '차트 미연결'}
 
 [출력 형식]
 1. 한 줄 요약
@@ -1505,7 +1571,7 @@ function buildLocalBriefing() {
     ];
     const riskLines = [
         `상승여력 ${state.metrics.upside.toFixed(1)}%는 입력한 목표 PER 가정에 민감합니다.`,
-        `KRX 차트 소스는 현재 ${state.chartSource === 'live' ? '실데이터' : state.chartSource === 'public_quote' ? '공개 시세 보정 차트' : '대체 YTD 차트'}입니다.`,
+        `차트 소스는 현재 ${state.chartSource === 'kiwoom_rest' ? '키움 REST 실데이터' : state.chartSource === 'cache' ? '저장된 마지막 키움 차트' : '미연결'}입니다.`,
         `최근 분기 데이터가 부족한 경우 분기 성장률 평가는 보수적으로 해석해야 합니다.`
     ];
     const finalOpinion = state.lastAnalysis.totalPct >= 80 ? '매수 후보' : state.lastAnalysis.totalPct >= 60 ? '관망 우위' : '주의 구간';
@@ -1548,8 +1614,8 @@ function formatBriefingText(text) {
             <div class="briefing-section">
                 <h3>${cleanTitle}</h3>
                 ${listLike
-                    ? `<ul class="briefing-list">${body.map((line) => `<li>${line.replace(/^[-•]\s*/, '')}</li>`).join('')}</ul>`
-                    : `<div class="briefing-body">${body.join('<br>')}</div>`}
+                ? `<ul class="briefing-list">${body.map((line) => `<li>${line.replace(/^[-•]\s*/, '')}</li>`).join('')}</ul>`
+                : `<div class="briefing-body">${body.join('<br>')}</div>`}
             </div>
         `;
     }).join('');
