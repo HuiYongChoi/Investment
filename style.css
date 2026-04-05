@@ -261,7 +261,7 @@ header#header {
     margin: 0 auto;
     padding: 18px 24px 0;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 14px;
 }
 
@@ -284,11 +284,31 @@ header#header {
     letter-spacing: 0.12em;
 }
 
+.market-val-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .market-pill strong {
-    display: block;
     font-size: 1.2rem;
     font-weight: 800;
     letter-spacing: -0.03em;
+}
+
+.market-chg {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.market-chg.up {
+    color: #4ade80;
+}
+
+.market-chg.down {
+    color: #f87171;
 }
 
 .market-note {
@@ -664,6 +684,64 @@ header#header {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    align-items: center;
+}
+
+/* (chip-wrap 제거됨 — ? 버튼이 indicator-chip 내부로 이동) */
+
+/* signal-card 내부 ? 툴팁 */
+.signal-card {
+    position: relative;
+}
+
+.signal-card-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.signal-card-hint {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: var(--text-muted);
+    font-size: 0.64rem;
+    font-weight: 800;
+    cursor: default;
+    flex-shrink: 0;
+}
+
+.signal-card-tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    width: 220px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(18, 22, 36, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: var(--text-secondary);
+    font-size: 0.74rem;
+    line-height: 1.55;
+    z-index: 100;
+    pointer-events: none;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.signal-card-hint:hover .signal-card-tooltip {
+    display: block;
+}
+
+/* 오실레이터 차트 상단 여백 */
+.tech-osc-shell {
+    margin-top: 10px;
 }
 
 .chart-toolbar-actions {
@@ -676,14 +754,19 @@ header#header {
 
 .seg-btn,
 .indicator-chip {
-    min-height: 40px;
-    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 44px;
+    padding: 0 18px;
     border-radius: 999px;
     border: 1px solid var(--glass-border);
     background: rgba(255, 255, 255, 0.03);
     color: var(--text-secondary);
+    font-size: 0.88rem;
     font-weight: 700;
     cursor: pointer;
+    position: relative;
 }
 
 .seg-btn.active,
@@ -691,6 +774,94 @@ header#header {
     background: rgba(79, 140, 255, 0.16);
     border-color: rgba(79, 140, 255, 0.5);
     color: white;
+}
+
+/* ? 힌트 — 이제 칩 버튼 내부에 위치 */
+.chip-hint {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.13);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.65rem;
+    font-weight: 800;
+    cursor: default;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.chip-tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 250px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(12, 16, 28, 0.97);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    font-weight: 400;
+    line-height: 1.65;
+    text-align: left;
+    white-space: normal;
+    z-index: 200;
+    pointer-events: none;
+    box-shadow: 0 10px 36px rgba(0, 0, 0, 0.6);
+}
+
+.chip-hint:hover .chip-tooltip {
+    display: block;
+}
+
+/* 호버 툴팁 (차트 위에 표시) */
+.tech-tooltip {
+    display: none;
+    position: absolute;
+    top: 12px;
+    min-width: 210px;
+    max-width: 260px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgba(8, 12, 22, 0.52);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    line-height: 1.75;
+    z-index: 50;
+    pointer-events: none;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    transition: left 0.08s, right 0.08s;
+}
+
+/* 시그널 뱃지 */
+.sig-buy, .sig-sell {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 20px;
+    vertical-align: middle;
+    letter-spacing: 0.01em;
+    margin-left: 4px;
+}
+.sig-buy {
+    background: rgba(74, 222, 128, 0.18);
+    color: #4ade80;
+    border: 1px solid rgba(74, 222, 128, 0.4);
+}
+.sig-sell {
+    background: rgba(248, 113, 113, 0.18);
+    color: #f87171;
+    border: 1px solid rgba(248, 113, 113, 0.4);
 }
 
 .btn-chart-reset[disabled] {

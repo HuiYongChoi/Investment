@@ -403,6 +403,11 @@ assert(scriptSource.includes('class="report-section-toggle"'), 'Report sections 
 assert(scriptSource.includes('class="report-section-body hidden"'), 'Report sections should start collapsed until the user expands them');
 assert(scriptSource.includes('page_no: page'), 'DART report fetching should request additional pages when the first page does not include quarterly reports');
 assert(scriptSource.includes('while (page <= totalPages && relevantReports.length < 12)'), 'DART report fetching should keep scanning pages until enough recent reports are collected');
+assert(scriptSource.includes('buildDartCompanySearchUrl(company)'), 'The DART 원문 button should use the company search URL helper');
+assert(scriptSource.includes('https://dart.fss.or.kr/dsab007/main.do?autoSearch=Y'), 'The DART 원문 button should point to the public DART disclosure search board');
+assert(scriptSource.includes('textCrpCik=${encodedCorpCode}'), 'The DART company search URL should include the corpCode filter when available');
+assert(scriptSource.includes('textCrpNm=${encodedName}'), 'The DART company search URL should include the company name filter');
+assert(!scriptSource.includes('https://dart.fss.or.kr/dsaf001/main.do?corpCode=${company.corpCode}'), 'The DART 원문 button should not use the rejected corpCode direct link');
 
 const styleSource = readText(`${cwd}/style.css`);
 assert(styleSource.includes('.report-year-toggle'), 'Styles should include the yearly quarterly-report toggle treatment');

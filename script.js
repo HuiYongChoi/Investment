@@ -504,7 +504,7 @@ async function startSearch() {
 
     document.getElementById('company-name').textContent = company.name;
     document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 Yahoo Finance (yfinance Python) 일·주·월·연/YTD 가격 흐름을 분석합니다.`;
-    document.getElementById('dart-link').href = `https://dart.fss.or.kr/dsaf001/main.do?corpCode=${company.corpCode}`;
+    document.getElementById('dart-link').href = buildDartCompanySearchUrl(company);
     document.getElementById('dashboard').classList.remove('hidden');
     document.getElementById('stock-realtime').classList.add('hidden');
     document.getElementById('stock-realtime').innerHTML = '';
@@ -978,6 +978,22 @@ async function fetchYfinanceChart(stockCode, market, interval, startDate, endDat
         end_date: endDate,
         name_hint: nameHint
     }, 'yfinance_chart'));
+}
+
+function buildDartCompanySearchUrl(company) {
+    const name = String(company?.name || '').trim();
+    const corpCode = String(company?.corpCode || '').trim();
+    if (!name && !corpCode) {
+        return 'https://dart.fss.or.kr/dsab007/main.do';
+    }
+
+    const currentYear = getCurrentYearKst();
+    const startDate = `${currentYear - 2}0101`;
+    const endDate = `${currentYear}1231`;
+    const encodedName = encodeURIComponent(name);
+    const encodedCorpCode = encodeURIComponent(corpCode);
+
+    return `https://dart.fss.or.kr/dsab007/main.do?autoSearch=Y&currentPage=1&maxResults=100&maxLinks=10&sort=&series=&option=corp&selectKey=&textCrpCik=${encodedCorpCode}&textCrpNm=${encodedName}&startDate=${startDate}&endDate=${endDate}`;
 }
 
 function buildFinancialRows(periods) {

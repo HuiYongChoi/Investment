@@ -997,28 +997,85 @@ try {
 
     if ($action === 'market') {
         $summary = [
-            'usdKrw' => null,
-            'jpyKrw' => null,
-            'goldKrwPerGram' => null,
+            'usdKrw'          => null,
+            'jpyKrw'          => null,
+            'goldKrwPerGram'  => null,
+            'usdKrwChangePct' => null,
+            'jpyKrwChangePct' => null,
+            'goldChangePct'   => null,
+            'vix'             => null,
+            'vixChangePct'    => null,
         ];
 
+        // yfinance quote 응답: currentPrice + previousClose → changePct 직접 계산
+        $calcChangePct = function(array $q): ?float {
+            $cur  = (float) ($q['currentPrice'] ?? 0);
+            $prev = (float) ($q['previousClose'] ?? 0);
+            if ($cur > 0 && $prev > 0) return (($cur - $prev) / $prev) * 100;
+            return null;
+        };
+
+        // ── USD/KRW: yfinance 우선, 실패 시 open.er-api 폴백 ──
         try {
-            $fxUpstream = request_upstream('https://open.er-api.com/v6/latest/USD');
-            $fx = safe_json_decode($fxUpstream['body']);
-            $usdKrw = (float) ($fx['rates']['KRW'] ?? 0);
-            $usdJpy = (float) ($fx['rates']['JPY'] ?? 0);
-            if ($usdKrw > 0) $summary['usdKrw'] = $usdKrw;
-            if ($usdKrw > 0 && $usdJpy > 0) $summary['jpyKrw'] = $usdKrw / $usdJpy;
-        } catch (Throwable $ignored) {
+            $usdQ = request_yfinance_bridge('quote', ['stock_code' => 'USDKRW=X', 'market' => 'FX']);
+            $usdCur = (float) ($usdQ['currentPrice'] ?? 0);
+            if ($usdCur > 0) {
+                $summary['usdKrw'] = $usdCur;
+                $summary['usdKrwChangePct'] = $calcChangePct($usdQ);
+            }
+        } catch (Throwable $ignored) {}
+
+        // ── JPY/KRW: yfinance 우선, 실패 시 USD 환율로 역산 ──
+        try {
+            $jpyQ = request_yfinance_bridge('quote', ['stock_code' => 'JPYKRW=X', 'market' => 'FX']);
+            $jpyCur = (float) ($jpyQ['currentPrice'] ?? 0);
+            if ($jpyCur > 0) {
+                $summary['jpyKrw'] = $jpyCur;
+                $summary['jpyKrwChangePct'] = $calcChangePct($jpyQ);
+            }
+        } catch (Throwable $ignored) {}
+
+        // yfinance 실패 시 open.er-api 폴백
+        if (!$summary['usdKrw'] || !$summary['jpyKrw']) {
+            try {
+                $fxUpstream = request_upstream('https://open.er-api.com/v6/latest/USD');
+                $fx = safe_json_decode($fxUpstream['body']);
+                $usdKrw = (float) ($fx['rates']['KRW'] ?? 0);
+                $usdJpy = (float) ($fx['rates']['JPY'] ?? 0);
+                if (!$summary['usdKrw'] && $usdKrw > 0) $summary['usdKrw'] = $usdKrw;
+                if (!$summary['jpyKrw'] && $usdKrw > 0 && $usdJpy > 0) $summary['jpyKrw'] = $usdKrw / $usdJpy;
+            } catch (Throwable $ignored) {}
         }
 
+        // ── 금 시세: GC=F yfinance (전일비 포함) ──
         try {
-            $goldUsdOunce = resolve_gold_usd_ounce();
-            if ($goldUsdOunce > 0 && !empty($summary['usdKrw'])) {
-                $summary['goldKrwPerGram'] = round(($goldUsdOunce * (float) $summary['usdKrw']) / 31.1034768, 2);
+            $gcQ = request_yfinance_bridge('quote', ['stock_code' => 'GC=F', 'market' => 'COMMODITY']);
+            $gcCur = (float) ($gcQ['currentPrice'] ?? 0);
+            if ($gcCur > 0 && !empty($summary['usdKrw'])) {
+                $summary['goldKrwPerGram'] = round(($gcCur * (float) $summary['usdKrw']) / 31.1034768, 2);
+                $summary['goldChangePct'] = $calcChangePct($gcQ);
             }
-        } catch (Throwable $ignored) {
+        } catch (Throwable $ignored) {}
+
+        // 금 폴백: 기존 멀티소스
+        if (!$summary['goldKrwPerGram']) {
+            try {
+                $goldUsdOunce = resolve_gold_usd_ounce();
+                if ($goldUsdOunce > 0 && !empty($summary['usdKrw'])) {
+                    $summary['goldKrwPerGram'] = round(($goldUsdOunce * (float) $summary['usdKrw']) / 31.1034768, 2);
+                }
+            } catch (Throwable $ignored) {}
         }
+
+        // ── VIX 지수: ^VIX yfinance ──
+        try {
+            $vixQ = request_yfinance_bridge('quote', ['stock_code' => '^VIX', 'market' => 'INDEX']);
+            $vixCur = (float) ($vixQ['currentPrice'] ?? 0);
+            if ($vixCur > 0) {
+                $summary['vix'] = round($vixCur, 2);
+                $summary['vixChangePct'] = $calcChangePct($vixQ);
+            }
+        } catch (Throwable $ignored) {}
 
         json_response(200, $summary);
     }
