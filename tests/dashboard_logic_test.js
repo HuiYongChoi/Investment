@@ -29,8 +29,35 @@ const directory = InvestmentLogic.buildCompanyDirectory({
 assert(directory.length === 2, 'Company directory should dedupe aliases by stock code');
 assert(directory[0].displayLabel === '삼성전자 · 005930', 'Display label should include company name and stock code on one line');
 
+const mergedDirectory = InvestmentLogic.mergeCompanyDirectories([
+    { name: 'NAVER', stockCode: '035420', corpCode: '00266961', market: 'AUTO', aliases: ['NAVER CORPORATION'] },
+    { name: '코리아에프티', stockCode: '123456', corpCode: '00999999', market: 'AUTO', aliases: ['KOREA F/T'] }
+], directory);
+
+const mergedNaver = mergedDirectory.find((item) => item.stockCode === '035420');
+assert(mergedNaver.name === 'NAVER', 'Remote company directory should be the primary source when available');
+assert(mergedNaver.aliases.includes('네이버'), 'Merged directory should preserve local Korean aliases');
+assert(mergedNaver.aliases.includes('NAVER'), 'Merged directory should preserve the remote primary name as an alias');
+assert(mergedNaver.displayLabel === 'NAVER · 035420', 'Merged company directory should keep the display label format');
+
+const mergedMatches = InvestmentLogic.matchCompanies(mergedDirectory, '네이버');
+assert(mergedMatches.length === 1 && mergedMatches[0].stockCode === '035420', 'Alias search should resolve merged directory entries');
+
 const matches = InvestmentLogic.matchCompanies(directory, '00593');
 assert(matches.length === 1 && matches[0].stockCode === '005930', 'Stock code prefix should find Samsung Electronics');
+
+const trailingDirectory = InvestmentLogic.buildCompanyDirectory({
+    '가나': { corpCode: '00000001', stockCode: '111111', market: 'KOSPI' },
+    '가나다': { corpCode: '00000002', stockCode: '222222', market: 'KOSPI' },
+    '가나다라': { corpCode: '00000003', stockCode: '333333', market: 'KOSPI' }
+});
+const trailingMatch = InvestmentLogic.pickTrailingCompanyMatch(trailingDirectory, '가');
+assert(trailingMatch && trailingMatch.stockCode === '333333', 'Fallback autocomplete selection should use the trailing suggestion for the current query');
+assert(InvestmentLogic.pickTrailingCompanyMatch(trailingDirectory, '') === null, 'Fallback autocomplete selection should ignore blank queries');
+assert(InvestmentLogic.moveSuggestionSelectionIndex(-1, 3, 1) === 0, 'Arrow-down should move to the first autocomplete suggestion when none is active');
+assert(InvestmentLogic.moveSuggestionSelectionIndex(0, 3, 1) === 1, 'Arrow-down should advance to the next autocomplete suggestion');
+assert(InvestmentLogic.moveSuggestionSelectionIndex(2, 3, 1) === 0, 'Arrow-down should wrap back to the first suggestion at the end of the list');
+assert(InvestmentLogic.moveSuggestionSelectionIndex(0, 3, -1) === 2, 'Arrow-up should wrap to the last suggestion from the first row');
 
 const quote = InvestmentLogic.normalizePublicQuote({
     closePrice: '186,200',
@@ -220,5 +247,110 @@ const orderedPeriods = InvestmentLogic.sortPeriods([
     { label: '2026 1분기', sortKey: 20261 }
 ]);
 assert(orderedPeriods[0].label === '2026 1분기', 'Latest quarterly periods should sort newest-first');
+
+const chartSample = [
+    { date: '20260105', open: 100, high: 110, low: 99, close: 108, volume: 10, change: 8, changePct: 8 },
+    { date: '20260106', open: 108, high: 112, low: 107, close: 111, volume: 11, change: 3, changePct: 2.78 },
+    { date: '20260120', open: 111, high: 120, low: 110, close: 118, volume: 12, change: 7, changePct: 6.31 },
+    { date: '20260203', open: 118, high: 122, low: 117, close: 121, volume: 13, change: 3, changePct: 2.54 },
+    { date: '20260204', open: 121, high: 126, low: 120, close: 125, volume: 14, change: 4, changePct: 3.31 },
+    { date: '20260302', open: 125, high: 129, low: 123, close: 127, volume: 15, change: 2, changePct: 1.6 },
+    { date: '20270104', open: 127, high: 140, low: 125, close: 138, volume: 16, change: 11, changePct: 8.66 }
+];
+
+const weeklySeries = InvestmentLogic.aggregateChartPoints(chartSample, 'week');
+assert(weeklySeries.length === 5, 'Weekly aggregation should merge rows within the same ISO week');
+assert(weeklySeries[0].open === 100 && weeklySeries[0].close === 111, 'Weekly aggregation should preserve first open and last close');
+assert(weeklySeries[0].high === 112 && weeklySeries[0].low === 99, 'Weekly aggregation should preserve weekly high and low');
+assert(weeklySeries[0].volume === 21, 'Weekly aggregation should sum weekly volume');
+
+const monthlySeries = InvestmentLogic.aggregateChartPoints(chartSample, 'month');
+assert(monthlySeries.length === 4, 'Monthly aggregation should merge rows within the same month');
+assert(monthlySeries[0].date === '20260120', 'Monthly aggregation should keep the last date token in the bucket');
+assert(monthlySeries[0].open === 100 && monthlySeries[0].close === 118, 'Monthly aggregation should preserve first open and last close for the month');
+
+const yearlySeries = InvestmentLogic.aggregateChartPoints(chartSample, 'year');
+assert(yearlySeries.length === 2, 'Yearly aggregation should merge rows within the same year');
+assert(yearlySeries[0].high === 129 && yearlySeries[0].volume === 75, 'Yearly aggregation should preserve yearly high and summed volume');
+
+const ytdSeries = InvestmentLogic.resolveChartSeries(chartSample, 'YTD', { currentYear: 2026 });
+assert(ytdSeries.length === 6, 'YTD range should keep only rows from the selected current year');
+
+const monthlyRange = InvestmentLogic.resolveChartSeries(chartSample, 'MONTH', { currentYear: 2026 });
+assert(monthlyRange.length === 4, 'MONTH range should return monthly aggregated candles');
+
+const clampedWindow = InvestmentLogic.normalizeChartWindow(100, 90, 20, 12);
+assert(clampedWindow.start === 80 && clampedWindow.end === 100, 'Chart window should clamp to the available right edge');
+
+const zoomedWindow = InvestmentLogic.zoomChartWindow({ start: 0, end: 100 }, 100, 0.5, 0.5, 20);
+assert(zoomedWindow.start === 25 && zoomedWindow.end === 75, 'Chart zoom helper should zoom toward the anchor point');
+
+const pannedWindow = InvestmentLogic.panChartWindow({ start: 25, end: 75 }, 20, 100);
+assert(pannedWindow.start === 45 && pannedWindow.end === 95, 'Chart pan helper should move the window without changing its size');
+
+const tooltipRight = InvestmentLogic.resolveChartTooltipLayout({
+    anchorX: 60,
+    anchorY: 20,
+    boxWidth: 140,
+    boxHeight: 120,
+    bounds: { left: 18, top: 10, right: 320, bottom: 280 },
+    gap: 12
+});
+assert(tooltipRight.x === 72, 'Tooltip layout should place the box to the right when enough space exists');
+assert(tooltipRight.y === 20, 'Tooltip layout should keep the requested vertical anchor when it fits');
+assert(tooltipRight.side === 'right', 'Tooltip layout should report right placement');
+
+const tooltipLeft = InvestmentLogic.resolveChartTooltipLayout({
+    anchorX: 280,
+    anchorY: 20,
+    boxWidth: 140,
+    boxHeight: 120,
+    bounds: { left: 18, top: 10, right: 320, bottom: 280 },
+    gap: 12
+});
+assert(tooltipLeft.x === 128, 'Tooltip layout should flip to the left when the right side is cramped');
+assert(tooltipLeft.side === 'left', 'Tooltip layout should report left placement');
+
+const tooltipClamped = InvestmentLogic.resolveChartTooltipLayout({
+    anchorX: 280,
+    anchorY: 250,
+    boxWidth: 140,
+    boxHeight: 120,
+    bounds: { left: 18, top: 10, right: 320, bottom: 280 },
+    gap: 12
+});
+assert(tooltipClamped.y === 160, 'Tooltip layout should clamp vertically inside the chart bounds');
+
+const scriptSource = readText(`${cwd}/script.js`);
+assert(scriptSource.includes("context.textAlign = 'left';"), 'Tooltip text should explicitly left-align inside the box');
+assert(scriptSource.includes("context.textBaseline = 'top';"), 'Tooltip text should use top baseline for consistent vertical rhythm');
+assert(scriptSource.includes("context.fillStyle = 'rgba(255, 255, 255, 0.84)';"), 'Tooltip should use a translucent white background for readability');
+
+const phpProxySource = readText(`${cwd}/proxy.php`);
+assert(phpProxySource.includes('https://api.gold-api.com/price/XAU'), 'PHP proxy should include the gold-api fallback source');
+assert(phpProxySource.includes('GC=F'), 'PHP proxy should include the Yahoo gold futures fallback');
+assert(phpProxySource.includes("$action === 'company_directory'"), 'PHP proxy should expose the company_directory action');
+assert(phpProxySource.includes('corpCode.xml'), 'PHP proxy should fetch the DART corpCode directory');
+
+const pythonProxySource = readText(`${cwd}/api_proxy.py`);
+assert(pythonProxySource.includes('https://api.gold-api.com/price/XAU'), 'Python proxy should include the gold-api fallback source');
+assert(pythonProxySource.includes('GC=F'), 'Python proxy should include the Yahoo gold futures fallback');
+assert(pythonProxySource.includes('/company-directory'), 'Python proxy should expose the company directory endpoint');
+assert(pythonProxySource.includes('name_hint = params.get("name_hint", "").strip()'), 'Python proxy should forward company name hints to the yfinance bridge');
+
+const rubyProxySource = readText(`${cwd}/api_proxy.rb`);
+assert(rubyProxySource.includes('https://api.gold-api.com/price/XAU'), 'Ruby proxy should include the gold-api fallback source');
+assert(rubyProxySource.includes('GC=F'), 'Ruby proxy should include the Yahoo gold futures fallback');
+assert(rubyProxySource.includes('/company-directory'), 'Ruby proxy should expose the company directory endpoint');
+assert(rubyProxySource.includes('name_hint = (req.query[\'name_hint\'] || \'\').strip'), 'Ruby proxy should forward company name hints to the yfinance bridge');
+
+const yfinanceBridgeSource = readText(`${cwd}/yfinance_bridge.py`);
+assert(yfinanceBridgeSource.includes('--name-hint'), 'yfinance bridge should accept company name hints for AUTO market resolution');
+
+assert(scriptSource.includes('name_hint'), 'Frontend yfinance requests should forward company name hints');
+assert(phpProxySource.includes('$nameHint = trim((string) ($_GET[\'name_hint\'] ?? \'\'));'), 'PHP proxy should read company name hints for yfinance bridge requests');
+assert(scriptSource.includes("event.key === 'ArrowDown'"), 'Search input should support arrow-down autocomplete navigation');
+assert(scriptSource.includes('syncCompanyInputValue(company);'), 'Search should synchronize the input text with the resolved autocomplete match');
+assert(!scriptSource.includes('companyInput.value = selected.displayLabel;'), 'Arrow-key navigation should not overwrite the typed input before the selection is committed');
 
 console.log('dashboard_logic_test: ok');

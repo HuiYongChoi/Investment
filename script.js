@@ -7,6 +7,29 @@ const KAKAO_STORAGE_ERROR = 'invest_nav_kakao_error';
 const KAKAO_STORAGE_RETURN_URL = 'invest_nav_kakao_return_url';
 const KAKAO_REDIRECT_URI = InvestmentLogic.resolveKakaoRedirectUri(location.href);
 const XP_MAX = 100;
+const CHART_HISTORY_YEARS = 5;
+const CHART_DEFAULT_WINDOWS = {
+    DAY: 120,
+    WEEK: 104,
+    MONTH: 60,
+    YEAR: 10,
+    YTD: 120
+};
+const CHART_MIN_WINDOWS = {
+    DAY: 20,
+    WEEK: 12,
+    MONTH: 12,
+    YEAR: 3,
+    YTD: 20
+};
+const CHART_MA_PERIODS = [5, 20, 60, 120, 200];
+const CHART_MA_COLORS = {
+    5: '#8fd3ff',
+    20: '#f59e0b',
+    60: '#22c55e',
+    120: '#a855f7',
+    200: '#f97316'
+};
 
 const COMPANY_MAP = {
     '삼성전자': { corpCode: '00126380', stockCode: '005930', market: 'KOSPI' },
@@ -39,7 +62,7 @@ const COMPANY_MAP = {
     '삼성SDI': { corpCode: '00126362', stockCode: '006400', market: 'KOSPI' }
 };
 
-const COMPANY_DIRECTORY = InvestmentLogic.buildCompanyDirectory(COMPANY_MAP);
+const FALLBACK_COMPANY_DIRECTORY = InvestmentLogic.buildCompanyDirectory(COMPANY_MAP);
 
 const ACCOUNT_ALIASES = {
     revenue: ['매출액', '영업수익', '수익(매출액)', '보험영업수익'],
@@ -63,12 +86,20 @@ const state = {
     reports: [],
     quote: null,
     quoteSource: 'idle',
+    companyDirectory: FALLBACK_COMPANY_DIRECTORY,
+    companyDirectoryLoaded: false,
+    companyDirectoryPromise: null,
     chartDaily: [],
     chartWeekly: [],
+    chartFullSeries: [],
     chartVisible: [],
-    chartRange: '1M',
+    chartRange: 'DAY',
+    chartWindow: null,
+    chartDrag: null,
     chartSource: 'idle',
+    searchQuery: '',
     searchMatches: [],
+    searchMatchIndex: -1,
     technicals: null,
     ratings: null,
     metrics: null,
@@ -90,27 +121,35 @@ initKakao();
 restoreKakaoSession();
 consumeKakaoMessage();
 loadMarketSummary();
+loadCompanyDirectory();
 
 function bindEvents() {
     const companyInput = document.getElementById('company-input');
     const suggestionBox = document.getElementById('company-suggestions');
     document.getElementById('search-btn').addEventListener('click', startSearch);
     companyInput.addEventListener('input', (event) => {
-        renderCompanySuggestions(event.target.value);
+        updateCompanySuggestions(event.target.value);
     });
     companyInput.addEventListener('focus', (event) => {
-        renderCompanySuggestions(event.target.value);
+        updateCompanySuggestions(event.target.value);
     });
     companyInput.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             hideCompanySuggestions();
             return;
         }
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            moveCompanySuggestion(1);
+            return;
+        }
+        if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            moveCompanySuggestion(-1);
+            return;
+        }
         if (event.key === 'Enter') {
             event.preventDefault();
-            if (!resolveCompany(companyInput.value) && state.searchMatches[0]) {
-                selectCompanySuggestion(state.searchMatches[0].stockCode);
-            }
             startSearch();
         }
     });
@@ -128,6 +167,7 @@ function bindEvents() {
     document.getElementById('btn-kakao-logout').addEventListener('click', logoutKakao);
     document.getElementById('kakao-send-btn').addEventListener('click', sendBriefingToKakao);
     document.getElementById('chart-range-controls').addEventListener('click', onChartRangeClick);
+    document.getElementById('chart-reset-btn').addEventListener('click', resetChartZoom);
     document.getElementById('indicator-toggle').addEventListener('click', onIndicatorToggle);
     window.addEventListener('resize', debounce(() => {
         if (!document.getElementById('dashboard').classList.contains('hidden')) {
@@ -158,17 +198,47 @@ function drawXP() {
 }
 
 function renderCompanySuggestions(rawQuery = '') {
-    const container = document.getElementById('company-suggestions');
-    const matches = InvestmentLogic.matchCompanies(COMPANY_DIRECTORY, rawQuery, 8);
-    state.searchMatches = matches;
-
-    if (!matches.length || document.activeElement !== document.getElementById('company-input')) {
+    const query = String(rawQuery || '').trim();
+    if (!query) {
+        state.searchQuery = '';
+        state.searchMatches = [];
         hideCompanySuggestions();
         return;
     }
 
-    container.innerHTML = matches.map((company) => `
-        <button type="button" class="company-option" data-stock-code="${company.stockCode}">
+    updateCompanySuggestions(query);
+}
+
+function updateCompanySuggestions(rawQuery = '') {
+    const query = String(rawQuery || '').trim();
+    state.searchQuery = query;
+    state.searchMatchIndex = -1;
+
+    if (!query) {
+        state.searchMatches = [];
+        hideCompanySuggestions();
+        return;
+    }
+
+    state.searchMatches = InvestmentLogic.matchCompanies(state.companyDirectory, query, 8);
+
+    if (!state.companyDirectoryLoaded) {
+        loadCompanyDirectory();
+    }
+
+    renderCompanySuggestionList();
+}
+
+function renderCompanySuggestionList() {
+    const container = document.getElementById('company-suggestions');
+    const companyInput = document.getElementById('company-input');
+    if (!state.searchMatches.length || document.activeElement !== companyInput) {
+        hideCompanySuggestions();
+        return;
+    }
+
+    container.innerHTML = state.searchMatches.map((company, index) => `
+        <button type="button" class="company-option ${index === state.searchMatchIndex ? 'active' : ''}" data-stock-code="${company.stockCode}" data-index="${index}">
             <span class="company-option-name">${escapeHtml(company.name)}</span>
             <span class="company-option-code">${company.stockCode}</span>
         </button>
@@ -177,6 +247,7 @@ function renderCompanySuggestions(rawQuery = '') {
 }
 
 function hideCompanySuggestions() {
+    state.searchMatchIndex = -1;
     document.getElementById('company-suggestions').classList.add('hidden');
 }
 
@@ -187,10 +258,31 @@ function onSuggestionClick(event) {
 }
 
 function selectCompanySuggestion(stockCode) {
-    const selected = COMPANY_DIRECTORY.find((item) => item.stockCode === stockCode);
+    const selected = state.companyDirectory.find((item) => item.stockCode === stockCode);
     if (!selected) return;
-    document.getElementById('company-input').value = selected.displayLabel;
+    syncCompanyInputValue(companyFromDirectoryEntry(selected));
     hideCompanySuggestions();
+}
+
+function moveCompanySuggestion(step) {
+    const companyInput = document.getElementById('company-input');
+    if (!state.searchMatches.length) {
+        updateCompanySuggestions(state.searchQuery || companyInput.value);
+        if (!state.searchMatches.length) return;
+    }
+
+    state.searchMatchIndex = InvestmentLogic.moveSuggestionSelectionIndex(
+        state.searchMatchIndex,
+        state.searchMatches.length,
+        step
+    );
+    const selected = state.searchMatches[state.searchMatchIndex];
+    if (!selected) return;
+    renderCompanySuggestionList();
+    const activeButton = document.querySelector('.company-option.active');
+    if (activeButton && typeof activeButton.scrollIntoView === 'function') {
+        activeButton.scrollIntoView({ block: 'nearest' });
+    }
 }
 
 function setStatus(message, tone = 'neutral') {
@@ -358,38 +450,52 @@ async function sendBriefingToKakao() {
 }
 
 async function startSearch() {
-    const rawInput = document.getElementById('company-input').value.trim();
-    const company = resolveCompany(rawInput);
+    const companyInput = document.getElementById('company-input');
+    const rawInput = companyInput.value.trim();
+    let company = resolveCompany(rawInput, { exactOnly: true });
     if (!company) {
-        setStatus('사전 매핑된 기업명 또는 종목코드를 입력해주세요.', 'error');
+        company = resolvePreferredSuggestion(rawInput);
+    }
+    if (!company) {
+        company = await resolveCompanyAsync(rawInput);
+    }
+    if (!company) {
+        setStatus('기업명 또는 종목코드를 입력해주세요.', 'error');
         return;
     }
 
+    syncCompanyInputValue(company);
     hideCompanySuggestions();
     state.company = company;
-    state.chartRange = '1M';
-    setStatus(`${company.name} 분석을 시작합니다. DART, Yahoo Finance 시세, 공시 리포트를 동기화하는 중입니다.`);
+    state.chartRange = 'DAY';
+    state.chartWindow = null;
+    state.chartDrag = null;
+    state.chartFullSeries = [];
+    state.chartVisible = [];
+    priceHoverIndex = null;
+    setStatus(`${company.name} 분석을 시작합니다. DART, Yahoo Finance 시세와 다중 기간 차트를 동기화하는 중입니다.`);
     setSourceBadge('source-dart', 'DART 동기화 중');
     setSourceBadge('source-market', 'Yahoo Finance 동기화 중');
     setSourceBadge('source-gemini', 'Gemini 대기 중');
 
     document.getElementById('company-name').textContent = company.name;
-    document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 Yahoo Finance (yfinance Python) 일봉/주봉 차트를 분석합니다.`;
+    document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 Yahoo Finance (yfinance Python) 일·주·월·연/YTD 가격 흐름을 분석합니다.`;
     document.getElementById('dart-link').href = `https://dart.fss.or.kr/dsaf001/main.do?corpCode=${company.corpCode}`;
     document.getElementById('dashboard').classList.remove('hidden');
     document.getElementById('stock-realtime').classList.add('hidden');
     document.getElementById('stock-realtime').innerHTML = '';
 
     try {
-        const startDate = `${getCurrentYearKst()}0101`;
+        const startDate = `${getCurrentYearKst() - CHART_HISTORY_YEARS}0101`;
         const endDate = getCurrentDateTokenKst();
+        const companyNameHint = buildCompanyNameHint(company);
         const [annualsResult, quarterliesResult, reportsResult, dailyChartResult, weeklyChartResult, quoteResult] = await Promise.allSettled([
             fetchMultiYearDart(company.corpCode),
             fetchQuarterlyHistory(company.corpCode),
             fetchDartReportList(company.corpCode),
-            fetchYfinanceChart(company.stockCode, company.market, 'daily', startDate, endDate),
-            fetchYfinanceChart(company.stockCode, company.market, 'weekly', startDate, endDate),
-            fetchYfinanceQuote(company.stockCode, company.market)
+            fetchYfinanceChart(company.stockCode, company.market, 'daily', startDate, endDate, companyNameHint),
+            fetchYfinanceChart(company.stockCode, company.market, 'weekly', startDate, endDate, companyNameHint),
+            fetchYfinanceQuote(company.stockCode, company.market, companyNameHint)
         ]);
 
         if (annualsResult.status !== 'fulfilled' || !annualsResult.value.length) {
@@ -400,6 +506,12 @@ async function startSearch() {
         state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
         state.reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
         const yfinanceQuotePayload = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
+        const resolvedMarket = yfinanceQuotePayload?.market
+            || (dailyChartResult.status === 'fulfilled' ? dailyChartResult.value?.market : '')
+            || (weeklyChartResult.status === 'fulfilled' ? weeklyChartResult.value?.market : '');
+        if (resolvedMarket && resolvedMarket !== 'AUTO') {
+            state.company.market = resolvedMarket;
+        }
         state.quote = yfinanceQuotePayload?.live
             ? InvestmentLogic.normalizeYfinanceQuote(yfinanceQuotePayload, yfinanceQuotePayload.fetched_at || '')
             : null;
@@ -479,28 +591,127 @@ async function startSearch() {
     }
 }
 
-function resolveCompany(input) {
-    if (!input) return null;
-    if (COMPANY_MAP[input]) {
-        return { name: input, ...COMPANY_MAP[input] };
+async function loadCompanyDirectory(force = false) {
+    if (state.companyDirectoryLoaded && !force) {
+        return state.companyDirectory;
     }
+    if (state.companyDirectoryPromise && !force) {
+        return state.companyDirectoryPromise;
+    }
+
+    const request = fetchJson(buildProxyUrl('company-directory', '', {}, 'company_directory'))
+        .then((payload) => {
+            const remoteDirectory = Array.isArray(payload?.directory) ? payload.directory : [];
+            if (remoteDirectory.length) {
+                state.companyDirectory = InvestmentLogic.mergeCompanyDirectories(remoteDirectory, FALLBACK_COMPANY_DIRECTORY);
+                state.companyDirectoryLoaded = true;
+            }
+            return state.companyDirectory;
+        })
+        .catch((error) => {
+            console.warn('company directory load failed', error);
+            return state.companyDirectory;
+        })
+        .finally(() => {
+            state.companyDirectoryPromise = null;
+            const companyInput = document.getElementById('company-input');
+            if (document.activeElement === companyInput && companyInput.value.trim()) {
+                updateCompanySuggestions(state.searchQuery || companyInput.value);
+            }
+        });
+
+    state.companyDirectoryPromise = request;
+    return request;
+}
+
+async function resolveCompanyAsync(input) {
+    let company = resolveCompany(input);
+    if (company || state.companyDirectoryLoaded) return company;
+    await loadCompanyDirectory();
+    company = resolveCompany(input);
+    return company;
+}
+
+function buildCompanyNameHint(company) {
+    const aliases = Array.isArray(company?.aliases) ? company.aliases : [];
+    return Array.from(new Set(
+        [company?.name, ...aliases]
+            .map((item) => String(item || '').trim())
+            .filter(Boolean)
+    )).join('|');
+}
+
+function companyFromDirectoryEntry(entry) {
+    if (!entry) return null;
+    return {
+        name: entry.name,
+        corpCode: entry.corpCode,
+        stockCode: entry.stockCode,
+        market: entry.market,
+        aliases: entry.aliases || []
+    };
+}
+
+function syncCompanyInputValue(company) {
+    if (!company) return;
+    const companyInput = document.getElementById('company-input');
+    const directory = state.companyDirectory.length ? state.companyDirectory : FALLBACK_COMPANY_DIRECTORY;
+    const matched = directory.find((item) => (
+        item.stockCode === company.stockCode
+        || (item.corpCode && item.corpCode === company.corpCode)
+    ));
+    if (matched) {
+        companyInput.value = matched.displayLabel;
+        return;
+    }
+    if (company.name && company.stockCode) {
+        companyInput.value = `${company.name} · ${company.stockCode}`;
+        return;
+    }
+    if (company.name) {
+        companyInput.value = company.name;
+    }
+}
+
+function resolvePreferredSuggestion(rawInput) {
+    const selected = state.searchMatchIndex >= 0 ? state.searchMatches[state.searchMatchIndex] : null;
+    if (selected) return companyFromDirectoryEntry(selected);
+
+    const trailing = state.searchMatches.length
+        ? state.searchMatches[state.searchMatches.length - 1]
+        : InvestmentLogic.pickTrailingCompanyMatch(state.companyDirectory, rawInput, 8);
+    return companyFromDirectoryEntry(trailing);
+}
+
+function resolveCompany(input, options = {}) {
+    const exactOnly = Boolean(options?.exactOnly);
+    if (!input) return null;
+    const directory = state.companyDirectory.length ? state.companyDirectory : FALLBACK_COMPANY_DIRECTORY;
 
     const stockCode = (input.match(/\b(\d{6})\b/) || [])[1];
     if (stockCode) {
-        const matchByStock = COMPANY_DIRECTORY.find((item) => item.stockCode === stockCode);
+        const matchByStock = directory.find((item) => item.stockCode === stockCode);
         if (matchByStock) {
-            return { name: matchByStock.name, corpCode: matchByStock.corpCode, stockCode: matchByStock.stockCode, market: matchByStock.market };
+            return companyFromDirectoryEntry(matchByStock);
         }
     }
 
-    const exactNameMatch = COMPANY_DIRECTORY.find((item) => item.name === input || item.displayLabel === input);
+    const exactNameMatch = directory.find((item) => (
+        item.name === input
+        || item.displayLabel === input
+        || (item.aliases || []).includes(input)
+    ));
     if (exactNameMatch) {
-        return { name: exactNameMatch.name, corpCode: exactNameMatch.corpCode, stockCode: exactNameMatch.stockCode, market: exactNameMatch.market };
+        return companyFromDirectoryEntry(exactNameMatch);
     }
 
-    const fuzzyMatch = InvestmentLogic.matchCompanies(COMPANY_DIRECTORY, input, 1)[0];
+    if (exactOnly) {
+        return null;
+    }
+
+    const fuzzyMatch = InvestmentLogic.matchCompanies(directory, input, 1)[0];
     if (fuzzyMatch) {
-        return { name: fuzzyMatch.name, corpCode: fuzzyMatch.corpCode, stockCode: fuzzyMatch.stockCode, market: fuzzyMatch.market };
+        return companyFromDirectoryEntry(fuzzyMatch);
     }
 
     if (/^\d{8}$/.test(input)) {
@@ -549,7 +760,7 @@ function buildProxyPostUrl(service, endpoint = '', productionAction = service) {
 }
 
 function chartCacheKey(stockCode) {
-    return `invest_nav_chart_cache_v41_${getCurrentYearKst()}_${stockCode}`;
+    return `invest_nav_chart_cache_v42_${getCurrentYearKst()}_${stockCode}`;
 }
 
 function readChartCache(stockCode) {
@@ -671,11 +882,14 @@ async function fetchDartReportList(corpCode) {
 }
 
 function formatChartSourceStatus() {
+    const coverage = state.chartVisible.length && state.chartFullSeries.length
+        ? ` · ${state.chartVisible.length}/${state.chartFullSeries.length}봉`
+        : '';
     if (state.chartSource === 'yfinance_python') {
-        return 'Yahoo Finance (yfinance Python) 일봉/주봉 차트';
+        return `Yahoo Finance (yfinance Python) 차트${coverage}`;
     }
     if (state.chartSource === 'cache') {
-        return 'Yahoo Finance 응답 지연으로 저장된 마지막 차트를 표시 중입니다.';
+        return `저장된 마지막 Yahoo Finance 차트${coverage}`;
     }
     return 'Yahoo Finance 차트가 연결되지 않아 가격 차트를 표시하지 못하고 있습니다.';
 }
@@ -703,20 +917,22 @@ function formatQuoteSourceText() {
     return '최근 차트 기준';
 }
 
-async function fetchYfinanceQuote(stockCode, market) {
+async function fetchYfinanceQuote(stockCode, market, nameHint = '') {
     return fetchJson(buildProxyUrl('yfinance', '/quote', {
         stock_code: stockCode,
-        market
+        market,
+        name_hint: nameHint
     }, 'yfinance_quote'));
 }
 
-async function fetchYfinanceChart(stockCode, market, interval, startDate, endDate) {
+async function fetchYfinanceChart(stockCode, market, interval, startDate, endDate, nameHint = '') {
     return fetchJson(buildProxyUrl('yfinance', '/chart', {
         stock_code: stockCode,
         market,
         interval,
         start_date: startDate,
-        end_date: endDate
+        end_date: endDate,
+        name_hint: nameHint
     }, 'yfinance_chart'));
 }
 
@@ -1219,12 +1435,84 @@ function renderTechSummary() {
     `;
 }
 
+function syncChartRangeButtons() {
+    document.querySelectorAll('#chart-range-controls .seg-btn').forEach((button) => {
+        button.classList.toggle('active', button.dataset.range === state.chartRange);
+    });
+}
+
+function getChartWindowMinimum(range, totalPoints) {
+    const requested = CHART_MIN_WINDOWS[String(range || 'DAY').toUpperCase()] || 20;
+    return Math.max(1, Math.min(Math.max(1, totalPoints || 0), requested));
+}
+
+function getDefaultChartWindowSize(range, totalPoints) {
+    const minimum = getChartWindowMinimum(range, totalPoints);
+    const requested = CHART_DEFAULT_WINDOWS[String(range || 'DAY').toUpperCase()] || minimum;
+    return Math.max(minimum, Math.min(Math.max(1, totalPoints || 0), requested));
+}
+
+function updateChartViewport(mode = 'preserve') {
+    const fullSeries = InvestmentLogic.resolveChartSeries(state.chartDaily, state.chartRange, {
+        currentYear: getCurrentYearKst(),
+        currentDateToken: getCurrentDateTokenKst()
+    });
+    state.chartFullSeries = fullSeries;
+
+    if (!fullSeries.length) {
+        state.chartWindow = { start: 0, end: 0 };
+        state.chartVisible = [];
+        updateChartResetButton();
+        return;
+    }
+
+    const total = fullSeries.length;
+    const minimum = getChartWindowMinimum(state.chartRange, total);
+
+    if (mode === 'recent' || !state.chartWindow) {
+        const windowSize = getDefaultChartWindowSize(state.chartRange, total);
+        state.chartWindow = InvestmentLogic.normalizeChartWindow(total, total - windowSize, windowSize, minimum);
+    } else if (mode === 'full') {
+        state.chartWindow = InvestmentLogic.normalizeChartWindow(total, 0, total, minimum);
+    } else {
+        state.chartWindow = InvestmentLogic.normalizeChartWindow(
+            total,
+            state.chartWindow.start,
+            state.chartWindow.end - state.chartWindow.start,
+            minimum
+        );
+    }
+
+    state.chartVisible = fullSeries.slice(state.chartWindow.start, state.chartWindow.end);
+    updateChartResetButton();
+}
+
+function isChartAtFullRange() {
+    if (!state.chartFullSeries.length || !state.chartWindow) return true;
+    return state.chartWindow.start === 0 && state.chartWindow.end === state.chartFullSeries.length;
+}
+
+function updateChartResetButton() {
+    const button = document.getElementById('chart-reset-btn');
+    if (!button) return;
+    button.disabled = !state.chartFullSeries.length || isChartAtFullRange();
+}
+
+function resetChartZoom() {
+    if (!state.chartDaily.length) return;
+    state.chartDrag = null;
+    priceHoverIndex = null;
+    renderCharts({ viewport: 'full' });
+}
+
 function onChartRangeClick(event) {
     const button = event.target.closest('.seg-btn');
     if (!button) return;
     state.chartRange = button.dataset.range;
-    document.querySelectorAll('.seg-btn').forEach((item) => item.classList.toggle('active', item === button));
-    renderCharts();
+    state.chartWindow = null;
+    state.chartDrag = null;
+    priceHoverIndex = null;
+    renderCharts({ viewport: 'recent' });
 }
 
 function onIndicatorToggle(event) {
@@ -1240,21 +1528,14 @@ function onIndicatorToggle(event) {
     renderCharts();
 }
 
-function renderCharts() {
-    state.chartVisible = getVisibleChartData(state.chartDaily, state.chartWeekly, state.chartRange);
+function renderCharts(options = {}) {
+    syncChartRangeButtons();
+    updateChartViewport(options.viewport || 'preserve');
     renderPriceChart(state.chartVisible);
     renderIndicatorChart(state.chartVisible);
     renderChartLegend();
     renderTechLegend();
-}
-
-function getVisibleChartData(dailyData, weeklyData, range) {
-    if (!dailyData.length) return [];
-    if (range === '1M') return dailyData.slice(-22);
-    if (range === '3M') return dailyData.slice(-66);
-    if (range === 'WEEK') return weeklyData.length ? weeklyData : aggregateCandles(dailyData, 'week');
-    if (range === 'YTD') return dailyData.slice();
-    return dailyData.slice(-22);
+    document.getElementById('chart-status').textContent = formatChartSourceStatus();
 }
 
 function aggregateCandles(data, mode) {
@@ -1293,24 +1574,35 @@ function renderPriceChart(data) {
         context.fillStyle = '#94a3b8';
         context.font = '14px Inter';
         context.fillText('차트 데이터가 없습니다.', 24, 32);
+        canvas.style.cursor = 'default';
+        canvas.onwheel = null;
+        canvas.onpointerdown = null;
+        canvas.onpointermove = null;
+        canvas.onpointerup = null;
+        canvas.onpointerleave = null;
+        canvas.onpointercancel = null;
         return;
     }
 
+    const fullSeries = state.chartFullSeries.length ? state.chartFullSeries : data;
+    const windowStart = state.chartWindow?.start ?? 0;
+    const windowEnd = state.chartWindow?.end ?? fullSeries.length;
     const padding = { top: 18, right: 86, bottom: 38, left: 18 };
     const width = canvas.width - padding.left - padding.right;
     const height = canvas.height - padding.top - padding.bottom;
-    const prices = data.flatMap((point) => [point.high, point.low]);
+    const closeSeries = fullSeries.map((point) => point.close);
+    const movingAverages = Object.fromEntries(
+        CHART_MA_PERIODS.map((period) => [period, computeSMA(closeSeries, period).slice(windowStart, windowEnd)])
+    );
+    const overlayValues = Object.values(movingAverages)
+        .flat()
+        .filter((value) => Number.isFinite(value));
+    const prices = data.flatMap((point) => [point.high, point.low]).concat(overlayValues);
     const maxPrice = Math.max(...prices) * 1.02;
     const minPrice = Math.min(...prices) * 0.98;
-    const xGap = width / data.length;
-    const candleWidth = Math.max(4, xGap * 0.6);
+    const xGap = width / Math.max(1, data.length);
+    const candleWidth = Math.max(4, Math.min(18, xGap * 0.58));
     const hovered = priceHoverIndex;
-
-    const closeSeries = data.map((point) => point.close);
-    const ma5 = computeSMA(closeSeries, 5);
-    const ma20 = computeSMA(closeSeries, 20);
-    const boll = computeBollingerSeries(closeSeries, 20, 2);
-    const localRsi = computeRSISeries(closeSeries, 14);
 
     const xAt = (index) => padding.left + xGap * index + xGap / 2;
     const yAt = (value) => padding.top + height - ((value - minPrice) / (maxPrice - minPrice || 1)) * height;
@@ -1351,15 +1643,9 @@ function renderPriceChart(data) {
         context.fillRect(x - candleWidth / 2, Math.min(openY, closeY), candleWidth, Math.max(2, Math.abs(closeY - openY)));
     });
 
-    if (state.selectedIndicators.has('MA')) {
-        drawOverlayLine(context, ma5, xAt, yAt, '#8fd3ff');
-        drawOverlayLine(context, ma20, xAt, yAt, '#f59e0b');
-    }
-
-    if (state.selectedIndicators.has('BOLL')) {
-        drawOverlayLine(context, boll.map((item) => item?.upper ?? null), xAt, yAt, 'rgba(34,211,238,0.9)');
-        drawOverlayLine(context, boll.map((item) => item?.lower ?? null), xAt, yAt, 'rgba(124,108,255,0.9)');
-    }
+    CHART_MA_PERIODS.forEach((period) => {
+        drawOverlayLine(context, movingAverages[period], xAt, yAt, CHART_MA_COLORS[period]);
+    });
 
     const labelStep = Math.max(1, Math.floor(data.length / 6));
     context.fillStyle = '#64748b';
@@ -1367,7 +1653,7 @@ function renderPriceChart(data) {
     context.font = '11px Inter';
     data.forEach((point, index) => {
         if (index % labelStep !== 0 && index !== data.length - 1) return;
-        context.fillText(formatAxisDate(point.date, state.chartRange === 'WEEK'), xAt(index), canvas.height - 12);
+        context.fillText(formatAxisDate(point.date, state.chartRange), xAt(index), canvas.height - 12);
     });
 
     if (hovered !== null && data[hovered]) {
@@ -1385,26 +1671,108 @@ function renderPriceChart(data) {
             `고가 ${point.high.toLocaleString()}원`,
             `저가 ${point.low.toLocaleString()}원`,
             `종가 ${point.close.toLocaleString()}원`,
-            `등락 ${point.changePct.toFixed(2)}%`
+            `등락 ${(point.changePct > 0 ? '+' : '') + point.changePct.toFixed(2)}%`
         ];
-        drawTooltip(context, x + 16, padding.top + 12, lines, canvas.width - 200, canvas.height - 120);
+        drawTooltip(context, x, padding.top + 10, lines, {
+            left: padding.left + 8,
+            top: padding.top + 8,
+            right: canvas.width - padding.right - 8,
+            bottom: canvas.height - padding.bottom - 8
+        });
     }
 
-    canvas.onmousemove = (event) => {
+    canvas.style.cursor = state.chartDrag ? 'grabbing' : 'crosshair';
+
+    const clearHover = () => {
+        if (priceHoverIndex === null) return;
+        priceHoverIndex = null;
+        renderPriceChart(state.chartVisible);
+    };
+
+    const releaseDrag = (pointerId) => {
+        if (!state.chartDrag) return;
+        if (pointerId !== undefined && state.chartDrag.pointerId !== pointerId) return;
+        try {
+            if (state.chartDrag.pointerId !== undefined) {
+                canvas.releasePointerCapture?.(state.chartDrag.pointerId);
+            }
+        } catch (error) {
+            // Pointer capture release can fail when the pointer was already lost.
+        }
+        state.chartDrag = null;
+        canvas.style.cursor = 'crosshair';
+    };
+
+    canvas.onwheel = (event) => {
+        if (!state.chartFullSeries.length || !state.chartWindow) return;
+        event.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const localX = event.clientX - rect.left - padding.left;
+        const anchorRatio = Math.max(0, Math.min(1, localX / Math.max(1, width)));
+        const factor = event.deltaY < 0 ? 0.82 : 1.22;
+        state.chartWindow = InvestmentLogic.zoomChartWindow(
+            state.chartWindow,
+            state.chartFullSeries.length,
+            factor,
+            anchorRatio,
+            getChartWindowMinimum(state.chartRange, state.chartFullSeries.length)
+        );
+        state.chartDrag = null;
+        priceHoverIndex = null;
+        renderCharts({ viewport: 'preserve' });
+    };
+
+    canvas.onpointerdown = (event) => {
+        if (!state.chartVisible.length || !state.chartWindow) return;
+        state.chartDrag = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            window: { ...state.chartWindow }
+        };
+        canvas.setPointerCapture?.(event.pointerId);
+        canvas.style.cursor = 'grabbing';
+    };
+
+    canvas.onpointermove = (event) => {
+        if (state.chartDrag && state.chartDrag.pointerId === event.pointerId) {
+            const dragWidth = Math.max(1, width);
+            const visiblePoints = Math.max(1, state.chartDrag.window.end - state.chartDrag.window.start);
+            const deltaRatio = (event.clientX - state.chartDrag.startX) / dragWidth;
+            const deltaPoints = Math.round(-deltaRatio * visiblePoints);
+            state.chartWindow = InvestmentLogic.panChartWindow(
+                state.chartDrag.window,
+                deltaPoints,
+                state.chartFullSeries.length
+            );
+            priceHoverIndex = null;
+            renderCharts({ viewport: 'preserve' });
+            return;
+        }
+
         const rect = canvas.getBoundingClientRect();
         const x = event.clientX - rect.left - padding.left;
         if (x < 0 || x > width) {
-            priceHoverIndex = null;
-            renderPriceChart(data);
+            clearHover();
             return;
         }
-        priceHoverIndex = Math.min(data.length - 1, Math.max(0, Math.floor(x / xGap)));
-        renderPriceChart(data);
+        const nextIndex = Math.min(data.length - 1, Math.max(0, Math.floor(x / xGap)));
+        if (nextIndex === priceHoverIndex) return;
+        priceHoverIndex = nextIndex;
+        renderPriceChart(state.chartVisible);
     };
 
-    canvas.onmouseleave = () => {
-        priceHoverIndex = null;
-        renderPriceChart(data);
+    canvas.onpointerup = (event) => {
+        releaseDrag(event.pointerId);
+    };
+
+    canvas.onpointercancel = (event) => {
+        releaseDrag(event.pointerId);
+        clearHover();
+    };
+
+    canvas.onpointerleave = (event) => {
+        if (state.chartDrag && state.chartDrag.pointerId === event.pointerId) return;
+        clearHover();
     };
 }
 
@@ -1438,6 +1806,12 @@ function renderIndicatorChart(data) {
     const xGap = width / data.length;
     const xAt = (index) => padding.left + xGap * index + xGap / 2;
     const localTechnicals = computeTechnicals(data);
+    if (!localTechnicals) {
+        context.fillStyle = '#94a3b8';
+        context.font = '13px Inter';
+        context.fillText('선택한 기간의 봉 수가 충분할 때 보조 차트가 표시됩니다.', 18, 30);
+        return;
+    }
 
     selectedOscillators.forEach((panel, panelIndex) => {
         const top = padding.top + panelIndex * (panelHeight + 12);
@@ -1495,17 +1869,13 @@ function renderIndicatorChart(data) {
 function renderChartLegend() {
     const items = [
         { type: 'dot', color: '#22c55e', label: '상승 봉' },
-        { type: 'dot', color: '#ef4444', label: '하락 봉' }
+        { type: 'dot', color: '#ef4444', label: '하락 봉' },
+        ...CHART_MA_PERIODS.map((period) => ({
+            type: 'line',
+            color: CHART_MA_COLORS[period],
+            label: `MA${period}`
+        }))
     ];
-
-    if (state.selectedIndicators.has('MA')) {
-        items.push({ type: 'line', color: '#8fd3ff', label: 'MA5' });
-        items.push({ type: 'line', color: '#f59e0b', label: 'MA20' });
-    }
-    if (state.selectedIndicators.has('BOLL')) {
-        items.push({ type: 'line', color: 'rgba(34,211,238,0.9)', label: '볼린저 상단' });
-        items.push({ type: 'line', color: 'rgba(124,108,255,0.9)', label: '볼린저 하단' });
-    }
 
     document.getElementById('chart-legend').innerHTML = items.map((item) => `
         <span class="legend-chip">
@@ -1799,21 +2169,65 @@ function drawLineSeries(context, series, xAt, yAt, color, width = 1.8) {
     context.stroke();
 }
 
-function drawTooltip(context, x, y, lines, maxX, maxY) {
-    const boxWidth = 168;
-    const boxHeight = lines.length * 18 + 16;
-    const drawX = Math.min(x, maxX);
-    const drawY = Math.min(y, maxY);
-    context.fillStyle = 'rgba(8,10,16,0.92)';
-    context.strokeStyle = 'rgba(255,255,255,0.14)';
-    context.lineWidth = 1;
-    context.fillRect(drawX, drawY, boxWidth, boxHeight);
-    context.strokeRect(drawX, drawY, boxWidth, boxHeight);
-    context.fillStyle = '#f8fafc';
-    context.font = '11px Inter';
-    lines.forEach((line, index) => {
-        context.fillText(line, drawX + 10, drawY + 18 + index * 16);
+function drawTooltip(context, anchorX, anchorY, lines, bounds) {
+    const paddingX = 16;
+    const paddingY = 14;
+    const lineHeight = 20;
+    const safeLines = Array.isArray(lines) ? lines : [];
+
+    context.save();
+    context.font = '600 13px Inter';
+    const boxWidth = Math.min(
+        Math.max(
+            156,
+            ...safeLines.map((line) => context.measureText(line).width + paddingX * 2)
+        ),
+        238
+    );
+    const boxHeight = Math.max(48, safeLines.length * lineHeight + paddingY * 2 - 4);
+    const layout = InvestmentLogic.resolveChartTooltipLayout({
+        anchorX,
+        anchorY,
+        boxWidth,
+        boxHeight,
+        bounds,
+        gap: 16
     });
+    const radius = 16;
+
+    context.textAlign = 'left';
+    context.textBaseline = 'top';
+    context.shadowColor = 'rgba(15, 23, 42, 0.18)';
+    context.shadowBlur = 16;
+    context.shadowOffsetY = 6;
+    context.fillStyle = 'rgba(255, 255, 255, 0.84)';
+    context.strokeStyle = 'rgba(255, 255, 255, 0.32)';
+    context.lineWidth = 1;
+
+    context.beginPath();
+    roundedRectPath(context, layout.x, layout.y, boxWidth, boxHeight, radius);
+    context.fill();
+    context.stroke();
+
+    context.shadowColor = 'transparent';
+    safeLines.forEach((line, index) => {
+        const textY = layout.y + paddingY + (index * lineHeight);
+        const isHeading = index === 0;
+        context.font = isHeading ? '700 13px Inter' : '600 12px Inter';
+        context.fillStyle = isHeading ? 'rgba(15, 23, 42, 0.96)' : 'rgba(15, 23, 42, 0.88)';
+        context.fillText(line, layout.x + paddingX, textY);
+    });
+    context.restore();
+}
+
+function roundedRectPath(context, x, y, width, height, radius) {
+    const safeRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
+    context.moveTo(x + safeRadius, y);
+    context.arcTo(x + width, y, x + width, y + height, safeRadius);
+    context.arcTo(x + width, y + height, x, y + height, safeRadius);
+    context.arcTo(x, y + height, x, y, safeRadius);
+    context.arcTo(x, y, x + width, y, safeRadius);
+    context.closePath();
 }
 
 function buildOscillatorMarkers(technicals, selectedIndicators) {
@@ -1936,9 +2350,13 @@ function formatQuoteTime(value) {
     }).format(date);
 }
 
-function formatAxisDate(token, weekly = false) {
+function formatAxisDate(token, range = 'DAY') {
     if (!token || token.length !== 8) return '';
-    return weekly ? `${token.slice(4, 6)}/${token.slice(6, 8)}` : `${token.slice(4, 6)}.${token.slice(6, 8)}`;
+    const mode = String(range || 'DAY').toUpperCase();
+    if (mode === 'YEAR') return token.slice(0, 4);
+    if (mode === 'MONTH') return `${token.slice(2, 4)}.${token.slice(4, 6)}`;
+    if (mode === 'WEEK') return `${token.slice(4, 6)}/${token.slice(6, 8)}`;
+    return `${token.slice(4, 6)}.${token.slice(6, 8)}`;
 }
 
 function getCurrentYearKst() {

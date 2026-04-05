@@ -28,6 +28,34 @@ def build_yahoo_symbol(stock_code: str, market: str) -> str:
     return raw
 
 
+def yahoo_symbol_candidates(stock_code: str, market: str) -> Iterable[str]:
+    raw = str(stock_code or "").strip().upper()
+    if not raw:
+        return []
+    if "." in raw or "=" in raw:
+        return [raw]
+
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if len(digits) == 6 and digits == raw:
+        market_key = str(market or "").strip().upper()
+        if market_key == "KOSDAQ":
+            return [f"{digits}.KQ"]
+        if market_key == "KOSPI":
+            return [f"{digits}.KS"]
+        return [f"{digits}.KS", f"{digits}.KQ"]
+
+    return [raw]
+
+
+def market_from_yahoo_symbol(symbol: str, fallback: str) -> str:
+    upper = str(symbol or "").strip().upper()
+    if upper.endswith(".KQ"):
+        return "KOSDAQ"
+    if upper.endswith(".KS"):
+        return "KOSPI"
+    return str(fallback or "").strip().upper() or "AUTO"
+
+
 def import_yfinance():
     try:
         import yfinance as yf  # type: ignore
@@ -115,15 +143,82 @@ def series_last_valid(values: Iterable[Any]) -> Optional[float]:
     return None
 
 
-def fetch_quote_payload(stock_code: str, market: str = "KOSPI") -> Dict[str, Any]:
-    symbol = build_yahoo_symbol(stock_code, market)
-    if not symbol:
+def normalize_search_text(value: Any) -> str:
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return ""
+    return "".join(ch for ch in raw if ch.isalnum())
+
+
+def parse_name_hints(name_hint: str) -> list[str]:
+    hints = []
+    for token in str(name_hint or "").split("|"):
+        normalized = normalize_search_text(token)
+        if normalized and normalized not in hints:
+            hints.append(normalized)
+    return hints
+
+
+def company_name_variants(symbol: str, info: Dict[str, Any]) -> list[str]:
+    variants = []
+    for value in (
+        info.get("shortName"),
+        info.get("longName"),
+        info.get("displayName"),
+        info.get("name"),
+        symbol,
+    ):
+        normalized = normalize_search_text(value)
+        if normalized and normalized not in variants:
+            variants.append(normalized)
+    return variants
+
+
+def suspicious_company_name(symbol: str, info: Dict[str, Any]) -> bool:
+    primary_name = str(info.get("shortName") or info.get("longName") or "").strip()
+    if not primary_name:
+        return False
+
+    normalized_primary = normalize_search_text(primary_name)
+    normalized_symbol = normalize_search_text(symbol)
+    if normalized_symbol and normalized_primary == normalized_symbol:
+        return True
+    if "," in primary_name and normalized_symbol and normalized_symbol in normalized_primary:
+        return True
+    return False
+
+
+def score_symbol_match(symbol: str, info: Dict[str, Any], name_hints: Iterable[str]) -> int:
+    score = 5
+    variants = company_name_variants(symbol, info)
+    if not variants:
+        score = 0
+
+    for hint in name_hints:
+        for variant in variants:
+            if variant == hint:
+                score = max(score, 120)
+            elif variant.startswith(hint) or hint.startswith(variant):
+                score = max(score, 90)
+            elif hint in variant or variant in hint:
+                score = max(score, 70)
+
+    if suspicious_company_name(symbol, info):
+        score -= 20
+    return score
+
+
+def fetch_quote_payload(stock_code: str, market: str = "KOSPI", name_hint: str = "") -> Dict[str, Any]:
+    symbols = list(yahoo_symbol_candidates(stock_code, market))
+    normalized_market = str(market or "").strip().upper() or "KOSPI"
+    name_hints = parse_name_hints(name_hint)
+    if not symbols:
         return {
             "live": False,
             "source": "yfinance_python",
             "error": "stock_code is required",
             "symbol": "",
-            "market": market,
+            "market": normalized_market,
         }
 
     yf, import_error = import_yfinance()
@@ -132,109 +227,117 @@ def fetch_quote_payload(stock_code: str, market: str = "KOSPI") -> Dict[str, Any
             "live": False,
             "source": "yfinance_python",
             "error": f"Python yfinance module is unavailable: {import_error}",
-            "symbol": symbol,
-            "market": market,
+            "symbol": symbols[0],
+            "market": normalized_market,
         }
 
-    try:
-        ticker = yf.Ticker(symbol)
-        fast_info = safe_fast_info(ticker)
-        info = safe_info(ticker)
-        history = safe_history(ticker, period="7d", interval="1d")
+    last_error = "Yahoo Finance returned no quote data"
+    best_payload = None
+    best_score = -10**9
+    for symbol in symbols:
+        try:
+            ticker = yf.Ticker(symbol)
+            fast_info = safe_fast_info(ticker)
+            info = safe_info(ticker)
+            history = safe_history(ticker, period="7d", interval="1d")
 
-        history_close = series_last_valid(history["Close"].tolist()) if not history.empty and "Close" in history else None
-        previous_close = None
-        last_timestamp = None
-        open_price = None
-        day_high = None
-        day_low = None
-        volume = None
+            history_close = series_last_valid(history["Close"].tolist()) if not history.empty and "Close" in history else None
+            previous_close = None
+            last_timestamp = None
+            open_price = None
+            day_high = None
+            day_low = None
+            volume = None
 
-        if not history.empty:
-            rows = history.dropna(subset=["Close"]) if "Close" in history else history
-            if not rows.empty:
-                last_row = rows.iloc[-1]
-                previous_row = rows.iloc[-2] if len(rows.index) > 1 else None
-                previous_close = normalize_number(previous_row.get("Close")) if previous_row is not None else None
-                last_timestamp = rows.index[-1]
-                open_price = normalize_number(last_row.get("Open"))
-                day_high = normalize_number(last_row.get("High"))
-                day_low = normalize_number(last_row.get("Low"))
-                volume = normalize_number(last_row.get("Volume"))
+            if not history.empty:
+                rows = history.dropna(subset=["Close"]) if "Close" in history else history
+                if not rows.empty:
+                    last_row = rows.iloc[-1]
+                    previous_row = rows.iloc[-2] if len(rows.index) > 1 else None
+                    previous_close = normalize_number(previous_row.get("Close")) if previous_row is not None else None
+                    last_timestamp = rows.index[-1]
+                    open_price = normalize_number(last_row.get("Open"))
+                    day_high = normalize_number(last_row.get("High"))
+                    day_low = normalize_number(last_row.get("Low"))
+                    volume = normalize_number(last_row.get("Volume"))
 
-        current_price = normalize_number(
-            fast_info.get("lastPrice")
-            or fast_info.get("regularMarketPrice")
-            or info.get("currentPrice")
-            or info.get("regularMarketPrice")
-            or history_close
-        )
-        previous_close = normalize_number(
-            fast_info.get("previousClose")
-            or info.get("previousClose")
-            or info.get("regularMarketPreviousClose")
-            or previous_close
-        )
-        open_price = normalize_number(
-            fast_info.get("open")
-            or info.get("open")
-            or info.get("regularMarketOpen")
-            or open_price
-        )
-        day_high = normalize_number(
-            fast_info.get("dayHigh")
-            or info.get("dayHigh")
-            or info.get("regularMarketDayHigh")
-            or day_high
-        )
-        day_low = normalize_number(
-            fast_info.get("dayLow")
-            or info.get("dayLow")
-            or info.get("regularMarketDayLow")
-            or day_low
-        )
-        volume = normalize_number(
-            fast_info.get("lastVolume")
-            or fast_info.get("regularMarketVolume")
-            or info.get("volume")
-            or info.get("regularMarketVolume")
-            or volume
-        )
+            current_price = normalize_number(
+                fast_info.get("lastPrice")
+                or fast_info.get("regularMarketPrice")
+                or info.get("currentPrice")
+                or info.get("regularMarketPrice")
+                or history_close
+            )
+            previous_close = normalize_number(
+                fast_info.get("previousClose")
+                or info.get("previousClose")
+                or info.get("regularMarketPreviousClose")
+                or previous_close
+            )
+            open_price = normalize_number(
+                fast_info.get("open")
+                or info.get("open")
+                or info.get("regularMarketOpen")
+                or open_price
+            )
+            day_high = normalize_number(
+                fast_info.get("dayHigh")
+                or info.get("dayHigh")
+                or info.get("regularMarketDayHigh")
+                or day_high
+            )
+            day_low = normalize_number(
+                fast_info.get("dayLow")
+                or info.get("dayLow")
+                or info.get("regularMarketDayLow")
+                or day_low
+            )
+            volume = normalize_number(
+                fast_info.get("lastVolume")
+                or fast_info.get("regularMarketVolume")
+                or info.get("volume")
+                or info.get("regularMarketVolume")
+                or volume
+            )
 
-        if current_price is None:
-            return {
-                "live": False,
+            if current_price is None:
+                last_error = "Yahoo Finance returned no quote data"
+                continue
+
+            payload = {
+                "live": True,
                 "source": "yfinance_python",
-                "error": "Yahoo Finance returned no quote data",
                 "symbol": symbol,
-                "market": market,
+                "market": market_from_yahoo_symbol(symbol, normalized_market),
+                "shortName": info.get("shortName") or info.get("longName") or "",
+                "currentPrice": current_price,
+                "previousClose": previous_close,
+                "open": open_price,
+                "dayHigh": day_high,
+                "dayLow": day_low,
+                "volume": volume,
+                "regularMarketTime": isoformat_kst(last_timestamp),
                 "fetched_at": now_kst().isoformat(),
             }
+            score = score_symbol_match(symbol, info, name_hints)
+            if best_payload is None or score > best_score:
+                best_payload = payload
+                best_score = score
+        except Exception as error:
+            last_error = str(error)
+            continue
 
-        return {
-            "live": True,
-            "source": "yfinance_python",
-            "symbol": symbol,
-            "market": market,
-            "shortName": info.get("shortName") or info.get("longName") or "",
-            "currentPrice": current_price,
-            "previousClose": previous_close,
-            "open": open_price,
-            "dayHigh": day_high,
-            "dayLow": day_low,
-            "volume": volume,
-            "regularMarketTime": isoformat_kst(last_timestamp),
-            "fetched_at": now_kst().isoformat(),
-        }
-    except Exception as error:
-        return {
-            "live": False,
-            "source": "yfinance_python",
-            "error": str(error),
-            "symbol": symbol,
-            "market": market,
-            "fetched_at": now_kst().isoformat(),
-        }
+    if best_payload is not None:
+        return best_payload
+
+    return {
+        "live": False,
+        "source": "yfinance_python",
+        "error": last_error,
+        "symbol": symbols[0],
+        "market": normalized_market,
+        "fetched_at": now_kst().isoformat(),
+    }
 
 
 def fetch_chart_payload(
@@ -243,15 +346,17 @@ def fetch_chart_payload(
     interval: str = "daily",
     start_date: str = "",
     end_date: str = "",
+    name_hint: str = "",
 ) -> Dict[str, Any]:
-    symbol = build_yahoo_symbol(stock_code, market)
-    if not symbol:
+    symbols = list(yahoo_symbol_candidates(stock_code, market))
+    normalized_market = str(market or "").strip().upper() or "KOSPI"
+    if not symbols:
         return {
             "live": False,
             "source": "yfinance_python",
             "error": "stock_code is required",
             "symbol": "",
-            "market": market,
+            "market": normalized_market,
             "interval": interval,
             "rows": [],
         }
@@ -262,8 +367,8 @@ def fetch_chart_payload(
             "live": False,
             "source": "yfinance_python",
             "error": f"Python yfinance module is unavailable: {import_error}",
-            "symbol": symbol,
-            "market": market,
+            "symbol": symbols[0],
+            "market": normalized_market,
             "interval": interval,
             "rows": [],
         }
@@ -274,8 +379,8 @@ def fetch_chart_payload(
             "live": False,
             "source": "yfinance_python",
             "error": f"Unsupported yfinance interval: {normalized_interval}",
-            "symbol": symbol,
-            "market": market,
+            "symbol": symbols[0],
+            "market": normalized_market,
             "interval": normalized_interval,
             "rows": [],
         }
@@ -285,74 +390,81 @@ def fetch_chart_payload(
     end = parse_date_token(end_date, today)
     yf_interval = "1wk" if normalized_interval == "weekly" else "1d"
 
-    try:
-        ticker = yf.Ticker(symbol)
-        history = safe_history(
-            ticker,
-            start=start.isoformat(),
-            end=(end + dt.timedelta(days=1)).isoformat(),
-            interval=yf_interval,
-        )
-        if history.empty:
-            return {
-                "live": False,
-                "source": "yfinance_python",
-                "error": "Yahoo Finance returned no chart rows",
-                "symbol": symbol,
-                "market": market,
-                "interval": normalized_interval,
-                "rows": [],
-                "fetched_at": now_kst().isoformat(),
-            }
+    if len(symbols) > 1:
+        preferred_quote = fetch_quote_payload(stock_code, normalized_market, name_hint)
+        preferred_symbol = str(preferred_quote.get("symbol") or "").strip()
+        if preferred_quote.get("live") and preferred_symbol in symbols:
+            symbols = [preferred_symbol, *[symbol for symbol in symbols if symbol != preferred_symbol]]
 
-        rows = []
-        previous_close = None
-        for index, row in history.iterrows():
-            close = normalize_number(row.get("Close"))
-            open_price = normalize_number(row.get("Open"))
-            high = normalize_number(row.get("High"))
-            low = normalize_number(row.get("Low"))
-            volume = normalize_number(row.get("Volume")) or 0
-            if close is None or open_price is None or high is None or low is None:
+    last_error = "Yahoo Finance returned no chart rows"
+    for symbol in symbols:
+        try:
+            ticker = yf.Ticker(symbol)
+            history = safe_history(
+                ticker,
+                start=start.isoformat(),
+                end=(end + dt.timedelta(days=1)).isoformat(),
+                interval=yf_interval,
+            )
+            if history.empty:
+                last_error = "Yahoo Finance returned no chart rows"
                 continue
 
-            base = previous_close if previous_close is not None else open_price
-            change = close - base if base is not None else 0
-            change_pct = (change / base) * 100 if base else 0
-            rows.append({
-                "date": index.strftime("%Y-%m-%d"),
-                "open": open_price,
-                "high": high,
-                "low": low,
-                "close": close,
-                "volume": int(volume) if isinstance(volume, (int, float)) else volume,
-                "previousClose": previous_close,
-                "change": change,
-                "changePct": change_pct,
-            })
-            previous_close = close
+            rows = []
+            previous_close = None
+            for index, row in history.iterrows():
+                close = normalize_number(row.get("Close"))
+                open_price = normalize_number(row.get("Open"))
+                high = normalize_number(row.get("High"))
+                low = normalize_number(row.get("Low"))
+                volume = normalize_number(row.get("Volume")) or 0
+                if close is None or open_price is None or high is None or low is None:
+                    continue
 
-        return {
-            "live": bool(rows),
-            "source": "yfinance_python",
-            "error": None if rows else "Yahoo Finance returned no chart rows",
-            "symbol": symbol,
-            "market": market,
-            "interval": normalized_interval,
-            "rows": rows,
-            "fetched_at": now_kst().isoformat(),
-        }
-    except Exception as error:
-        return {
-            "live": False,
-            "source": "yfinance_python",
-            "error": str(error),
-            "symbol": symbol,
-            "market": market,
-            "interval": normalized_interval,
-            "rows": [],
-            "fetched_at": now_kst().isoformat(),
-        }
+                base = previous_close if previous_close is not None else open_price
+                change = close - base if base is not None else 0
+                change_pct = (change / base) * 100 if base else 0
+                rows.append({
+                    "date": index.strftime("%Y-%m-%d"),
+                    "open": open_price,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "volume": int(volume) if isinstance(volume, (int, float)) else volume,
+                    "previousClose": previous_close,
+                    "change": change,
+                    "changePct": change_pct,
+                })
+                previous_close = close
+
+            if not rows:
+                last_error = "Yahoo Finance returned no chart rows"
+                continue
+
+            return {
+                "live": True,
+                "source": "yfinance_python",
+                "error": None,
+                "symbol": symbol,
+                "market": market_from_yahoo_symbol(symbol, normalized_market),
+                "interval": normalized_interval,
+                "rows": rows,
+                "fetched_at": now_kst().isoformat(),
+            }
+        except Exception as error:
+            last_error = str(error)
+            continue
+
+    return {
+        "live": False,
+        "source": "yfinance_python",
+        "error": last_error,
+        "symbol": symbols[0],
+        "market": normalized_market,
+        "interval": normalized_interval,
+        "rows": [],
+        "fetched_at": now_kst().isoformat(),
+    }
 
 
 def main() -> None:
@@ -362,6 +474,7 @@ def main() -> None:
     quote_parser = subparsers.add_parser("quote")
     quote_parser.add_argument("--stock-code", required=True)
     quote_parser.add_argument("--market", default="KOSPI")
+    quote_parser.add_argument("--name-hint", default="")
 
     chart_parser = subparsers.add_parser("chart")
     chart_parser.add_argument("--stock-code", required=True)
@@ -369,12 +482,13 @@ def main() -> None:
     chart_parser.add_argument("--interval", default="daily")
     chart_parser.add_argument("--start-date", default="")
     chart_parser.add_argument("--end-date", default="")
+    chart_parser.add_argument("--name-hint", default="")
 
     args = parser.parse_args()
     if args.command == "quote":
-        payload = fetch_quote_payload(args.stock_code, args.market)
+        payload = fetch_quote_payload(args.stock_code, args.market, args.name_hint)
     else:
-        payload = fetch_chart_payload(args.stock_code, args.market, args.interval, args.start_date, args.end_date)
+        payload = fetch_chart_payload(args.stock_code, args.market, args.interval, args.start_date, args.end_date, args.name_hint)
     print(json.dumps(payload, ensure_ascii=False))
 
 

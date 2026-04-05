@@ -1,5 +1,6 @@
 import datetime as dt
 import http.server
+import io
 import json
 import os
 import pathlib
@@ -7,11 +8,15 @@ import tempfile
 import urllib.parse
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
+import zipfile
+from typing import Optional
 
 import yfinance_bridge
 
 APP_ROOT = pathlib.Path(__file__).resolve().parent
 AWS_FILE = APP_ROOT / "AWS.txt"
+COMPANY_DIRECTORY_CACHE = pathlib.Path(tempfile.gettempdir()) / "investment-navigator-company-directory.json"
 
 DART_BASE = "https://opendart.fss.or.kr/api"
 KRX_BASE = "https://data-dbg.krx.co.kr/svc/apis/sto"
@@ -20,6 +25,7 @@ KIWOOM_TOKEN_URL = "https://api.kiwoom.com/oauth2/token"
 NAVER_STOCK_BASE = "https://m.stock.naver.com/api/stock"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 KAKAO_TOKEN_URL = "https://kauth.kakao.com/oauth/token"
+KST = dt.timezone(dt.timedelta(hours=9))
 
 
 def read_aws_lines():
@@ -29,6 +35,10 @@ def read_aws_lines():
 
 
 AWS_LINES = read_aws_lines()
+
+
+def now_kst() -> dt.datetime:
+    return dt.datetime.now(KST)
 
 
 def read_next_value(label: str) -> str:
@@ -88,6 +98,18 @@ def request_json(url: str, method: str = "GET", params=None, headers=None, json_
         return response.status, raw
 
 
+def request_bytes(url: str, method: str = "GET", params=None, headers=None):
+    params = params or {}
+    headers = headers or {}
+
+    if params:
+        url += ("&" if "?" in url else "?") + urllib.parse.urlencode(params)
+
+    request = urllib.request.Request(url, method=method, headers=headers)
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return response.status, response.read()
+
+
 def request_details(url: str, method: str = "GET", params=None, headers=None, json_body=None, form_body=None):
     params = params or {}
     headers = headers or {}
@@ -120,6 +142,142 @@ def safe_json(raw: str):
         return json.loads(raw)
     except json.JSONDecodeError:
         return {"raw": raw}
+
+
+def extract_gold_usd_ounce(payload) -> Optional[float]:
+    if isinstance(payload, list):
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            gold_value = normalize_number(item.get("gold"))
+            if gold_value and gold_value > 0:
+                return float(gold_value)
+            price_value = normalize_number(item.get("price"))
+            if price_value and price_value > 0:
+                return float(price_value)
+        return None
+
+    if isinstance(payload, dict):
+        gold_value = normalize_number(payload.get("gold"))
+        if gold_value and gold_value > 0:
+            return float(gold_value)
+        price_value = normalize_number(payload.get("price"))
+        if price_value and price_value > 0:
+            return float(price_value)
+
+    return None
+
+
+def resolve_gold_usd_ounce() -> Optional[float]:
+    loaders = [
+        lambda: safe_json(request_json("https://api.metals.live/v1/spot/gold")[1]),
+        lambda: safe_json(request_json("https://api.gold-api.com/price/XAU")[1]),
+        lambda: yfinance_bridge.fetch_quote_payload("GC=F", "COMMODITY"),
+    ]
+
+    for load in loaders:
+        try:
+            value = extract_gold_usd_ounce(load())
+            if value and value > 0:
+                return float(value)
+        except Exception:
+            continue
+
+    return None
+
+
+def read_cached_company_directory(allow_stale: bool = False):
+    if not COMPANY_DIRECTORY_CACHE.exists():
+        return None
+    try:
+        payload = json.loads(COMPANY_DIRECTORY_CACHE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("directory"), list):
+        return None
+    cached_at = str(payload.get("cachedAt", "")).strip()
+    try:
+        cached_dt = dt.datetime.fromisoformat(cached_at)
+    except ValueError:
+        cached_dt = dt.datetime.fromtimestamp(0, tz=KST)
+    if cached_dt.tzinfo is None:
+        cached_dt = cached_dt.replace(tzinfo=KST)
+    is_fresh = cached_dt >= (now_kst() - dt.timedelta(hours=12))
+    if not allow_stale and not is_fresh:
+        return None
+    return payload
+
+
+def write_cached_company_directory(payload):
+    try:
+        COMPANY_DIRECTORY_CACHE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.chmod(COMPANY_DIRECTORY_CACHE, 0o600)
+    except OSError:
+        pass
+
+
+def build_company_directory_entries(xml_raw: bytes):
+    root = ET.fromstring(xml_raw)
+    entries = []
+    for node in root.findall("list"):
+        stock_code = "".join(ch for ch in (node.findtext("stock_code", "") or "") if ch.isdigit())
+        if len(stock_code) != 6:
+            continue
+        name = (node.findtext("corp_name", "") or "").strip()
+        if not name:
+            continue
+        corp_code = (node.findtext("corp_code", "") or "").strip()
+        corp_eng_name = (node.findtext("corp_eng_name", "") or "").strip()
+        aliases = [corp_eng_name] if corp_eng_name and corp_eng_name.lower() != name.lower() else []
+        entries.append({
+            "name": name,
+            "stockCode": stock_code,
+            "corpCode": corp_code,
+            "market": "AUTO",
+            "aliases": aliases,
+        })
+    entries.sort(key=lambda item: (item.get("name", ""), item.get("stockCode", "")))
+    return entries
+
+
+def fetch_company_directory_payload():
+    if not DART_KEY:
+        raise RuntimeError("DART API key is not configured")
+    _, archive = request_bytes(f"{DART_BASE}/corpCode.xml", params={"crtfc_key": DART_KEY})
+    with zipfile.ZipFile(io.BytesIO(archive)) as zip_file:
+        xml_raw = zip_file.read("CORPCODE.xml")
+    entries = build_company_directory_entries(xml_raw)
+    payload = {
+        "live": True,
+        "source": "dart_corp_code",
+        "cachedAt": now_kst().isoformat(),
+        "count": len(entries),
+        "directory": entries,
+    }
+    write_cached_company_directory(payload)
+    return payload
+
+
+def company_directory_payload():
+    cached = read_cached_company_directory()
+    if cached is not None:
+        return cached
+    try:
+        return fetch_company_directory_payload()
+    except Exception as error:
+        stale = read_cached_company_directory(allow_stale=True)
+        if stale is not None:
+            stale["stale"] = True
+            stale["error"] = str(error)
+            return stale
+        return {
+            "live": False,
+            "source": "dart_corp_code",
+            "cachedAt": now_kst().isoformat(),
+            "count": 0,
+            "directory": [],
+            "error": str(error),
+        }
 
 
 def date_token(value: dt.date) -> str:
@@ -346,6 +504,9 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         if path == "/market/summary":
             self.handle_market_summary()
             return
+        if path == "/company-directory":
+            self.send_json(200, company_directory_payload())
+            return
         if path == "/market/quote":
             self.handle_market_quote(params)
             return
@@ -482,11 +643,12 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
     def handle_yfinance_quote(self, params):
         stock_code = params.get("stock_code", "").strip()
         market = params.get("market", "KOSPI").strip() or "KOSPI"
+        name_hint = params.get("name_hint", "").strip()
         if not stock_code:
             self.send_json(400, {"error": "stock_code 파라미터가 필요합니다.", "live": False, "source": "yfinance_python"})
             return
 
-        payload = yfinance_bridge.fetch_quote_payload(stock_code, market)
+        payload = yfinance_bridge.fetch_quote_payload(stock_code, market, name_hint)
         self.send_json(200, payload)
 
     def handle_yfinance_chart(self, params):
@@ -495,12 +657,13 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         interval = params.get("interval", "daily").strip().lower() or "daily"
         start_date = "".join(ch for ch in params.get("start_date", f"{dt.date.today().year}0101") if ch.isdigit())
         end_date = "".join(ch for ch in params.get("end_date", date_token(dt.date.today())) if ch.isdigit())
+        name_hint = params.get("name_hint", "").strip()
 
         if not stock_code:
             self.send_json(400, {"error": "stock_code 파라미터가 필요합니다.", "live": False, "source": "yfinance_python", "rows": []})
             return
 
-        payload = yfinance_bridge.fetch_chart_payload(stock_code, market, interval, start_date, end_date)
+        payload = yfinance_bridge.fetch_chart_payload(stock_code, market, interval, start_date, end_date, name_hint)
         self.send_json(200, payload)
 
     def handle_krx_chart(self, params):
@@ -635,17 +798,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             pass
 
         try:
-            _, gold_raw = request_json("https://api.metals.live/v1/spot/gold")
-            gold_payload = safe_json(gold_raw)
-            gold_usd_oz = None
-            if isinstance(gold_payload, list):
-                for item in gold_payload:
-                    if isinstance(item, dict) and "gold" in item:
-                        gold_usd_oz = item["gold"]
-                        break
-            elif isinstance(gold_payload, dict):
-                gold_usd_oz = gold_payload.get("gold")
-
+            gold_usd_oz = resolve_gold_usd_ounce()
             if gold_usd_oz and summary["usdKrw"]:
                 summary["goldKrwPerGram"] = round(float(gold_usd_oz) * float(summary["usdKrw"]) / 31.1034768, 2)
         except Exception:

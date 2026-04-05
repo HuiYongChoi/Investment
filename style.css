@@ -666,6 +666,14 @@ header#header {
     gap: 8px;
 }
 
+.chart-toolbar-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
 .seg-btn,
 .indicator-chip {
     min-height: 40px;
@@ -683,6 +691,11 @@ header#header {
     background: rgba(79, 140, 255, 0.16);
     border-color: rgba(79, 140, 255, 0.5);
     color: white;
+}
+
+.btn-chart-reset[disabled] {
+    opacity: 0.48;
+    cursor: not-allowed;
 }
 
 .status-inline {
@@ -707,6 +720,11 @@ header#header {
     display: block;
     width: 100%;
     height: auto;
+}
+
+.chart-shell canvas {
+    touch-action: none;
+    user-select: none;
 }
 
 .chart-legend {

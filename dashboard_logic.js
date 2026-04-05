@@ -111,17 +111,112 @@
         }));
     }
 
+    function normalizeCompanyDirectoryEntry(entry) {
+        const name = String(entry?.name || '').trim();
+        const stockCode = String(entry?.stockCode ?? entry?.stock_code ?? '').trim();
+        if (!name || !stockCode) return null;
+
+        const aliasCandidates = Array.isArray(entry?.aliases) ? entry.aliases : [];
+        const aliases = Array.from(new Set(
+            [name, ...aliasCandidates]
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+        ));
+
+        return {
+            name,
+            stockCode,
+            corpCode: String(entry?.corpCode ?? entry?.corp_code ?? '').trim(),
+            market: String(entry?.market || 'AUTO').trim().toUpperCase() || 'AUTO',
+            aliases,
+            displayLabel: `${name} · ${stockCode}`
+        };
+    }
+
+    function mergeCompanyDirectories(primaryDirectory, fallbackDirectory) {
+        const merged = new Map();
+
+        function applyEntries(entries, preferred) {
+            (entries || []).forEach((item) => {
+                const entry = normalizeCompanyDirectoryEntry(item);
+                if (!entry) return;
+
+                if (!merged.has(entry.stockCode)) {
+                    merged.set(entry.stockCode, entry);
+                    return;
+                }
+
+                const current = merged.get(entry.stockCode);
+                const aliasSet = new Set([...(current.aliases || []), ...(entry.aliases || [])]);
+                const next = {
+                    ...current,
+                    aliases: Array.from(aliasSet)
+                };
+
+                if (preferred) {
+                    next.name = entry.name || current.name;
+                    next.displayLabel = `${next.name} · ${next.stockCode}`;
+                }
+                if (!next.corpCode && entry.corpCode) next.corpCode = entry.corpCode;
+                if ((!next.market || next.market === 'AUTO') && entry.market) next.market = entry.market;
+                if (!next.aliases.includes(next.name)) next.aliases.unshift(next.name);
+                merged.set(entry.stockCode, next);
+            });
+        }
+
+        applyEntries(fallbackDirectory, false);
+        applyEntries(primaryDirectory, true);
+
+        return Array.from(merged.values()).sort((left, right) => (
+            left.name.localeCompare(right.name) || left.stockCode.localeCompare(right.stockCode)
+        ));
+    }
+
     function matchCompanies(directory, rawQuery, limit) {
         const max = limit || 8;
         const query = normalizeSearch(rawQuery);
         if (!query) return directory.slice(0, max);
 
         return directory
-            .filter((entry) => {
-                const haystacks = [entry.name, entry.stockCode, ...entry.aliases].map(normalizeSearch);
-                return haystacks.some((item) => item.includes(query) || item.startsWith(query));
+            .map((entry) => {
+                const haystacks = [entry.name, entry.stockCode, ...(entry.aliases || [])]
+                    .map(normalizeSearch)
+                    .filter(Boolean);
+                let rank = Infinity;
+                haystacks.forEach((item) => {
+                    if (item === query) rank = Math.min(rank, 0);
+                    else if (item.startsWith(query)) rank = Math.min(rank, 1);
+                    else if (item.includes(query)) rank = Math.min(rank, 2);
+                });
+                return { entry, rank };
             })
+            .filter((item) => Number.isFinite(item.rank))
+            .sort((left, right) => (
+                left.rank - right.rank
+                || left.entry.name.length - right.entry.name.length
+                || left.entry.name.localeCompare(right.entry.name)
+            ))
+            .map((item) => item.entry)
             .slice(0, max);
+    }
+
+    function pickTrailingCompanyMatch(directory, rawQuery, limit) {
+        const query = String(rawQuery || '').trim();
+        if (!query) return null;
+        const matches = matchCompanies(Array.isArray(directory) ? directory : [], query, limit);
+        return matches.length ? matches[matches.length - 1] : null;
+    }
+
+    function moveSuggestionSelectionIndex(currentIndex, itemCount, step) {
+        const size = Number(itemCount) || 0;
+        if (size <= 0) return -1;
+
+        const offset = Number(step) || 0;
+        if (!offset) return Math.min(Math.max(Number(currentIndex) || 0, 0), size - 1);
+
+        const baseIndex = Number.isInteger(currentIndex) ? currentIndex : -1;
+        const normalizedBase = baseIndex >= 0 ? baseIndex : (offset > 0 ? -1 : 0);
+        return (normalizedBase + offset + size) % size;
     }
 
     function normalizePublicQuote(payload) {
@@ -273,6 +368,160 @@
             .filter((point) => !startDate || point.date >= startDate);
     }
 
+    function tokenToDate(value) {
+        const token = normalizeDateToken(value);
+        if (!token || token.length !== 8) return null;
+        return new Date(Number(token.slice(0, 4)), Number(token.slice(4, 6)) - 1, Number(token.slice(6, 8)));
+    }
+
+    function chartWeekKey(token) {
+        const date = tokenToDate(token);
+        if (!date) return '';
+        const pivot = new Date(date.getTime());
+        const day = pivot.getDay() || 7;
+        pivot.setDate(pivot.getDate() + 4 - day);
+        const yearStart = new Date(pivot.getFullYear(), 0, 1);
+        const week = Math.ceil((((pivot - yearStart) / 86400000) + 1) / 7);
+        return `${pivot.getFullYear()}-W${String(week).padStart(2, '0')}`;
+    }
+
+    function chartBucketKey(token, granularity) {
+        const normalized = normalizeDateToken(token);
+        if (!normalized) return '';
+        if (granularity === 'week') return chartWeekKey(normalized);
+        if (granularity === 'month') return normalized.slice(0, 6);
+        if (granularity === 'year') return normalized.slice(0, 4);
+        return normalized;
+    }
+
+    function aggregateChartPoints(points, granularity) {
+        const mode = String(granularity || 'day').toLowerCase();
+        const sorted = (points || [])
+            .filter((point) => normalizeDateToken(point?.date))
+            .map((point) => ({
+                ...point,
+                date: normalizeDateToken(point.date)
+            }))
+            .sort((left, right) => left.date.localeCompare(right.date));
+
+        if (!sorted.length || mode === 'day') return sorted;
+
+        const groups = new Map();
+        sorted.forEach((point) => {
+            const key = chartBucketKey(point.date, mode);
+            if (!key) return;
+
+            if (!groups.has(key)) {
+                groups.set(key, { ...point });
+                return;
+            }
+
+            const bucket = groups.get(key);
+            bucket.high = Math.max(bucket.high ?? point.high ?? 0, point.high ?? 0);
+            bucket.low = Math.min(bucket.low ?? point.low ?? 0, point.low ?? 0);
+            bucket.close = point.close;
+            bucket.volume = (bucket.volume ?? 0) + (point.volume ?? 0);
+            bucket.date = point.date;
+            bucket.time = point.time || bucket.time || '';
+            bucket.listedShares = point.listedShares ?? bucket.listedShares ?? 0;
+        });
+
+        return Array.from(groups.values()).map((point) => {
+            const change = (point.close ?? 0) - (point.open ?? 0);
+            return {
+                ...point,
+                change,
+                changePct: point.open ? percentage(change, point.open) : 0
+            };
+        });
+    }
+
+    function resolveChartSeries(dailyPoints, range, options) {
+        const mode = String(range || 'DAY').toUpperCase();
+        const config = options || {};
+        const currentYear = Number(config.currentYear || 0)
+            || Number(String(config.currentDateToken || '').slice(0, 4))
+            || new Date().getFullYear();
+        const sorted = aggregateChartPoints(dailyPoints, 'day');
+
+        if (mode === 'WEEK') return aggregateChartPoints(sorted, 'week');
+        if (mode === 'MONTH') return aggregateChartPoints(sorted, 'month');
+        if (mode === 'YEAR') return aggregateChartPoints(sorted, 'year');
+        if (mode === 'YTD') return sorted.filter((point) => Number(point.date.slice(0, 4)) === currentYear);
+        return sorted;
+    }
+
+    function normalizeChartWindow(totalPoints, startIndex, windowSize, minPoints) {
+        const total = Math.max(0, Math.round(Number(totalPoints) || 0));
+        if (!total) return { start: 0, end: 0 };
+
+        const safeMin = Math.max(1, Math.min(total, Math.round(Number(minPoints) || 1)));
+        const safeSize = Math.max(safeMin, Math.min(total, Math.round(Number(windowSize) || total)));
+        let start = Math.max(0, Math.round(Number(startIndex) || 0));
+        if (start + safeSize > total) start = total - safeSize;
+        return { start, end: start + safeSize };
+    }
+
+    function zoomChartWindow(window, totalPoints, factor, anchorRatio, minPoints) {
+        const current = normalizeChartWindow(
+            totalPoints,
+            window?.start ?? 0,
+            (window?.end ?? totalPoints) - (window?.start ?? 0),
+            minPoints
+        );
+        const total = Math.max(0, Math.round(Number(totalPoints) || 0));
+        if (!total) return current;
+
+        const safeFactor = Number(factor) || 1;
+        const safeAnchor = Math.max(0, Math.min(1, Number(anchorRatio) || 0));
+        const size = current.end - current.start;
+        const nextSize = Math.max(
+            Math.max(1, Math.min(total, Math.round(Number(minPoints) || 1))),
+            Math.min(total, Math.round(size * safeFactor))
+        );
+        const anchorIndex = current.start + (size * safeAnchor);
+        const nextStart = Math.round(anchorIndex - (nextSize * safeAnchor));
+        return normalizeChartWindow(total, nextStart, nextSize, minPoints);
+    }
+
+    function panChartWindow(window, deltaPoints, totalPoints) {
+        const current = normalizeChartWindow(
+            totalPoints,
+            window?.start ?? 0,
+            (window?.end ?? totalPoints) - (window?.start ?? 0),
+            1
+        );
+        return normalizeChartWindow(totalPoints, current.start + (Number(deltaPoints) || 0), current.end - current.start, 1);
+    }
+
+    function resolveChartTooltipLayout(options) {
+        const config = options || {};
+        const bounds = config.bounds || {};
+        const gap = Math.max(0, Number(config.gap) || 0);
+        const boxWidth = Math.max(0, Number(config.boxWidth) || 0);
+        const boxHeight = Math.max(0, Number(config.boxHeight) || 0);
+        const left = Number(bounds.left) || 0;
+        const top = Number(bounds.top) || 0;
+        const right = Math.max(left, Number(bounds.right) || left);
+        const bottom = Math.max(top, Number(bounds.bottom) || top);
+        const anchorX = Number(config.anchorX) || left;
+        const anchorY = Number(config.anchorY) || top;
+
+        const availableRight = right - anchorX;
+        const availableLeft = anchorX - left;
+        const preferRight = availableRight >= boxWidth + gap || availableRight >= availableLeft;
+        const x = preferRight
+            ? Math.min(anchorX + gap, right - boxWidth)
+            : Math.max(left, anchorX - gap - boxWidth);
+        const y = Math.min(Math.max(anchorY, top), Math.max(top, bottom - boxHeight));
+
+        return {
+            x,
+            y,
+            side: preferRight ? 'right' : 'left'
+        };
+    }
+
     function generateAnchoredSyntheticChart(options) {
         const stockCode = options.stockCode;
         const startDate = options.startDate;
@@ -420,22 +669,32 @@
     }
 
     root.InvestmentLogic = {
+        aggregateChartPoints,
         buildBusinessDateTokens,
         buildCompanyDirectory,
         buildYahooSymbol,
+        chartBucketKey,
         clearKakaoSessionState,
         describePriceDelta,
         generateAnchoredSyntheticChart,
         getQuarterlyReportConfigs,
         matchCompanies,
+        mergeCompanyDirectories,
+        moveSuggestionSelectionIndex,
+        normalizeChartWindow,
         normalizeKiwoomChartRows,
         normalizeKiwoomQuote,
         normalizePublicQuote,
         normalizeYfinanceChartRows,
         normalizeYfinanceQuote,
+        panChartWindow,
+        resolveChartTooltipLayout,
+        resolveChartSeries,
         resolveKakaoCallbackUri,
         resolveKakaoRedirectUri,
         resolveKakaoReturnUrl,
-        sortPeriods
+        sortPeriods,
+        pickTrailingCompanyMatch,
+        zoomChartWindow
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

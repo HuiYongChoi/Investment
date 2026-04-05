@@ -2,7 +2,9 @@ require 'date'
 require 'json'
 require 'net/http'
 require 'open3'
+require 'rexml/document'
 require 'time'
+require 'tempfile'
 require 'tmpdir'
 require 'uri'
 require 'webrick'
@@ -18,6 +20,7 @@ KIWOOM_TOKEN_URL = 'https://api.kiwoom.com/oauth2/token'
 NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock'
 GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
 KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token'
+COMPANY_DIRECTORY_CACHE = File.join(Dir.tmpdir, 'investment-navigator-company-directory.json')
 
 def aws_lines
   @aws_lines ||= File.exist?(AWS_FILE) ? File.readlines(AWS_FILE, chomp: true, encoding: 'UTF-8').map(&:strip) : []
@@ -111,6 +114,142 @@ def parse_json(body)
   JSON.parse(body)
 rescue JSON::ParserError
   { 'raw' => body }
+end
+
+def extract_gold_usd_ounce(payload)
+  if payload.is_a?(Array)
+    payload.each do |item|
+      next unless item.is_a?(Hash)
+      gold_value = item['gold'].to_f
+      return gold_value if gold_value.positive?
+      price_value = item['price'].to_f
+      return price_value if price_value.positive?
+    end
+  elsif payload.is_a?(Hash)
+    gold_value = payload['gold'].to_f
+    return gold_value if gold_value.positive?
+    price_value = payload['price'].to_f
+    return price_value if price_value.positive?
+  end
+
+  nil
+end
+
+def resolve_gold_usd_ounce
+  loaders = [
+    -> { parse_json(perform_request(method: :get, url: 'https://api.metals.live/v1/spot/gold')[:body]) },
+    -> { parse_json(perform_request(method: :get, url: 'https://api.gold-api.com/price/XAU')[:body]) },
+    -> { request_yfinance_bridge('quote', stock_code: 'GC=F', market: 'COMMODITY') }
+  ]
+
+  loaders.each do |load|
+    begin
+      value = extract_gold_usd_ounce(load.call)
+      return value if value&.positive?
+    rescue StandardError
+      nil
+    end
+  end
+
+  nil
+end
+
+def read_cached_company_directory(allow_stale: false)
+  return nil unless File.readable?(COMPANY_DIRECTORY_CACHE)
+
+  payload = parse_json(File.read(COMPANY_DIRECTORY_CACHE, encoding: 'UTF-8'))
+  return nil unless payload.is_a?(Hash) && payload['directory'].is_a?(Array)
+
+  cached_at = Time.parse(payload['cachedAt'].to_s)
+  is_fresh = cached_at >= (Time.now - (12 * 60 * 60))
+  return nil if !allow_stale && !is_fresh
+
+  payload
+rescue StandardError
+  nil
+end
+
+def write_cached_company_directory(payload)
+  File.write(COMPANY_DIRECTORY_CACHE, JSON.generate(payload))
+  File.chmod(0o600, COMPANY_DIRECTORY_CACHE)
+rescue StandardError
+  nil
+end
+
+def build_company_directory_entries(xml_raw)
+  document = REXML::Document.new(xml_raw)
+  entries = []
+
+  document.elements.each('result/list') do |node|
+    stock_code = node.elements['stock_code']&.text.to_s.gsub(/\D/, '')
+    next unless stock_code.length == 6
+
+    name = node.elements['corp_name']&.text.to_s.strip
+    next if name.empty?
+
+    corp_code = node.elements['corp_code']&.text.to_s.strip
+    corp_eng_name = node.elements['corp_eng_name']&.text.to_s.strip
+    aliases = []
+    aliases << corp_eng_name unless corp_eng_name.empty? || corp_eng_name.casecmp?(name)
+    entries << {
+      name: name,
+      stockCode: stock_code,
+      corpCode: corp_code,
+      market: 'AUTO',
+      aliases: aliases
+    }
+  end
+
+  entries.sort_by { |entry| [entry[:name], entry[:stockCode]] }
+end
+
+def fetch_company_directory_payload
+  raise 'DART API key is not configured' if DART_KEY.empty?
+
+  upstream = perform_request(
+    method: :get,
+    url: "#{DART_BASE}/corpCode.xml",
+    params: { 'crtfc_key' => DART_KEY }
+  )
+
+  xml_raw = Tempfile.create(%w[dart-corp .zip]) do |file|
+    file.binmode
+    file.write(upstream[:body])
+    file.flush
+    stdout, stderr, status = Open3.capture3('unzip', '-p', file.path, 'CORPCODE.xml')
+    raise(stderr.to_s.empty? ? 'Unable to extract DART corpCode XML' : stderr.to_s) unless status.success?
+    stdout
+  end
+
+  entries = build_company_directory_entries(xml_raw)
+  payload = {
+    live: true,
+    source: 'dart_corp_code',
+    cachedAt: Time.now.getlocal('+09:00').iso8601,
+    count: entries.length,
+    directory: entries
+  }
+  write_cached_company_directory(payload)
+  payload
+end
+
+def company_directory_payload
+  cached = read_cached_company_directory
+  return cached if cached
+
+  fetch_company_directory_payload
+rescue StandardError => error
+  stale = read_cached_company_directory(allow_stale: true)
+  return stale.merge('stale' => true, 'error' => error.message) if stale
+
+  {
+    live: false,
+    source: 'dart_corp_code',
+    cachedAt: Time.now.getlocal('+09:00').iso8601,
+    count: 0,
+    directory: [],
+    error: error.message
+  }
 end
 
 def parse_kiwoom_expiry_timestamp(raw)
@@ -476,12 +615,13 @@ server.mount_proc '/yfinance/quote' do |req, res|
 
   stock_code = (req.query['stock_code'] || '').strip
   market = (req.query['market'] || 'KOSPI').strip
+  name_hint = (req.query['name_hint'] || '').strip
   if stock_code.empty?
     json_response(res, 400, live: false, source: 'yfinance_python', error: 'stock_code 파라미터가 필요합니다.')
     next
   end
 
-  payload = request_yfinance_bridge('quote', stock_code: stock_code, market: market)
+  payload = request_yfinance_bridge('quote', stock_code: stock_code, market: market, name_hint: name_hint)
   json_response(res, 200, payload)
 end
 
@@ -493,6 +633,7 @@ server.mount_proc '/yfinance/chart' do |req, res|
   interval = (req.query['interval'] || 'daily').strip.downcase
   start_date = (req.query['start_date'] || "#{Date.today.year}0101").gsub(/\D/, '')
   end_date = (req.query['end_date'] || Date.today.strftime('%Y%m%d')).gsub(/\D/, '')
+  name_hint = (req.query['name_hint'] || '').strip
 
   if stock_code.empty?
     json_response(res, 400, live: false, source: 'yfinance_python', error: 'stock_code 파라미터가 필요합니다.', rows: [])
@@ -505,7 +646,8 @@ server.mount_proc '/yfinance/chart' do |req, res|
     market: market,
     interval: interval,
     start_date: start_date,
-    end_date: end_date
+    end_date: end_date,
+    name_hint: name_hint
   )
   json_response(res, 200, payload)
 end
@@ -672,15 +814,7 @@ server.mount_proc '/market/summary' do |req, res|
   end
 
   begin
-    gold_payload = parse_json(perform_request(method: :get, url: 'https://api.metals.live/v1/spot/gold')[:body])
-    gold_usd_per_oz =
-      if gold_payload.is_a?(Array)
-        item = gold_payload.find { |entry| entry.is_a?(Hash) && entry.key?('gold') }
-        item&.fetch('gold', nil)
-      elsif gold_payload.is_a?(Hash)
-        gold_payload['gold']
-      end
-
+    gold_usd_per_oz = resolve_gold_usd_ounce
     if gold_usd_per_oz && summary[:usdKrw]
       summary[:goldKrwPerGram] = (gold_usd_per_oz.to_f * summary[:usdKrw] / 31.1034768).round(2)
     end
@@ -689,6 +823,12 @@ server.mount_proc '/market/summary' do |req, res|
   end
 
   json_response(res, 200, summary)
+end
+
+server.mount_proc '/company-directory' do |req, res|
+  next unless with_cors(req, res)
+
+  json_response(res, 200, company_directory_payload)
 end
 
 server.mount_proc '/market/quote' do |req, res|

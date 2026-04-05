@@ -362,6 +362,151 @@ function yfinance_bridge_path(): string
     return __DIR__ . '/yfinance_bridge.py';
 }
 
+function company_directory_cache_path(): string
+{
+    $config = secret_config();
+    if (!empty($config['company_directory_cache'])) {
+        return trim((string) $config['company_directory_cache']);
+    }
+    return rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'investment-navigator-company-directory.json';
+}
+
+function read_cached_company_directory(bool $allowStale = false): ?array
+{
+    $path = company_directory_cache_path();
+    if (!is_readable($path)) return null;
+
+    $payload = safe_json_decode((string) file_get_contents($path));
+    if (!is_array($payload) || !isset($payload['directory']) || !is_array($payload['directory'])) {
+        return null;
+    }
+
+    $cachedAt = strtotime((string) ($payload['cachedAt'] ?? '')) ?: 0;
+    $isFresh = $cachedAt >= (time() - (12 * 60 * 60));
+    if (!$allowStale && !$isFresh) return null;
+    return $payload;
+}
+
+function write_cached_company_directory(array $payload): void
+{
+    $path = company_directory_cache_path();
+    @file_put_contents($path, json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    @chmod($path, 0600);
+}
+
+function extract_zip_entry_text(string $zipBinary, string $entryName): string
+{
+    $tempPath = tempnam(sys_get_temp_dir(), 'dart-corp-');
+    if ($tempPath === false) {
+        throw new RuntimeException('Unable to allocate temp file for DART corpCode');
+    }
+
+    file_put_contents($tempPath, $zipBinary);
+    $zip = new ZipArchive();
+    $status = $zip->open($tempPath);
+    if ($status !== true) {
+        @unlink($tempPath);
+        throw new RuntimeException('Unable to open DART corpCode archive');
+    }
+
+    $xmlRaw = $zip->getFromName($entryName);
+    $zip->close();
+    @unlink($tempPath);
+
+    if (!is_string($xmlRaw) || $xmlRaw === '') {
+        throw new RuntimeException('DART corpCode archive entry was empty');
+    }
+
+    return $xmlRaw;
+}
+
+function build_company_directory_entries(string $xmlRaw): array
+{
+    $xml = @simplexml_load_string($xmlRaw);
+    if (!$xml) {
+        throw new RuntimeException('Unable to parse DART corpCode XML');
+    }
+
+    $entries = [];
+    foreach ($xml->list as $node) {
+        $stockCode = preg_replace('/\D+/', '', trim((string) ($node->stock_code ?? '')));
+        if (strlen($stockCode) !== 6) continue;
+
+        $name = trim((string) ($node->corp_name ?? ''));
+        if ($name === '') continue;
+        $corpCode = trim((string) ($node->corp_code ?? ''));
+        $corpEngName = trim(html_entity_decode((string) ($node->corp_eng_name ?? ''), ENT_QUOTES | ENT_XML1, 'UTF-8'));
+        $aliases = [];
+        $normalizedEng = function_exists('mb_strtolower') ? mb_strtolower($corpEngName, 'UTF-8') : strtolower($corpEngName);
+        $normalizedName = function_exists('mb_strtolower') ? mb_strtolower($name, 'UTF-8') : strtolower($name);
+        if ($corpEngName !== '' && $normalizedEng !== $normalizedName) {
+            $aliases[] = $corpEngName;
+        }
+
+        $entries[] = [
+            'name' => $name,
+            'stockCode' => $stockCode,
+            'corpCode' => $corpCode,
+            'market' => 'AUTO',
+            'aliases' => $aliases,
+        ];
+    }
+
+    usort($entries, static fn ($left, $right) => strcmp(
+        ($left['name'] ?? '') . ($left['stockCode'] ?? ''),
+        ($right['name'] ?? '') . ($right['stockCode'] ?? '')
+    ));
+
+    return $entries;
+}
+
+function fetch_company_directory_payload(): array
+{
+    $key = dart_key();
+    if ($key === '') {
+        throw new RuntimeException('DART API key is not configured');
+    }
+
+    $upstream = request_upstream(DART_BASE . '/corpCode.xml?crtfc_key=' . rawurlencode($key));
+    $xmlRaw = extract_zip_entry_text($upstream['body'], 'CORPCODE.xml');
+    $entries = build_company_directory_entries($xmlRaw);
+    $payload = [
+        'live' => true,
+        'source' => 'dart_corp_code',
+        'cachedAt' => now_kst()->format(DateTimeInterface::ATOM),
+        'count' => count($entries),
+        'directory' => $entries,
+    ];
+    write_cached_company_directory($payload);
+    return $payload;
+}
+
+function company_directory_payload(): array
+{
+    $cached = read_cached_company_directory();
+    if ($cached !== null) return $cached;
+
+    try {
+        return fetch_company_directory_payload();
+    } catch (Throwable $error) {
+        $stale = read_cached_company_directory(true);
+        if ($stale !== null) {
+            $stale['stale'] = true;
+            $stale['error'] = $error->getMessage();
+            return $stale;
+        }
+
+        return [
+            'live' => false,
+            'source' => 'dart_corp_code',
+            'cachedAt' => now_kst()->format(DateTimeInterface::ATOM),
+            'count' => 0,
+            'directory' => [],
+            'error' => $error->getMessage(),
+        ];
+    }
+}
+
 function yfinance_python_candidates(): array
 {
     $configured = get_secret('YFINANCE_PYTHON_BIN', 'yfinance_python_bin');
@@ -434,6 +579,53 @@ function request_yfinance_bridge(string $command, array $params): array
     }
 
     return $payload;
+}
+
+function extract_gold_usd_ounce(array $payload): float
+{
+    if (isset($payload[0]) && is_array($payload)) {
+        foreach ($payload as $row) {
+            if (!is_array($row)) continue;
+            if (array_key_exists('gold', $row) && (float) $row['gold'] > 0) {
+                return (float) $row['gold'];
+            }
+            if (array_key_exists('price', $row) && (float) $row['price'] > 0) {
+                return (float) $row['price'];
+            }
+        }
+    }
+
+    if (isset($payload['gold']) && (float) $payload['gold'] > 0) {
+        return (float) $payload['gold'];
+    }
+
+    if (isset($payload['price']) && (float) $payload['price'] > 0) {
+        return (float) $payload['price'];
+    }
+
+    return 0.0;
+}
+
+function resolve_gold_usd_ounce(): float
+{
+    $sources = [
+        static fn () => safe_json_decode(request_upstream('https://api.metals.live/v1/spot/gold')['body']),
+        static fn () => safe_json_decode(request_upstream('https://api.gold-api.com/price/XAU')['body']),
+        static fn () => request_yfinance_bridge('quote', [
+            'stock_code' => 'GC=F',
+            'market' => 'COMMODITY',
+        ]),
+    ];
+
+    foreach ($sources as $load) {
+        try {
+            $value = extract_gold_usd_ounce((array) $load());
+            if ($value > 0) return $value;
+        } catch (Throwable $ignored) {
+        }
+    }
+
+    return 0.0;
 }
 
 function business_dates(string $startToken, string $endToken): array
@@ -661,6 +853,7 @@ try {
     if ($action === 'yfinance_quote') {
         $stockCode = trim((string) ($_GET['stock_code'] ?? ''));
         $market = trim((string) ($_GET['market'] ?? 'KOSPI'));
+        $nameHint = trim((string) ($_GET['name_hint'] ?? ''));
         if ($stockCode === '') {
             json_response(400, ['error' => 'stock_code is required', 'live' => false, 'source' => 'yfinance_python']);
         }
@@ -668,6 +861,7 @@ try {
         $payload = request_yfinance_bridge('quote', [
             'stock_code' => $stockCode,
             'market' => $market !== '' ? $market : 'KOSPI',
+            'name_hint' => $nameHint,
         ]);
         json_response(200, $payload);
     }
@@ -678,6 +872,7 @@ try {
         $interval = strtolower(trim((string) ($_GET['interval'] ?? 'daily')));
         $startDate = preg_replace('/\D/', '', (string) ($_GET['start_date'] ?? date('Y') . '0101'));
         $endDate = preg_replace('/\D/', '', (string) ($_GET['end_date'] ?? date('Ymd')));
+        $nameHint = trim((string) ($_GET['name_hint'] ?? ''));
 
         if ($stockCode === '') {
             json_response(400, ['error' => 'stock_code is required', 'live' => false, 'source' => 'yfinance_python', 'rows' => []]);
@@ -689,6 +884,7 @@ try {
             'interval' => $interval !== '' ? $interval : 'daily',
             'start_date' => $startDate,
             'end_date' => $endDate,
+            'name_hint' => $nameHint,
         ]);
         json_response(200, $payload);
     }
@@ -817,27 +1013,18 @@ try {
         }
 
         try {
-            $goldUpstream = request_upstream('https://api.metals.live/v1/spot/gold');
-            $goldPayload = safe_json_decode($goldUpstream['body']);
-            $goldUsdOunce = null;
-            if (isset($goldPayload[0]) && is_array($goldPayload)) {
-                foreach ($goldPayload as $row) {
-                    if (is_array($row) && array_key_exists('gold', $row)) {
-                        $goldUsdOunce = (float) $row['gold'];
-                        break;
-                    }
-                }
-            } elseif (isset($goldPayload['gold'])) {
-                $goldUsdOunce = (float) $goldPayload['gold'];
-            }
-
-            if ($goldUsdOunce && !empty($summary['usdKrw'])) {
+            $goldUsdOunce = resolve_gold_usd_ounce();
+            if ($goldUsdOunce > 0 && !empty($summary['usdKrw'])) {
                 $summary['goldKrwPerGram'] = round(($goldUsdOunce * (float) $summary['usdKrw']) / 31.1034768, 2);
             }
         } catch (Throwable $ignored) {
         }
 
         json_response(200, $summary);
+    }
+
+    if ($action === 'company_directory') {
+        json_response(200, company_directory_payload());
     }
 
     json_response(200, [
