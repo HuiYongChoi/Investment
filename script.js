@@ -130,6 +130,7 @@ loadCompanyDirectory();
 function bindEvents() {
     const companyInput = document.getElementById('company-input');
     const suggestionBox = document.getElementById('company-suggestions');
+    const sectorPresetSelect = document.getElementById('m-sector-preset');
     document.getElementById('search-btn').addEventListener('click', startSearch);
     companyInput.addEventListener('input', (event) => {
         updateCompanySuggestions(event.target.value);
@@ -174,10 +175,19 @@ function bindEvents() {
     document.getElementById('chart-range-controls').addEventListener('click', onChartRangeClick);
     document.getElementById('chart-reset-btn').addEventListener('click', resetChartZoom);
     document.getElementById('indicator-toggle').addEventListener('click', onIndicatorToggle);
+    if (sectorPresetSelect) {
+        sectorPresetSelect.addEventListener('change', onValuationSectorPresetChange);
+    }
     document.querySelectorAll('[data-number-format="won"]').forEach((input) => {
         if (input.readOnly) return;
         input.addEventListener('input', onWonInputFormat);
         input.addEventListener('blur', onWonInputFormat);
+    });
+    ['m-adjusted-eps', 'm-target-per', 'm-eps-growth', 'm-required-return'].forEach((id) => {
+        const input = document.getElementById(id);
+        if (!input) return;
+        input.addEventListener('input', onValuationManualInput);
+        input.addEventListener('blur', onValuationManualInput);
     });
     window.addEventListener('resize', debounce(() => {
         if (!document.getElementById('dashboard').classList.contains('hidden')) {
@@ -347,6 +357,15 @@ function setMarketChg(id, changePct) {
     el.className = `market-chg ${changePct > 0 ? 'up' : changePct < 0 ? 'down' : ''}`;
 }
 
+function formatMarketIndexValue(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return '-';
+    return numeric.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
 async function loadMarketSummary() {
     try {
         const data = await fetchJson(buildProxyUrl('market', '/summary'));
@@ -373,10 +392,23 @@ async function loadMarketSummary() {
             const vixLevel = data.vix < 15 ? '극도 낙관' : data.vix < 20 ? '안정' : data.vix < 30 ? '경계' : data.vix < 40 ? '공포' : '극도 공포';
             document.getElementById('vix-note').textContent = vixLevel;
         }
+        if (data.kospi) {
+            document.getElementById('kospi-value').textContent = formatMarketIndexValue(data.kospi);
+            document.getElementById('kospi-note').textContent = '코스피 종합지수';
+            setMarketChg('kospi-chg', data.kospiChangePct ?? null);
+        }
+        if (data.kosdaq) {
+            document.getElementById('kosdaq-value').textContent = formatMarketIndexValue(data.kosdaq);
+            document.getElementById('kosdaq-note').textContent = '코스닥 종합지수';
+            setMarketChg('kosdaq-chg', data.kosdaqChangePct ?? null);
+        }
     } catch (error) {
         document.getElementById('fx-usdkrw-note').textContent = '연동 실패';
         document.getElementById('fx-jpykrw-note').textContent = '연동 실패';
         document.getElementById('gold-note').textContent = '연동 실패';
+        document.getElementById('vix-note').textContent = '연동 실패';
+        document.getElementById('kospi-note').textContent = '연동 실패';
+        document.getElementById('kosdaq-note').textContent = '연동 실패';
     }
 }
 
@@ -533,6 +565,7 @@ async function startSearch() {
     document.getElementById('dashboard').classList.remove('hidden');
     document.getElementById('stock-realtime').classList.add('hidden');
     document.getElementById('stock-realtime').innerHTML = '';
+    resetMetricManualInputs();
     renderReports([]);
     renderFinancialTable('fin-annual-table', []);
     renderFinancialTable('fin-quarterly-table', []);
@@ -1336,6 +1369,63 @@ function onWonInputFormat(event) {
     input.value = InvestmentLogic.formatWonInputValue(input.value);
 }
 
+function onValuationManualInput(event) {
+    const input = event.target;
+    if (!input || input.readOnly) return;
+    if (input.dataset.numberFormat === 'won') {
+        input.value = InvestmentLogic.formatWonInputValue(input.value);
+    }
+    if (!state.lastAnalysis.fin) return;
+    calcMetrics();
+}
+
+function renderForwardEpsWarning(show) {
+    const warning = document.getElementById('forward-eps-warning');
+    if (!warning) return;
+    warning.classList.toggle('hidden', !show);
+}
+
+function getSelectedValuationSectorPreset() {
+    return InvestmentLogic.resolveValuationSectorPreset(document.getElementById('m-sector-preset')?.value || '');
+}
+
+function renderValuationPresetGuide(preset) {
+    const nameBadge = document.getElementById('sector-name-badge');
+    const premiumBadge = document.getElementById('sector-premium-badge');
+    const guideCopy = document.getElementById('metrics-guide-copy');
+    if (!nameBadge || !premiumBadge || !guideCopy) return;
+
+    if (!preset) {
+        nameBadge.textContent = '프리셋 없음';
+        premiumBadge.textContent = '무형자산 가산 0%';
+        guideCopy.textContent = '섹터 프리셋을 선택하면 목표 PER, 요구수익률, 무형자산 프리미엄이 자동 적용됩니다.';
+        return;
+    }
+
+    nameBadge.textContent = preset.label;
+    premiumBadge.textContent = preset.badgeText || `무형자산 가산 ${preset.premiumRate}%`;
+    guideCopy.textContent = preset.guideText;
+}
+
+function applyValuationSectorPreset(preset) {
+    if (!preset) return;
+    document.getElementById('m-target-per').value = String(preset.targetPer);
+    document.getElementById('m-required-return').value = String(preset.requiredReturn);
+}
+
+function onValuationSectorPresetChange(event) {
+    const preset = InvestmentLogic.resolveValuationSectorPreset(event.target.value);
+    if (preset) {
+        applyValuationSectorPreset(preset);
+    } else {
+        document.getElementById('m-target-per').value = '';
+        document.getElementById('m-required-return').value = '8';
+    }
+    renderValuationPresetGuide(preset);
+    if (!state.lastAnalysis.fin) return;
+    calcMetrics();
+}
+
 function setFormattedInputValue(id, value) {
     const input = document.getElementById(id);
     if (!input) return;
@@ -1360,6 +1450,17 @@ function getNumericInputValue(id) {
     return InvestmentLogic.parseFormattedNumber(input.value);
 }
 
+function resetMetricManualInputs() {
+    document.getElementById('m-sector-preset').value = '';
+    document.getElementById('m-adjusted-eps').value = '';
+    document.getElementById('m-target-per').value = '';
+    document.getElementById('m-eps-growth').value = '';
+    document.getElementById('m-required-return').value = '8';
+    document.getElementById('m-trailing-eps').value = '';
+    renderForwardEpsWarning(false);
+    renderValuationPresetGuide(null);
+}
+
 function resolveValuationInputs(summary, lastTrade, previousSummary) {
     const price = Number(lastTrade?.close) || 0;
     const fallbackRoe = Number(summary?.roe) || percentage(summary?.netIncome || 0, summary?.equity || 0);
@@ -1370,18 +1471,22 @@ function resolveValuationInputs(summary, lastTrade, previousSummary) {
     const fallbackEps = Number(lastTrade?.sharesOutstanding)
         ? safeDivide(summary?.netIncome || 0, lastTrade.sharesOutstanding)
         : (fallbackBps && fallbackRoe ? fallbackBps * (fallbackRoe / 100) : 0);
-    const forwardEps = Number(lastTrade?.forwardEps) || fallbackEps || 0;
+    const forwardEps = Number(lastTrade?.forwardEps) || 0;
+    const trailingEps = Number(lastTrade?.trailingEps) || fallbackEps || 0;
     const bps = Number(lastTrade?.bps) || fallbackBps || 0;
     const roe = Number(lastTrade?.roe) || fallbackRoe || 0;
-    const forwardPer = Number(lastTrade?.forwardPer) || safeDivide(price, forwardEps) || 0;
+    const forwardPer = Number(lastTrade?.forwardPer) || (forwardEps ? safeDivide(price, forwardEps) : 0) || 0;
+    const forwardOverheat = forwardEps > 0 && trailingEps > 0 && forwardEps >= (trailingEps * 1.5);
 
     return {
         price,
         forwardEps,
+        trailingEps,
         forwardPer,
         bps,
         roe,
-        growthRate: fallbackGrowth
+        growthRate: fallbackGrowth,
+        forwardOverheat
     };
 }
 
@@ -1389,13 +1494,17 @@ function autoFillMetrics(summary, lastTrade, previousSummary) {
     const valuation = resolveValuationInputs(summary, lastTrade, previousSummary);
     setFormattedInputValue('m-price', valuation.price);
     setFormattedInputValue('m-forward-eps', valuation.forwardEps);
+    setFormattedInputValue('m-trailing-eps', valuation.trailingEps);
     setPlainInputValue('m-forward-per', valuation.forwardPer, 1);
     setFormattedInputValue('m-bps', valuation.bps);
     setPlainInputValue('m-roe', valuation.roe, 1);
-    setFormattedInputValue('m-adjusted-eps', valuation.forwardEps);
-    document.getElementById('m-target-per').value = valuation.forwardPer > 0 ? valuation.forwardPer.toFixed(1) : '15.0';
-    document.getElementById('m-eps-growth').value = valuation.growthRate ? valuation.growthRate.toFixed(1) : '0.0';
-    document.getElementById('m-required-return').value = '8';
+    renderForwardEpsWarning(valuation.forwardOverheat);
+    if (!document.getElementById('m-eps-growth').value.trim()) {
+        document.getElementById('m-eps-growth').value = valuation.growthRate ? valuation.growthRate.toFixed(1) : '0.0';
+    }
+    if (!document.getElementById('m-required-return').value.trim()) {
+        document.getElementById('m-required-return').value = '8';
+    }
     state.lastAnalysis.fin = {
         rev: summary.revenue || 0,
         op: summary.operatingIncome || 0,
@@ -1410,42 +1519,93 @@ function autoFillMetrics(summary, lastTrade, previousSummary) {
 function calcMetrics() {
     const price = getNumericInputValue('m-price');
     const forwardEps = getNumericInputValue('m-forward-eps');
+    const trailingEps = getNumericInputValue('m-trailing-eps');
     const forwardPer = Number(document.getElementById('m-forward-per').value) || safeDivide(price, forwardEps) || 0;
     const bps = getNumericInputValue('m-bps');
     const roe = Number(document.getElementById('m-roe').value) || 0;
-    const adjustedEps = getNumericInputValue('m-adjusted-eps') || forwardEps;
-    const targetPer = Number(document.getElementById('m-target-per').value) || forwardPer || 15;
+    const selectedSectorPreset = getSelectedValuationSectorPreset();
+    const { baseEPS, basePER, usingManualEps, epsSource, forwardOverheat } = InvestmentLogic.resolveBaseValuationVariables({
+        adjustedEps: document.getElementById('m-adjusted-eps').value,
+        forwardEps: document.getElementById('m-forward-eps').value,
+        trailingEps: document.getElementById('m-trailing-eps').value,
+        targetPer: document.getElementById('m-target-per').value,
+        forwardPer: document.getElementById('m-forward-per').value
+    });
     const epsGrowth = Number(document.getElementById('m-eps-growth').value) || 0;
     const requiredReturn = Number(document.getElementById('m-required-return').value) || 8;
     const fin = state.lastAnalysis.fin;
 
     const debtRatio = percentage(fin.debt, fin.eq);
     const operatingMargin = percentage(fin.op, fin.rev);
-    const projectedEps = adjustedEps * (1 + (epsGrowth / 100));
-    const targetPrice = projectedEps * targetPer;
-    const discountFactor = 1 + (requiredReturn / 100);
-    const discountedFairValue = discountFactor > 0 ? targetPrice / discountFactor : targetPrice;
-    const upside = percentage(discountedFairValue - price, price);
-    const pbr = safeDivide(price, bps);
+    const valuationOutputs = InvestmentLogic.computeValuationOutputs({
+        currentPrice: document.getElementById('m-price').value,
+        baseEPS,
+        basePER,
+        bps: document.getElementById('m-bps').value,
+        roe: document.getElementById('m-roe').value,
+        epsGrowth: document.getElementById('m-eps-growth').value,
+        requiredReturn: document.getElementById('m-required-return').value,
+        premiumRate: selectedSectorPreset?.premiumRate ?? 0
+    });
+    const { perFairValue, finalTargetPrice, premiumRatePct, pegRatio, pegTone, srimFairValue, upsidePct, upsideTone } = valuationOutputs;
+    renderValuationPresetGuide(selectedSectorPreset);
+    renderForwardEpsWarning(forwardOverheat);
 
-    state.lastAnalysis.metrics = { forwardPer, roe, debtR: debtRatio, opM: operatingMargin, targetPrice: discountedFairValue, upside, projectedEps, pbr, requiredReturn };
+    const epsSourceLabel = epsSource === 'manual'
+        ? '조정 EPS'
+        : epsSource === 'forward'
+            ? '선행 EPS'
+            : epsSource === 'ttm'
+                ? 'TTM EPS'
+                : 'EPS';
+
+    state.lastAnalysis.metrics = {
+        forwardPer,
+        roe,
+        debtR: debtRatio,
+        opM: operatingMargin,
+        targetPrice: finalTargetPrice,
+        upside: upsidePct,
+        requiredReturn,
+        baseEPS,
+        basePER,
+        premiumRate: premiumRatePct,
+        pegRatio,
+        perModelPrice: perFairValue,
+        srimPrice: srimFairValue
+    };
     state.metrics = state.lastAnalysis.metrics;
 
     const items = [
-        { label: '선행 EPS', value: forwardEps ? `${Math.round(forwardEps).toLocaleString()}원` : '-', hint: 'API 연동 기준 EPS' },
-        { label: '선행 PER', value: forwardPer ? `${forwardPer.toFixed(1)}배` : '-', tone: forwardPer && forwardPer <= targetPer ? 'good' : forwardPer && forwardPer <= targetPer * 1.4 ? 'warn' : 'bad', hint: `목표 PER ${targetPer.toFixed(1)}배 비교` },
-        { label: 'BPS', value: bps ? `${Math.round(bps).toLocaleString()}원` : '-', hint: '주당순자산가치' },
-        { label: 'ROE', value: `${roe.toFixed(1)}%`, tone: roe > 12 ? 'good' : roe > 8 ? 'warn' : 'bad', hint: '당기순이익 / 자본' },
-        { label: 'PBR', value: pbr ? `${pbr.toFixed(2)}배` : '-', tone: pbr && pbr <= 1.5 ? 'good' : pbr && pbr <= 2.5 ? 'warn' : 'bad', hint: '현재 주가 / BPS' },
-        { label: '영업이익률', value: `${operatingMargin.toFixed(1)}%`, tone: operatingMargin > 10 ? 'good' : operatingMargin > 5 ? 'warn' : 'bad', hint: '영업이익 / 매출액' },
-        { label: '부채비율', value: `${debtRatio.toFixed(1)}%`, tone: debtRatio < 100 ? 'good' : debtRatio < 180 ? 'warn' : 'bad', hint: '부채총계 / 자본총계' },
-        { label: '1년 후 EPS', value: projectedEps ? `${Math.round(projectedEps).toLocaleString()}원` : '-', hint: `조정 EPS에 성장률 ${epsGrowth.toFixed(1)}% 반영` },
-        { label: '적정주가', value: discountedFairValue ? `${Math.round(discountedFairValue).toLocaleString()}원` : '-', hint: `목표 PER 적용 후 요구수익률 ${requiredReturn.toFixed(1)}% 할인` },
-        { label: '상승여력', value: `${upside > 0 ? '+' : ''}${upside.toFixed(1)}%`, tone: upside > 0 ? 'good' : 'bad', hint: '할인 적용 적정주가 대비' }
+        {
+            label: '최종 목표가',
+            primary: true,
+            value: finalTargetPrice ? `${Math.round(finalTargetPrice).toLocaleString()}원` : '-',
+            hint: finalTargetPrice
+                ? `PER 모델 ${Math.round(perFairValue).toLocaleString()}원 × 무형자산 가산 ${premiumRatePct.toFixed(0)}% · EPS 기준: ${epsSourceLabel}`
+                : 'EPS와 목표 PER가 잡히면 섹터 프리미엄을 반영합니다.'
+        },
+        {
+            label: 'PEG 지표',
+            value: pegRatio === null ? '-' : pegRatio.toFixed(2),
+            tone: pegTone,
+            hint: `목표 PER ${basePER.toFixed(1)}배 / EPS 예상 성장률 ${epsGrowth.toFixed(1)}%`
+        },
+        {
+            label: 'S-RIM 적정주가',
+            value: srimFairValue ? `${Math.round(srimFairValue).toLocaleString()}원` : '-',
+            hint: `BPS ${Math.round(bps).toLocaleString()}원, ROE ${roe.toFixed(1)}%, 요구수익률 ${requiredReturn.toFixed(1)}%`
+        },
+        {
+            label: '상승여력',
+            value: `${upsidePct > 0 ? '+' : ''}${upsidePct.toFixed(1)}%`,
+            tone: upsideTone,
+            hint: `${usingManualEps ? '조정 EPS' : epsSourceLabel} 기준 최종 목표가 대비`
+        }
     ];
 
     document.getElementById('metrics-grid').innerHTML = items.map((item) => `
-        <div class="metric-tile">
+        <div class="metric-tile metric-result-tile ${item.primary ? 'metric-result-primary' : ''}">
             <div class="mt-label">${item.label}</div>
             <div class="mt-value ${item.tone || ''}">${item.value}</div>
             <div class="mt-hint">${item.hint}</div>

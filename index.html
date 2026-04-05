@@ -51,37 +51,90 @@
             <strong id="market-datetime">-</strong>
             <span class="market-note">Asia/Seoul</span>
         </div>
-        <div class="market-pill">
-            <span class="market-label">USD/KRW</span>
-            <div class="market-val-row">
-                <strong id="fx-usdkrw">-</strong>
-                <span class="market-chg" id="fx-usdkrw-chg"></span>
+        <div class="market-groups">
+            <div class="market-card-group market-global-group">
+                <div class="market-pill">
+                    <span class="market-label">USD/KRW</span>
+                    <div class="market-val-row">
+                        <strong id="fx-usdkrw">-</strong>
+                        <span class="market-chg" id="fx-usdkrw-chg"></span>
+                    </div>
+                    <span class="market-note" id="fx-usdkrw-note">환율 연동 중</span>
+                </div>
+                <div class="market-pill">
+                    <span class="market-label">JPY/KRW</span>
+                    <div class="market-val-row">
+                        <strong id="fx-jpykrw">-</strong>
+                        <span class="market-chg" id="fx-jpykrw-chg"></span>
+                    </div>
+                    <span class="market-note" id="fx-jpykrw-note">100엔 환산 기준</span>
+                </div>
+                <div class="market-pill">
+                    <span class="market-label">금 시세</span>
+                    <div class="market-val-row">
+                        <strong id="gold-krw">-</strong>
+                        <span class="market-chg" id="gold-chg"></span>
+                    </div>
+                    <span class="market-note" id="gold-note">1g 기준</span>
+                </div>
+                <div class="market-pill">
+                    <div class="market-label-row">
+                        <span class="market-label">VIX 지수</span>
+                        <span class="help-icon" tabindex="0" aria-label="VIX 통계적 매수 시그널 안내">
+                            ?
+                            <div class="vix-tooltip" role="tooltip">
+                                <div class="vix-tooltip-title">VIX 대비 S&amp;P 500 1년 뒤 기대 수익</div>
+                                <div class="vix-tooltip-table" aria-hidden="true">
+                                    <div class="vix-tooltip-row">
+                                        <span>27~35</span>
+                                        <span>승률 77%</span>
+                                        <span>수익 +13.2%</span>
+                                    </div>
+                                    <div class="vix-tooltip-row">
+                                        <span>35~42</span>
+                                        <span>승률 92%</span>
+                                        <span>수익 +25.5%</span>
+                                    </div>
+                                    <div class="vix-tooltip-row">
+                                        <span>43~50</span>
+                                        <span>승률 94%</span>
+                                        <span>수익 +35.2%</span>
+                                    </div>
+                                    <div class="vix-tooltip-row">
+                                        <span>50이상</span>
+                                        <span>승률 99%</span>
+                                        <span>수익 +31.9%</span>
+                                    </div>
+                                </div>
+                                <div class="vix-tooltip-insight">인사이트: VIX 30 이상은 역사적 분할 매수 구간입니다.</div>
+                            </div>
+                        </span>
+                    </div>
+                    <div class="market-val-row">
+                        <strong id="vix-value">-</strong>
+                        <span class="market-chg" id="vix-chg"></span>
+                    </div>
+                    <span class="market-note" id="vix-note">공포·탐욕 지수</span>
+                </div>
             </div>
-            <span class="market-note" id="fx-usdkrw-note">환율 연동 중</span>
-        </div>
-        <div class="market-pill">
-            <span class="market-label">JPY/KRW</span>
-            <div class="market-val-row">
-                <strong id="fx-jpykrw">-</strong>
-                <span class="market-chg" id="fx-jpykrw-chg"></span>
+            <div class="market-card-group market-domestic-group">
+                <div class="market-pill">
+                    <span class="market-label">KOSPI 종합</span>
+                    <div class="market-val-row">
+                        <strong id="kospi-value">-</strong>
+                        <span class="market-chg" id="kospi-chg"></span>
+                    </div>
+                    <span class="market-note" id="kospi-note">코스피 종합지수</span>
+                </div>
+                <div class="market-pill">
+                    <span class="market-label">KOSDAQ 종합</span>
+                    <div class="market-val-row">
+                        <strong id="kosdaq-value">-</strong>
+                        <span class="market-chg" id="kosdaq-chg"></span>
+                    </div>
+                    <span class="market-note" id="kosdaq-note">코스닥 종합지수</span>
+                </div>
             </div>
-            <span class="market-note" id="fx-jpykrw-note">100엔 환산 기준</span>
-        </div>
-        <div class="market-pill">
-            <span class="market-label">금 시세</span>
-            <div class="market-val-row">
-                <strong id="gold-krw">-</strong>
-                <span class="market-chg" id="gold-chg"></span>
-            </div>
-            <span class="market-note" id="gold-note">1g 기준</span>
-        </div>
-        <div class="market-pill">
-            <span class="market-label">VIX 지수</span>
-            <div class="market-val-row">
-                <strong id="vix-value">-</strong>
-                <span class="market-chg" id="vix-chg"></span>
-            </div>
-            <span class="market-note" id="vix-note">공포·탐욕 지수</span>
         </div>
     </section>
 
@@ -203,8 +256,15 @@
                             <input type="text" id="m-price" class="tech-in tech-in-readonly" placeholder="-" readonly data-number-format="won" inputmode="numeric">
                         </label>
                         <label class="input-block">
-                            <span>선행 EPS (원)</span>
+                            <div class="field-label-row">
+                                <span>선행 EPS (원)</span>
+                                <span class="field-warning-icon hidden" id="forward-eps-warning" title="전망치 과열 주의">!</span>
+                            </div>
                             <input type="text" id="m-forward-eps" class="tech-in tech-in-readonly" placeholder="-" readonly data-number-format="won" inputmode="numeric">
+                        </label>
+                        <label class="input-block">
+                            <span>TTM EPS (원)</span>
+                            <input type="text" id="m-trailing-eps" class="tech-in tech-in-readonly" placeholder="-" readonly data-number-format="won" inputmode="numeric">
                         </label>
                         <label class="input-block">
                             <span>선행 PER (배)</span>
@@ -226,6 +286,17 @@
                         <p>필요한 경우 EPS와 밸류에이션 가정을 덮어써서 적정주가를 조정합니다.</p>
                     </div>
                     <div class="input-grid valuation-grid">
+                        <label class="input-block input-block-wide">
+                            <span>산업 섹터 선택</span>
+                            <select id="m-sector-preset" class="tech-in tech-select">
+                                <option value="">선택 안 함</option>
+                                <option value="intelligent_machines">지능형 기계 (AI/반도체/로봇)</option>
+                                <option value="biotech_innovation">바이오/혁신신약</option>
+                                <option value="growth_platform">일반 성장주/플랫폼</option>
+                                <option value="value_dividend">가치주/배당주</option>
+                                <option value="general_manufacturing">일반 제조</option>
+                            </select>
+                        </label>
                         <label class="input-block">
                             <span>조정 EPS (원)</span>
                             <input type="text" id="m-adjusted-eps" class="tech-in" placeholder="0" data-number-format="won" inputmode="numeric">
@@ -249,6 +320,13 @@
                 <i data-lucide="refresh-cw"></i>
                 <span>가치 지표 재계산</span>
             </button>
+            <div class="metrics-guide" id="metrics-guide">
+                <div class="valuation-preset-row">
+                    <span class="sector-badge" id="sector-name-badge">프리셋 없음</span>
+                    <span class="sector-badge sector-badge-accent" id="sector-premium-badge">무형자산 가산 0%</span>
+                </div>
+                <p class="metrics-guide-copy" id="metrics-guide-copy">섹터 프리셋을 선택하면 목표 PER, 요구수익률, 무형자산 프리미엄이 자동 적용됩니다.</p>
+            </div>
             <div class="metrics-grid" id="metrics-grid"></div>
         </section>
 

@@ -1005,6 +1005,10 @@ try {
             'goldChangePct'   => null,
             'vix'             => null,
             'vixChangePct'    => null,
+            'kospi'           => null,
+            'kospiChangePct'  => null,
+            'kosdaq'          => null,
+            'kosdaqChangePct' => null,
         ];
 
         // yfinance quote 응답: currentPrice + previousClose → changePct 직접 계산
@@ -1074,6 +1078,25 @@ try {
             if ($vixCur > 0) {
                 $summary['vix'] = round($vixCur, 2);
                 $summary['vixChangePct'] = $calcChangePct($vixQ);
+            }
+        } catch (Throwable $ignored) {}
+
+        // ── KOSPI / KOSDAQ 종합지수: Yahoo Finance INDEX quote ──
+        try {
+            $kospiQ = request_yfinance_bridge('quote', ['stock_code' => '^KS11', 'market' => 'INDEX']);
+            $kospiCur = (float) ($kospiQ['currentPrice'] ?? 0);
+            if ($kospiCur > 0) {
+                $summary['kospi'] = round($kospiCur, 2);
+                $summary['kospiChangePct'] = $calcChangePct($kospiQ);
+            }
+        } catch (Throwable $ignored) {}
+
+        try {
+            $kosdaqQ = request_yfinance_bridge('quote', ['stock_code' => '^KQ11', 'market' => 'INDEX']);
+            $kosdaqCur = (float) ($kosdaqQ['currentPrice'] ?? 0);
+            if ($kosdaqCur > 0) {
+                $summary['kosdaq'] = round($kosdaqCur, 2);
+                $summary['kosdaqChangePct'] = $calcChangePct($kosdaqQ);
             }
         } catch (Throwable $ignored) {}
 

@@ -9,6 +9,54 @@
         returnUrl: 'invest_nav_kakao_return_url'
     });
 
+    const VALUATION_SECTOR_PRESETS = Object.freeze({
+        intelligent_machines: Object.freeze({
+            key: 'intelligent_machines',
+            label: '지능형 기계 (AI/반도체/로봇)',
+            targetPer: 22,
+            requiredReturn: 6,
+            premiumRate: 25,
+            badgeText: 'AI 슈퍼사이클 할증 +25%',
+            guideText: 'AI 슈퍼사이클 및 HBM 독점 가치 반영 중'
+        }),
+        biotech_innovation: Object.freeze({
+            key: 'biotech_innovation',
+            label: '바이오/혁신신약',
+            targetPer: 35,
+            requiredReturn: 12,
+            premiumRate: 40,
+            badgeText: '혁신 파이프라인 프리미엄 +40%',
+            guideText: '임상 파이프라인과 플랫폼 잠재력 프리미엄 반영 중'
+        }),
+        growth_platform: Object.freeze({
+            key: 'growth_platform',
+            label: '일반 성장주/플랫폼',
+            targetPer: 25,
+            requiredReturn: 8,
+            premiumRate: 20,
+            badgeText: '플랫폼 성장 프리미엄 +20%',
+            guideText: '네트워크 효과와 장기 TAM 확장 가치 반영 중'
+        }),
+        value_dividend: Object.freeze({
+            key: 'value_dividend',
+            label: '가치주/배당주',
+            targetPer: 8,
+            requiredReturn: 9,
+            premiumRate: 0,
+            badgeText: '현금흐름 프리미엄 0%',
+            guideText: '보수적 현금흐름 기반 밸류에이션 적용 중'
+        }),
+        general_manufacturing: Object.freeze({
+            key: 'general_manufacturing',
+            label: '일반 제조',
+            targetPer: 12,
+            requiredReturn: 8,
+            premiumRate: 10,
+            badgeText: '제조 프리미엄 +10%',
+            guideText: '설비 경쟁력과 점진 성장 프리미엄 반영 중'
+        })
+    });
+
     function parseNumberText(value) {
         if (value === null || value === undefined) return null;
         const normalized = String(value).replace(/,/g, '').trim();
@@ -28,6 +76,73 @@
         if (!digits) return '';
         const formatted = Number.parseInt(digits, 10).toLocaleString('en-US');
         return negative ? `-${formatted}` : formatted;
+    }
+
+    function resolveBaseValuationVariables(values) {
+        const source = values || {};
+        const manualEps = parseFormattedNumber(source.adjustedEps);
+        const forwardEps = parseFormattedNumber(source.forwardEps);
+        const trailingEps = parseFormattedNumber(source.trailingEps);
+        const manualPer = parseNumberText(source.targetPer) ?? 0;
+        const forwardPer = parseNumberText(source.forwardPer) ?? 0;
+        const epsSource = manualEps ? 'manual' : forwardEps ? 'forward' : trailingEps ? 'ttm' : 'none';
+        const forwardOverheat = forwardEps > 0 && trailingEps > 0 && forwardEps >= (trailingEps * 1.5);
+
+        return {
+            baseEPS: manualEps || forwardEps || trailingEps || 0,
+            basePER: manualPer || forwardPer || 0,
+            usingManualEps: manualEps > 0,
+            usingManualPer: manualPer > 0,
+            epsSource,
+            forwardOverheat
+        };
+    }
+
+    function resolveValuationSectorPreset(key) {
+        const normalizedKey = String(key || '').trim();
+        return VALUATION_SECTOR_PRESETS[normalizedKey] || null;
+    }
+
+    function computeValuationOutputs(values) {
+        const source = values || {};
+        const currentPrice = parseFormattedNumber(source.currentPrice);
+        const baseEPS = parseFormattedNumber(source.baseEPS);
+        const basePER = parseNumberText(source.basePER) ?? 0;
+        const bps = parseFormattedNumber(source.bps);
+        const roePct = parseNumberText(source.roe) ?? 0;
+        const growthPct = parseNumberText(source.epsGrowth) ?? 0;
+        const requiredReturnPct = parseNumberText(source.requiredReturn) ?? 0;
+        const premiumRatePct = parseNumberText(source.premiumRate) ?? 0;
+
+        const perFairValueRaw = baseEPS > 0 && basePER > 0 ? baseEPS * basePER : 0;
+        const perFairValue = perFairValueRaw ? Math.round(perFairValueRaw) : 0;
+        const finalTargetPriceRaw = perFairValue * (1 + (premiumRatePct / 100));
+        const finalTargetPrice = finalTargetPriceRaw ? Math.round(finalTargetPriceRaw) : 0;
+        const pegRatio = growthPct > 0 && basePER > 0 ? basePER / growthPct : null;
+        const pegTone = pegRatio === null ? '' : pegRatio < 1 ? 'good' : 'bad';
+
+        const roeDecimal = roePct / 100;
+        const requiredReturnDecimal = requiredReturnPct / 100;
+        const srimFairValueRaw = bps > 0 && requiredReturnDecimal > 0
+            ? bps + (bps * ((roeDecimal - requiredReturnDecimal) / requiredReturnDecimal))
+            : 0;
+        const srimFairValue = srimFairValueRaw ? Math.round(srimFairValueRaw) : 0;
+
+        const upsidePct = currentPrice > 0 && finalTargetPrice
+            ? percentage(finalTargetPrice - currentPrice, currentPrice)
+            : 0;
+        const upsideTone = upsidePct > 0 ? 'hot' : upsidePct < 0 ? 'cool' : '';
+
+        return {
+            perFairValue,
+            finalTargetPrice,
+            premiumRatePct,
+            pegRatio,
+            pegTone,
+            srimFairValue,
+            upsidePct,
+            upsideTone
+        };
     }
 
     function parseSignedNumberText(value) {
@@ -337,7 +452,8 @@
             high: parseNumberText(payload?.dayHigh ?? payload?.high ?? payload?.regularMarketDayHigh) ?? 0,
             low: parseNumberText(payload?.dayLow ?? payload?.low ?? payload?.regularMarketDayLow) ?? 0,
             volume: parseNumberText(payload?.volume ?? payload?.regularMarketVolume ?? payload?.lastVolume) ?? 0,
-            forwardEps: parseNumberText(payload?.epsForward ?? payload?.forwardEps ?? payload?.trailingEps),
+            forwardEps: parseNumberText(payload?.epsForward ?? payload?.forwardEps),
+            trailingEps: parseNumberText(payload?.trailingEps ?? payload?.epsTrailing ?? payload?.ttmEps),
             forwardPer: parseNumberText(payload?.forwardPE ?? payload?.forwardPer ?? payload?.trailingPE),
             bps: parseNumberText(payload?.bookValue ?? payload?.bps),
             roe: parseNumberText(payload?.returnOnEquity ?? payload?.roe),
@@ -797,8 +913,11 @@
         normalizePublicQuote,
         normalizeYfinanceChartRows,
         normalizeYfinanceQuote,
+        computeValuationOutputs,
         parseFormattedNumber,
         panChartWindow,
+        resolveBaseValuationVariables,
+        resolveValuationSectorPreset,
         sliceChartSeriesWindow,
         sliceTechnicalSeriesWindow,
         buildChartSeriesSignature,

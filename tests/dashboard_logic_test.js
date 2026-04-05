@@ -340,6 +340,98 @@ assert(InvestmentLogic.formatWonInputValue('1234567') === '1,234,567', 'Won inpu
 assert(InvestmentLogic.formatWonInputValue('0012300원') === '12,300', 'Won input formatting should strip non-digits and leading zeros');
 assert(InvestmentLogic.parseFormattedNumber('1,234,567') === 1234567, 'Formatted numeric text should parse back to a number');
 assert(InvestmentLogic.parseFormattedNumber('') === 0, 'Blank numeric text should parse to 0');
+const valuationFallback = InvestmentLogic.resolveBaseValuationVariables({
+    adjustedEps: '',
+    forwardEps: '12,300',
+    trailingEps: '9,800',
+    targetPer: '',
+    forwardPer: '8.6'
+});
+assert(valuationFallback.baseEPS === 12300, 'Base EPS should fall back to the API forward EPS when the adjusted EPS is blank');
+assert(Math.round(valuationFallback.basePER * 10) / 10 === 8.6, 'Base PER should fall back to the API forward PER when the target PER is blank');
+assert(!valuationFallback.usingManualEps && !valuationFallback.usingManualPer, 'Fallback valuation variables should report that manual overrides are inactive');
+assert(valuationFallback.epsSource === 'forward', 'Base EPS should prefer forward EPS over trailing TTM EPS when both are available');
+
+const valuationTtmFallback = InvestmentLogic.resolveBaseValuationVariables({
+    adjustedEps: '',
+    forwardEps: '',
+    trailingEps: '9,800',
+    targetPer: '',
+    forwardPer: '8.6'
+});
+assert(valuationTtmFallback.baseEPS === 9800, 'Base EPS should fall back to TTM EPS when forward EPS is missing');
+assert(valuationTtmFallback.epsSource === 'ttm', 'Base EPS source should report the TTM fallback when forward EPS is unavailable');
+assert(valuationTtmFallback.forwardOverheat === false, 'TTM fallback alone should not trigger the forward-overheat warning');
+
+const valuationOverride = InvestmentLogic.resolveBaseValuationVariables({
+    adjustedEps: '15,000',
+    forwardEps: '12,300',
+    trailingEps: '9,800',
+    targetPer: '11.2',
+    forwardPer: '8.6'
+});
+assert(valuationOverride.baseEPS === 15000, 'Base EPS should immediately prefer the manually entered adjusted EPS');
+assert(Math.round(valuationOverride.basePER * 10) / 10 === 11.2, 'Base PER should immediately prefer the manually entered target PER');
+assert(valuationOverride.usingManualEps && valuationOverride.usingManualPer, 'Override valuation variables should report that manual inputs are active');
+assert(valuationOverride.epsSource === 'manual', 'Manual adjusted EPS should remain the selected EPS source');
+
+const valuationOverheat = InvestmentLogic.resolveBaseValuationVariables({
+    adjustedEps: '',
+    forwardEps: '15,500',
+    trailingEps: '10,000',
+    targetPer: '',
+    forwardPer: '9.0'
+});
+assert(valuationOverheat.forwardOverheat === true, 'Forward EPS should raise the overheat flag when it exceeds TTM EPS by 50% or more');
+
+const intelligentMachinesPreset = InvestmentLogic.resolveValuationSectorPreset('intelligent_machines');
+assert(intelligentMachinesPreset.label === '지능형 기계 (AI/반도체/로봇)', 'Intelligent machines preset should expose the expected 2026 label');
+assert(intelligentMachinesPreset.targetPer === 22, 'Intelligent machines preset should auto-fill the target PER to 22x');
+assert(intelligentMachinesPreset.requiredReturn === 6, 'Intelligent machines preset should auto-fill the required return to 6%');
+assert(intelligentMachinesPreset.premiumRate === 25, 'Intelligent machines preset should expose a 25% intangible premium');
+assert(intelligentMachinesPreset.guideText.includes('HBM'), 'Intelligent machines preset should expose the AI-cycle guidance copy');
+
+const biotechPreset = InvestmentLogic.resolveValuationSectorPreset('biotech_innovation');
+assert(biotechPreset.targetPer === 35, 'Biotech preset should auto-fill the target PER to 35x');
+assert(biotechPreset.requiredReturn === 12, 'Biotech preset should auto-fill the required return to 12%');
+assert(biotechPreset.premiumRate === 40, 'Biotech preset should expose a 40% intangible premium');
+
+const valueDividendPreset = InvestmentLogic.resolveValuationSectorPreset('value_dividend');
+assert(valueDividendPreset.targetPer === 8, 'Value/dividend preset should auto-fill the target PER to 8x');
+assert(valueDividendPreset.requiredReturn === 9, 'Value/dividend preset should auto-fill the required return to 9%');
+assert(valueDividendPreset.premiumRate === 0, 'Value/dividend preset should carry no intangible premium');
+
+const valuationCards = InvestmentLogic.computeValuationOutputs({
+    currentPrice: '10,000',
+    baseEPS: 1000,
+    basePER: 12,
+    bps: '8,000',
+    roe: '12',
+    epsGrowth: '20',
+    requiredReturn: '8',
+    premiumRate: '10'
+});
+assert(valuationCards.perFairValue === 12000, 'PER-model fair value should equal base EPS times base PER');
+assert(valuationCards.finalTargetPrice === 13200, 'Final target price should apply the intangible-asset premium on top of the PER-model fair value');
+assert(Math.round(valuationCards.pegRatio * 100) / 100 === 0.6, 'PEG should divide base PER by the expected EPS growth rate');
+assert(valuationCards.pegTone === 'good', 'PEG under 1.0 should use the green tone');
+assert(valuationCards.srimFairValue === 12000, 'S-RIM fair value should apply the ROE spread over the required return to BPS');
+assert(valuationCards.upsidePct === 32, 'Upside should compare the premium-adjusted final target price against the current price');
+assert(valuationCards.upsideTone === 'hot', 'Positive upside should use the red tone');
+
+const valuationCardsNegative = InvestmentLogic.computeValuationOutputs({
+    currentPrice: '10,000',
+    baseEPS: 500,
+    basePER: 10,
+    bps: '8,000',
+    roe: '6',
+    epsGrowth: '5',
+    requiredReturn: '8',
+    premiumRate: '0'
+});
+assert(valuationCardsNegative.pegTone === 'bad', 'PEG of 1.0 or higher should use the red tone');
+assert(valuationCardsNegative.upsidePct === -50, 'Negative upside should preserve the signed percentage');
+assert(valuationCardsNegative.upsideTone === 'cool', 'Negative upside should use the blue tone');
 
 const tooltipRight = InvestmentLogic.resolveChartTooltipLayout({
     anchorX: 60,
@@ -382,10 +474,33 @@ assert(scriptSource.includes("document.querySelectorAll('[data-number-format=\"w
 assert(scriptSource.includes("setFormattedInputValue('m-forward-eps'"), 'Auto-filled valuation data should populate the forward EPS read-only field');
 assert(scriptSource.includes("setFormattedInputValue('m-bps'"), 'Auto-filled valuation data should populate the BPS read-only field');
 assert(scriptSource.includes("document.getElementById('m-required-return').value = '8';"), 'Required return should default to 8%');
+assert(scriptSource.includes("InvestmentLogic.resolveBaseValuationVariables({"), 'Valuation calculations should derive base EPS and PER through the shared override helper');
+assert(scriptSource.includes("InvestmentLogic.computeValuationOutputs({"), 'Valuation calculations should derive the result cards through the shared valuation helper');
+assert(scriptSource.includes("InvestmentLogic.resolveValuationSectorPreset("), 'Sector preset selection should resolve shared preset metadata through dashboard logic');
+assert(scriptSource.includes("forwardOverheat"), 'Valuation rendering should surface the forward-vs-TTM EPS overheat state');
+assert(scriptSource.includes("document.getElementById('m-adjusted-eps').value = '';"), 'Adjusted EPS should start blank so the API forward EPS can remain the default base value');
+assert(scriptSource.includes("document.getElementById('m-target-per').value = '';"), 'Target PER should start blank so the API forward PER can remain the default base value');
+assert(scriptSource.includes("input.addEventListener('input', onValuationManualInput);"), 'Manual valuation inputs should trigger immediate recalculation on each keystroke');
+assert(scriptSource.includes("document.getElementById('m-sector-preset')"), 'Valuation controls should wire the sector preset dropdown');
+assert(scriptSource.includes("document.getElementById('m-trailing-eps')"), 'Valuation controls should populate the trailing TTM EPS read-only field');
+assert(scriptSource.includes("document.getElementById('forward-eps-warning')"), 'Valuation rendering should target the forward EPS warning indicator');
+assert(scriptSource.includes("최종 목표가"), 'Valuation output should include the premium-adjusted final target card');
+assert(scriptSource.includes("metric-result-primary"), 'Valuation output should mark the final target card as the primary emphasized result');
+assert(scriptSource.includes("EPS 기준:"), 'Valuation output should annotate the active EPS source in small helper text');
+assert(scriptSource.includes("PEG 지표"), 'Valuation output should include the PEG result card');
+assert(scriptSource.includes("S-RIM 적정주가"), 'Valuation output should include the S-RIM result card');
+assert(scriptSource.includes("sector-premium-badge"), 'Valuation output should render the intangible-premium badge');
+assert(scriptSource.includes("metrics-guide"), 'Valuation output should render the dynamic sector guide block');
 
 const phpProxySource = readText(`${cwd}/proxy.php`);
 assert(phpProxySource.includes('https://api.gold-api.com/price/XAU'), 'PHP proxy should include the gold-api fallback source');
 assert(phpProxySource.includes('GC=F'), 'PHP proxy should include the Yahoo gold futures fallback');
+assert(phpProxySource.includes("'kospi'"), 'PHP market summary should expose a KOSPI field');
+assert(phpProxySource.includes("'kospiChangePct'"), 'PHP market summary should expose KOSPI change percentage');
+assert(phpProxySource.includes("'kosdaq'"), 'PHP market summary should expose a KOSDAQ field');
+assert(phpProxySource.includes("'kosdaqChangePct'"), 'PHP market summary should expose KOSDAQ change percentage');
+assert(phpProxySource.includes("^KS11"), 'PHP market summary should fetch the KOSPI Yahoo index symbol');
+assert(phpProxySource.includes("^KQ11"), 'PHP market summary should fetch the KOSDAQ Yahoo index symbol');
 assert(phpProxySource.includes("$action === 'company_directory'"), 'PHP proxy should expose the company_directory action');
 assert(phpProxySource.includes('corpCode.xml'), 'PHP proxy should fetch the DART corpCode directory');
 
@@ -406,9 +521,16 @@ assert(yfinanceBridgeSource.includes('--name-hint'), 'yfinance bridge should acc
 assert(yfinanceBridgeSource.includes('read_cached_payload('), 'yfinance bridge should read short-lived cached payloads before calling Yahoo Finance');
 assert(yfinanceBridgeSource.includes('write_cached_payload('), 'yfinance bridge should persist successful Yahoo Finance responses for reuse');
 assert(yfinanceBridgeSource.includes('"sharesOutstanding"'), 'yfinance bridge should expose sharesOutstanding for valuation inputs');
+assert(yfinanceBridgeSource.includes('"trailingEps"'), 'yfinance bridge should expose trailing TTM EPS for valuation fallback');
 
 assert(scriptSource.includes('name_hint'), 'Frontend yfinance requests should forward company name hints');
 assert(phpProxySource.includes('$nameHint = trim((string) ($_GET[\'name_hint\'] ?? \'\'));'), 'PHP proxy should read company name hints for yfinance bridge requests');
+assert(scriptSource.includes("document.getElementById('kospi-value').textContent"), 'Market summary rendering should populate the KOSPI card value');
+assert(scriptSource.includes("setMarketChg('kospi-chg'"), 'Market summary rendering should populate the KOSPI change badge');
+assert(scriptSource.includes("document.getElementById('kospi-note').textContent = '코스피 종합지수';"), 'KOSPI card note should describe the composite index');
+assert(scriptSource.includes("document.getElementById('kosdaq-value').textContent"), 'Market summary rendering should populate the KOSDAQ card value');
+assert(scriptSource.includes("setMarketChg('kosdaq-chg'"), 'Market summary rendering should populate the KOSDAQ change badge');
+assert(scriptSource.includes("document.getElementById('kosdaq-note').textContent = '코스닥 종합지수';"), 'KOSDAQ card note should describe the composite index');
 assert(scriptSource.includes("event.key === 'ArrowDown'"), 'Search input should support arrow-down autocomplete navigation');
 assert(scriptSource.includes('syncCompanyInputValue(company);'), 'Search should synchronize the input text with the resolved autocomplete match');
 assert(!scriptSource.includes('companyInput.value = selected.displayLabel;'), 'Arrow-key navigation should not overwrite the typed input before the selection is committed');
@@ -435,11 +557,33 @@ const styleSource = readText(`${cwd}/style.css`);
 assert(styleSource.includes('.report-year-toggle'), 'Styles should include the yearly quarterly-report toggle treatment');
 assert(styleSource.includes('.report-section'), 'Styles should include grouped report section layout');
 assert(styleSource.includes('.report-section-toggle'), 'Styles should include the report section toggle treatment');
+assert(styleSource.includes('.market-label-row'), 'Styles should include the VIX label row layout for the inline help icon');
+assert(styleSource.includes('.help-icon'), 'Styles should include the circular help icon treatment');
+assert(styleSource.includes('.vix-tooltip'), 'Styles should include the VIX tooltip surface');
+assert(styleSource.includes('backdrop-filter: blur(8px);'), 'VIX tooltip should use a blurred glass background');
+assert(styleSource.includes('right: 0;'), 'VIX tooltip should anchor to the right edge to avoid clipping at the viewport edge');
+assert(styleSource.includes('max-width: 280px;'), 'VIX tooltip should cap its width for mobile screens');
+assert(styleSource.includes('.help-icon:hover .vix-tooltip'), 'VIX tooltip should open on hover');
+assert(styleSource.includes('.help-icon:focus-within .vix-tooltip'), 'VIX tooltip should also open on keyboard focus');
+assert(styleSource.includes('white-space: normal;'), 'VIX tooltip should allow wrapped content inside the bounded panel');
+assert(styleSource.includes('.market-groups'), 'Styles should include the grouped market-bar layout wrapper');
+assert(styleSource.includes('.market-global-group'), 'Styles should include the global market-card group');
+assert(styleSource.includes('.market-domestic-group'), 'Styles should include the domestic index-card group');
+assert(styleSource.includes('repeat(auto-fit, minmax(160px, 1fr))'), 'Market card groups should use auto-fit minmax responsive columns');
+assert(styleSource.includes('border-left: 1px solid'), 'Domestic market group should be visually separated from the global group on wide screens');
+assert(styleSource.includes('.valuation-preset-row'), 'Styles should include the sector preset row treatment');
+assert(styleSource.includes('.sector-badge'), 'Styles should include the premium badge treatment');
+assert(styleSource.includes('.metrics-guide'), 'Styles should include the dynamic sector guide block');
+assert(styleSource.includes('.field-warning-icon'), 'Styles should include the forward EPS warning indicator');
+assert(styleSource.includes('.field-label-row'), 'Styles should include the inline label/warning row for EPS fields');
+assert(styleSource.includes('.metric-result-primary'), 'Styles should include the emphasized final-target card treatment');
 
 const htmlSource = readText(`${cwd}/index.html`);
 assert(htmlSource.includes('API 연동값 (읽기 전용)'), 'Valuation form should include a read-only API track');
 assert(htmlSource.includes('수동 입력 / 가정 조정'), 'Valuation form should include a manual override track');
 assert(htmlSource.includes('id="m-forward-eps"'), 'Valuation form should expose the forward EPS read-only field');
+assert(htmlSource.includes('id="m-trailing-eps"'), 'Valuation form should expose the trailing TTM EPS read-only field');
+assert(htmlSource.includes('id="forward-eps-warning"'), 'Valuation form should include the forward EPS overheat warning indicator');
 assert(htmlSource.includes('id="m-forward-per"'), 'Valuation form should expose the forward PER read-only field');
 assert(htmlSource.includes('id="m-bps"'), 'Valuation form should expose the BPS read-only field');
 assert(htmlSource.includes('id="m-adjusted-eps"'), 'Valuation form should expose the adjusted EPS input');
@@ -447,5 +591,26 @@ assert(htmlSource.includes('id="m-eps-growth"'), 'Valuation form should expose t
 assert(htmlSource.includes('id="m-required-return"'), 'Valuation form should expose the required return input');
 assert(!htmlSource.includes('id="m-shares"'), 'Valuation form should remove the listed shares input');
 assert(!htmlSource.includes('id="m-expected-op"'), 'Valuation form should remove the expected operating income input');
+assert(htmlSource.includes('id="m-sector-preset"'), 'Valuation form should expose the sector preset dropdown');
+assert(htmlSource.includes('지능형 기계 (AI/반도체/로봇)'), 'Valuation form should include the intelligent-machines preset option');
+assert(htmlSource.includes('바이오/혁신신약'), 'Valuation form should include the biotech preset option');
+assert(htmlSource.includes('일반 성장주/플랫폼'), 'Valuation form should include the growth-platform preset option');
+assert(htmlSource.includes('가치주/배당주'), 'Valuation form should include the value-dividend preset option');
+assert(htmlSource.includes('일반 제조'), 'Valuation form should include the general-manufacturing preset option');
+assert(htmlSource.includes('id="metrics-guide"'), 'Valuation section should include the dynamic guide container');
+assert(htmlSource.includes('id="sector-premium-badge"'), 'Valuation section should include the premium badge slot');
+assert(htmlSource.includes('class="help-icon"'), 'Market bar should render a compact VIX help icon');
+assert(htmlSource.includes('class="vix-tooltip"'), 'Market bar should include the VIX tooltip layer');
+assert(htmlSource.includes('class="market-groups"'), 'Top market area should wrap global and domestic cards into grouped layout containers');
+assert(htmlSource.includes('class="market-card-group market-global-group"'), 'Top market area should include the global market-card group');
+assert(htmlSource.includes('class="market-card-group market-domestic-group"'), 'Top market area should include the domestic market-card group');
+assert(htmlSource.includes('id="kospi-value"'), 'Market bar should include a KOSPI value slot');
+assert(htmlSource.includes('id="kosdaq-value"'), 'Market bar should include a KOSDAQ value slot');
+assert(htmlSource.includes('KOSPI 종합'), 'Market bar should label the KOSPI card');
+assert(htmlSource.includes('KOSDAQ 종합'), 'Market bar should label the KOSDAQ card');
+assert(htmlSource.includes('VIX 대비 S&amp;P 500 1년 뒤 기대 수익'), 'VIX tooltip should include the historical return heading');
+assert(htmlSource.includes('27~35'), 'VIX tooltip should include the 27~35 historical probability row');
+assert(htmlSource.includes('50이상'), 'VIX tooltip should include the panic-range historical probability row');
+assert(htmlSource.includes('인사이트: VIX 30 이상은 역사적 분할 매수 구간입니다.'), 'VIX tooltip should include the highlighted insight callout');
 
 console.log('dashboard_logic_test: ok');
