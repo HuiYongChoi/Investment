@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Investment Navigator</title>
-    <meta name="description" content="DART 공시, KRX 시세, Gemini 브리핑, Kakao 로그인을 결합한 투자 분석 대시보드">
+    <meta name="description" content="DART 공시, 키움증권 시세, Gemini 브리핑, Kakao 로그인을 결합한 투자 분석 대시보드">
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
@@ -16,7 +16,7 @@
             <div class="logo-icon"><i data-lucide="compass"></i></div>
             <div class="logo-text">
                 <span class="logo-name">INVESTMENT NAVIGATOR</span>
-                <span class="logo-sub">DART + KRX + Gemini + Kakao</span>
+                <span class="logo-sub">DART + 키움증권 + Gemini + Kakao</span>
             </div>
         </div>
         <div class="header-right">
@@ -106,7 +106,7 @@
             </div>
             <div class="source-row">
                 <span class="source-badge" id="source-dart">DART 준비 중</span>
-                <span class="source-badge" id="source-krx">KRX 준비 중</span>
+                <span class="source-badge" id="source-krx">시세 준비 중</span>
                 <span class="source-badge" id="source-gemini">Gemini 준비 중</span>
             </div>
             <div id="stock-realtime" class="stock-strip hidden"></div>
@@ -117,16 +117,21 @@
                 <div class="card-icon chart-gradient"><i data-lucide="chart-candlestick"></i></div>
                 <div class="card-copy">
                     <h2>주가 흐름 및 추세</h2>
-                    <p class="card-sub" id="chart-meta">KRX 일별 시세를 기반으로 OHLC 툴팁과 MA5, MA20, 볼린저 오버레이를 표시합니다.</p>
+                    <p class="card-sub" id="chart-meta">키움증권 REST API 시세를 기반으로 OHLC 툴팁과 MA5/20/60/200, 볼린저 오버레이를 표시합니다.</p>
                 </div>
             </div>
             <div class="chart-toolbar">
                 <div class="segmented-control" id="chart-range-controls">
-                    <button class="seg-btn active" data-range="1M">1M</button>
-                    <button class="seg-btn" data-range="3M">3M</button>
-                    <button class="seg-btn" data-range="WEEK">주봉</button>
-                    <button class="seg-btn" data-range="YTD">2026 YTD</button>
+                    <button class="seg-btn active" data-range="DAILY">일봉</button>
+                    <button class="seg-btn" data-range="WEEKLY">주봉</button>
+                    <button class="seg-btn" data-range="MONTHLY">월봉</button>
+                    <button class="seg-btn" data-range="YTD">YTD</button>
                 </div>
+                <select id="ytd-year-select" class="ytd-year-select" style="display:none;">
+                    <option value="2026">2026</option>
+                    <option value="2025">2025</option>
+                    <option value="2024">2024</option>
+                </select>
                 <div id="chart-status" class="status-inline">차트 데이터를 불러오는 중입니다.</div>
             </div>
             <div class="chart-shell">
@@ -228,12 +233,10 @@
                     <span>자동 재계산</span>
                 </button>
             </div>
-            <div class="indicator-shell">
-                <canvas id="indicator-chart" width="1000" height="280"></canvas>
-            </div>
-            <div id="tech-legend" class="chart-legend"></div>
             <div id="technical-grid" class="technical-grid"></div>
             <div id="tech-summary" class="tech-summary"></div>
+            <div id="indicator-panels" class="indicator-panels"></div>
+            <div id="tech-legend" class="chart-legend"></div>
         </section>
 
         <section class="card" id="card-briefing">

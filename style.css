@@ -695,11 +695,62 @@ header#header {
 }
 
 .chart-shell,
-.indicator-shell {
+.indicator-shell,
+.indicator-shell-mini {
     border-radius: var(--radius-md);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015));
     border: 1px solid var(--glass-border);
     padding: 18px;
+}
+
+.indicator-shell-mini {
+    padding: 10px;
+}
+
+.ytd-year-select {
+    height: 40px;
+    padding: 0 14px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-primary);
+    font-weight: 700;
+    font-size: 0.88rem;
+    cursor: pointer;
+    outline: none;
+}
+
+.ytd-year-select option {
+    background: #0e1320;
+    color: var(--text-primary);
+}
+
+.indicator-panels {
+    display: grid;
+    gap: 16px;
+    margin-top: 18px;
+}
+
+.indicator-panel-item {
+    border-radius: var(--radius-md);
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.02);
+    overflow: hidden;
+}
+
+.indicator-panel-label {
+    padding: 12px 18px 8px;
+    font-size: 0.82rem;
+    font-weight: 800;
+    color: var(--accent-cyan);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.indicator-panel-item canvas {
+    display: block;
+    width: 100%;
+    height: auto;
 }
 
 .chart-shell canvas,
@@ -831,6 +882,25 @@ header#header {
 .fin-table td:last-child {
     border-radius: 0 14px 14px 0;
     font-weight: 800;
+}
+
+.inline-change {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 800;
+    background: rgba(255, 255, 255, 0.04);
+    vertical-align: middle;
+}
+
+.inline-change.good {
+    background: var(--success-bg);
+}
+
+.inline-change.bad {
+    background: var(--danger-bg);
 }
 
 .input-grid {
@@ -1084,26 +1154,49 @@ header#header {
 }
 
 .briefing-section {
-    margin-top: 20px;
+    margin-top: 22px;
+    padding: 18px 20px;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.briefing-section + .briefing-section {
+    margin-top: 12px;
 }
 
 .briefing-section h3 {
-    margin-bottom: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
     font-size: 1.05rem;
     color: var(--accent-cyan);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    letter-spacing: -0.01em;
 }
 
 .briefing-body {
     color: var(--text-secondary);
-    line-height: 1.8;
-    white-space: pre-wrap;
+    line-height: 1.85;
+    font-size: 0.94rem;
+}
+
+.briefing-body strong {
+    color: var(--text-primary);
+    font-weight: 800;
 }
 
 .briefing-list {
     display: grid;
-    gap: 8px;
-    margin-left: 18px;
+    gap: 10px;
+    margin-left: 8px;
     color: var(--text-secondary);
+    font-size: 0.94rem;
+    line-height: 1.7;
+}
+
+.briefing-list li {
+    padding-left: 12px;
+    border-left: 3px solid var(--accent-blue);
 }
 
 .header-actions {
