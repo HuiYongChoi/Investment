@@ -22,6 +22,7 @@ const KIWOOM_TOKEN_URL = 'https://api.kiwoom.com/oauth2/token';
 const NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock';
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 const KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token';
+const KAKAO_USER_URL = 'https://kapi.kakao.com/v2/user/me';
 
 function json_response(int $status, array $payload): void
 {
@@ -87,8 +88,7 @@ function secret_config(): array
         if (is_readable($secretFile)) {
             $loaded = require $secretFile;
             if (is_array($loaded)) {
-                $config = $loaded;
-                break;
+                $config = array_replace($config, $loaded);
             }
         }
     }
@@ -125,6 +125,11 @@ function gemini_key(): string
 function kakao_rest_key(): string
 {
     return get_secret('KAKAO_REST_API_KEY', 'kakao_rest_api_key', aws_inline_value('Rest API:'));
+}
+
+function kakao_client_secret(): string
+{
+    return get_secret('KAKAO_CLIENT_SECRET', 'kakao_client_secret', aws_inline_value('Client Secret:'));
 }
 
 function kiwoom_app_key(): string
@@ -977,12 +982,13 @@ try {
             json_response(400, ['error' => 'code and redirectUri are required']);
         }
 
-        $body = http_build_query([
+        $body = http_build_query(array_filter([
             'grant_type' => 'authorization_code',
             'client_id' => $key,
+            'client_secret' => kakao_client_secret(),
             'redirect_uri' => $redirectUri,
             'code' => $code,
-        ]);
+        ], static fn ($value) => $value !== ''));
 
         $upstream = request_upstream(
             KAKAO_TOKEN_URL,
@@ -990,8 +996,25 @@ try {
             $body,
             'POST'
         );
+        $responsePayload = safe_json_decode($upstream['body']);
+        if (
+            $upstream['status'] >= 200
+            && $upstream['status'] < 300
+            && !empty($responsePayload['access_token'])
+        ) {
+            $profileUpstream = request_upstream(
+                KAKAO_USER_URL,
+                ['Authorization: Bearer ' . trim((string) $responsePayload['access_token'])]
+            );
+            if ($profileUpstream['status'] >= 200 && $profileUpstream['status'] < 300) {
+                $profilePayload = safe_json_decode($profileUpstream['body']);
+                if ($profilePayload) {
+                    $responsePayload['profile'] = $profilePayload;
+                }
+            }
+        }
         http_response_code($upstream['status']);
-        echo $upstream['body'];
+        echo json_encode($responsePayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
     }
 

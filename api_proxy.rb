@@ -20,6 +20,7 @@ KIWOOM_TOKEN_URL = 'https://api.kiwoom.com/oauth2/token'
 NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock'
 GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
 KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token'
+KAKAO_USER_URL = 'https://kapi.kakao.com/v2/user/me'
 COMPANY_DIRECTORY_CACHE = File.join(Dir.tmpdir, 'investment-navigator-company-directory.json')
 
 def aws_lines
@@ -53,6 +54,7 @@ DART_KEY = env_or_aws('DART_API_KEY', next_label: 'DART 오픈 API')
 KRX_KEY = env_or_aws('KRX_AUTH_KEY', next_label: 'KRX Open API')
 GEMINI_KEY = env_or_aws('GEMINI_API_KEY', next_label: 'Gemini API KEY')
 KAKAO_REST_KEY = env_or_aws('KAKAO_REST_API_KEY', inline_prefix: 'Rest API:')
+KAKAO_CLIENT_SECRET = env_or_aws('KAKAO_CLIENT_SECRET', inline_prefix: 'Client Secret:')
 KIWOOM_APP_KEY = ENV.fetch('KIWOOM_APP_KEY', '').strip
 KIWOOM_SECRET_KEY = ENV.fetch('KIWOOM_SECRET_KEY', '').strip
 KIWOOM_TOKEN_CACHE = File.join(Dir.tmpdir, 'investment-navigator-kiwoom-token.json')
@@ -781,10 +783,28 @@ server.mount_proc '/kakao/token' do |req, res|
       form_body: {
         grant_type: 'authorization_code',
         client_id: KAKAO_REST_KEY,
+        client_secret: KAKAO_CLIENT_SECRET,
         redirect_uri: redirect_uri,
         code: code
-      }
+      }.reject { |_key, value| value.to_s.strip.empty? }
     )
+    payload = parse_json(upstream[:body])
+    if upstream[:status].between?(200, 299) && payload.is_a?(Hash) && !payload['access_token'].to_s.empty?
+        profile_upstream = perform_request(
+          method: :get,
+          url: KAKAO_USER_URL,
+          headers: {
+            'Authorization' => "Bearer #{payload['access_token'].to_s.strip}"
+          }
+        )
+        if profile_upstream[:status].between?(200, 299)
+          profile_payload = parse_json(profile_upstream[:body])
+          if profile_payload.is_a?(Hash) && !profile_payload.empty?
+            payload['profile'] = profile_payload
+            upstream[:body] = JSON.generate(payload)
+          end
+        end
+    end
 
     res.status = upstream[:status]
     res['Content-Type'] = 'application/json; charset=utf-8'

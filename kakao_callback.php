@@ -39,8 +39,26 @@
     <script>
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
         const proxyBase = isLocal ? 'http://localhost:8081/kakao/token' : '/proxy.php?action=kakao';
+        const STORAGE_KEYS = {
+            token: 'invest_nav_kakao_token',
+            error: 'invest_nav_kakao_error',
+            returnUrl: 'invest_nav_kakao_return_url',
+            profile: 'invest_nav_kakao_profile'
+        };
+        function readAuthValue(key) {
+            return sessionStorage.getItem(key) || localStorage.getItem(key) || '';
+        }
+        function writeAuthValue(key, value) {
+            if (value === null || value === undefined || value === '') {
+                sessionStorage.removeItem(key);
+                localStorage.removeItem(key);
+                return;
+            }
+            sessionStorage.setItem(key, value);
+            localStorage.setItem(key, value);
+        }
         const returnUrl = InvestmentLogic.resolveKakaoReturnUrl(
-            sessionStorage.getItem('invest_nav_kakao_return_url'),
+            readAuthValue(STORAGE_KEYS.returnUrl),
             location.href
         );
         const redirectUri = InvestmentLogic.resolveKakaoCallbackUri(location.href);
@@ -51,7 +69,7 @@
 
         async function finish() {
             if (!code) {
-                if (error) sessionStorage.setItem('invest_nav_kakao_error', error);
+                if (error) writeAuthValue(STORAGE_KEYS.error, error);
                 location.replace(returnUrl);
                 return;
             }
@@ -69,11 +87,16 @@
                 if (!response.ok || !data.access_token) {
                     throw new Error(data.error || data.msg || 'access token 발급 실패');
                 }
-                sessionStorage.setItem('invest_nav_kakao_token', data.access_token);
-                sessionStorage.removeItem('invest_nav_kakao_error');
+                writeAuthValue(STORAGE_KEYS.token, data.access_token);
+                if (data.profile) {
+                    writeAuthValue(STORAGE_KEYS.profile, JSON.stringify(data.profile));
+                } else {
+                    writeAuthValue(STORAGE_KEYS.profile, '');
+                }
+                writeAuthValue(STORAGE_KEYS.error, '');
                 message.textContent = '로그인 처리가 완료되어 원래 페이지로 이동합니다.';
             } catch (requestError) {
-                sessionStorage.setItem('invest_nav_kakao_error', requestError.message);
+                writeAuthValue(STORAGE_KEYS.error, requestError.message);
                 message.textContent = '로그인 처리 중 문제가 발생했습니다. 원래 페이지로 돌아갑니다.';
             }
 

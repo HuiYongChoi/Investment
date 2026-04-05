@@ -15,11 +15,10 @@
         <div class="header-left">
             <div class="logo-icon"><i data-lucide="compass"></i></div>
             <div class="logo-text">
-                <span class="logo-name">INVESTMENT NAVIGATOR</span>
-                <span class="logo-sub">DART + Yahoo Finance + Gemini + Kakao</span>
+                <span class="logo-name">INVEST NAV</span>
             </div>
         </div>
-        <div class="header-right">
+        <div class="header-right mobile-header-auth">
             <div id="kakao-auth-area" class="kakao-auth-area">
                 <button id="btn-kakao-login" class="btn-kakao">
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -36,14 +35,71 @@
                     <button id="btn-kakao-logout" class="btn-outline">로그아웃</button>
                 </div>
             </div>
-            <div class="xp-pill">
-                <i data-lucide="zap" class="xp-icon"></i>
-                <span id="level-badge">Lv.1</span>
-                <div class="xp-track"><div class="xp-fill" id="xp-bar"></div></div>
-                <span id="xp-text">0/100</span>
+            <button id="mobile-kakao-login" class="mobile-auth-chip hidden" type="button">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M12 2c-5.52 0-10 3.58-10 8 0 2.87 1.83 5.39 4.61 6.84L5.3 21.03l4.63-2.61c.67.11 1.36.17 2.07.17 5.52 0 10-3.58 10-8s-4.48-8-10-8z"/>
+                </svg>
+                <span>카카오</span>
+            </button>
+            <div id="mobile-kakao-profile" class="mobile-auth-chip hidden">
+                <img id="mobile-kakao-profile-img" src="" alt="카카오 프로필">
+                <div class="mobile-auth-meta">
+                    <span id="mobile-kakao-nickname">카카오 사용자</span>
+                    <span id="mobile-kakao-login-state">카카오 로그인 유지 중</span>
+                </div>
             </div>
+            <button id="mobile-kakao-logout" class="mobile-auth-logout hidden" type="button">로그아웃</button>
         </div>
     </header>
+
+    <section id="mobile-utility-strip" class="mobile-utility-strip hidden" aria-label="모바일 빠른 정보">
+        <div class="mobile-market-tabs">
+            <div class="mobile-market-tab">
+                <span class="mobile-market-label">현재 시각</span>
+                <strong id="mobile-market-datetime">-</strong>
+            </div>
+            <div class="mobile-market-tab">
+                <span class="mobile-market-label">USD/KRW</span>
+                <strong id="mobile-fx-usdkrw">-</strong>
+                <span class="market-chg" id="mobile-fx-usdkrw-chg"></span>
+            </div>
+            <div class="mobile-market-tab">
+                <span class="mobile-market-label">JPY/KRW</span>
+                <strong id="mobile-fx-jpykrw">-</strong>
+                <span class="market-chg" id="mobile-fx-jpykrw-chg"></span>
+            </div>
+            <div class="mobile-market-tab">
+                <span class="mobile-market-label">금</span>
+                <strong id="mobile-gold-krw">-</strong>
+                <span class="market-chg" id="mobile-gold-chg"></span>
+            </div>
+            <div class="mobile-market-tab">
+                <span class="mobile-market-label">VIX</span>
+                <strong id="mobile-vix-value">-</strong>
+                <span class="market-chg" id="mobile-vix-chg"></span>
+            </div>
+            <div class="mobile-market-tab">
+                <span class="mobile-market-label">WTI</span>
+                <strong id="mobile-wti-value">-</strong>
+                <span class="market-chg" id="mobile-wti-chg"></span>
+            </div>
+            <div class="mobile-market-tab">
+                <span class="mobile-market-label">Brent</span>
+                <strong id="mobile-brent-value">-</strong>
+                <span class="market-chg" id="mobile-brent-chg"></span>
+            </div>
+            <div class="mobile-market-tab">
+                <span class="mobile-market-label">KOSPI</span>
+                <strong id="mobile-kospi-value">-</strong>
+                <span class="market-chg" id="mobile-kospi-chg"></span>
+            </div>
+            <div class="mobile-market-tab">
+                <span class="mobile-market-label">KOSDAQ</span>
+                <strong id="mobile-kosdaq-value">-</strong>
+                <span class="market-chg" id="mobile-kosdaq-chg"></span>
+            </div>
+        </div>
+    </section>
 
     <section id="market-bar" class="market-bar">
         <div class="market-pill market-clock">
@@ -186,17 +242,17 @@
                 <i data-lucide="arrow-right"></i>
             </button>
         </div>
-        <div class="helper-row">
-            <span class="helper-chip">Yahoo Finance YTD 차트</span>
-            <span class="helper-chip">최근 3개년 연간·분기 공시</span>
-            <span class="helper-chip">기술적 지표 자동 계산</span>
-            <span class="helper-chip">Gemini 브리핑 + 카카오 전송</span>
-        </div>
         <div id="search-status" class="search-status">기업명 또는 종목코드를 입력하면 자동완성으로 검색할 수 있습니다.</div>
     </section>
 
-    <main id="dashboard" class="dashboard hidden" data-mobile-tab="chart-finance">
-        <section class="card" id="card-overview" data-mobile-panel="chart-finance">
+    <main id="dashboard" class="dashboard hidden" data-mobile-tab="home">
+        <div class="mobile-content-tabbar" id="mobile-content-tabbar">
+            <button class="mobile-content-tab active" type="button" data-mobile-content-target="chart">차트</button>
+            <button class="mobile-content-tab" type="button" data-mobile-content-target="finance">재무</button>
+            <button class="mobile-content-tab" type="button" data-mobile-content-target="technical">기술적</button>
+        </div>
+
+        <section class="card" id="card-overview" data-mobile-panel="chart-finance" data-mobile-content-panel="chart">
             <div class="card-header">
                 <div class="card-icon brand-gradient"><i data-lucide="building-2"></i></div>
                 <div class="card-copy">
@@ -216,7 +272,7 @@
             <div id="stock-realtime" class="stock-strip hidden"></div>
         </section>
 
-        <section class="card" id="card-chart" data-mobile-panel="chart-finance">
+        <section class="card" id="card-chart" data-mobile-panel="chart-finance" data-mobile-content-panel="chart">
             <div class="card-header">
                 <div class="card-icon chart-gradient"><i data-lucide="chart-candlestick"></i></div>
                 <div class="card-copy">
@@ -233,6 +289,11 @@
                     <button class="seg-btn" data-range="YTD">YTD</button>
                 </div>
                 <div class="chart-toolbar-actions">
+                    <div class="mobile-chart-zoom" aria-label="모바일 차트 확대 컨트롤">
+                        <button class="btn-outline btn-chart-zoom" type="button" data-chart-zoom="out" aria-label="차트 축소">-</button>
+                        <button class="btn-outline btn-chart-zoom" type="button" data-chart-zoom="in" aria-label="차트 확대">+</button>
+                        <button class="btn-outline btn-chart-zoom btn-chart-reset-mobile" type="button" data-chart-zoom="reset">초기화</button>
+                    </div>
                     <button class="btn-outline btn-chart-reset" id="chart-reset-btn" type="button" disabled>확대 초기화</button>
                     <div id="chart-status" class="status-inline">차트 데이터를 불러오는 중입니다.</div>
                 </div>
@@ -243,7 +304,7 @@
             <div id="chart-legend" class="chart-legend"></div>
         </section>
 
-        <section class="card" id="card-reports" data-mobile-panel="chart-finance">
+        <section class="card" id="card-reports" data-mobile-panel="chart-finance" data-mobile-content-panel="finance">
             <div class="card-header">
                 <div class="card-icon report-gradient"><i data-lucide="files"></i></div>
                 <div class="card-copy">
@@ -254,7 +315,7 @@
             <div id="report-list" class="report-list"></div>
         </section>
 
-        <section class="card" id="card-financials" data-mobile-panel="chart-finance">
+        <section class="card" id="card-financials" data-mobile-panel="chart-finance" data-mobile-content-panel="finance">
             <div class="card-header">
                 <div class="card-icon financial-gradient"><i data-lucide="table-properties"></i></div>
                 <div class="card-copy">
@@ -364,7 +425,7 @@
             <div class="metrics-grid" id="metrics-grid"></div>
         </section>
 
-        <section class="card" id="card-rating" data-mobile-panel="chart-finance">
+        <section class="card" id="card-rating" data-mobile-panel="chart-finance" data-mobile-content-panel="finance">
             <div class="card-header">
                 <div class="card-icon rating-gradient"><i data-lucide="award"></i></div>
                 <div class="card-copy">
@@ -376,7 +437,7 @@
             <div id="rating-details" class="rating-details"></div>
         </section>
 
-        <section class="card" id="card-technical" data-mobile-panel="chart-finance">
+        <section class="card" id="card-technical" data-mobile-panel="chart-finance" data-mobile-content-panel="technical">
             <div class="card-header">
                 <div class="card-icon tech-gradient"><i data-lucide="activity"></i></div>
                 <div class="card-copy">
@@ -407,10 +468,17 @@
                         <span class="chip-hint">?<span class="chip-tooltip"><strong>골든 / 데드크로스 (MA5 / MA20)</strong><br>단기·장기 이동평균 교차 신호<br>🟢 골든크로스(매수): MA5가 MA20 상향돌파<br>🔴 데드크로스(매도): MA5가 MA20 하향돌파</span></span>
                     </button>
                 </div>
-                <button class="btn-outline" id="tech-refresh-btn">
-                    <i data-lucide="sparkles"></i>
-                    <span>자동 재계산</span>
-                </button>
+                <div class="chart-toolbar-actions">
+                    <div class="mobile-chart-zoom" aria-label="모바일 차트 확대 컨트롤">
+                        <button class="btn-outline btn-chart-zoom" type="button" data-chart-zoom="out" aria-label="차트 축소">-</button>
+                        <button class="btn-outline btn-chart-zoom" type="button" data-chart-zoom="in" aria-label="차트 확대">+</button>
+                        <button class="btn-outline btn-chart-zoom btn-chart-reset-mobile" type="button" data-chart-zoom="reset">초기화</button>
+                    </div>
+                    <button class="btn-outline" id="tech-refresh-btn">
+                        <i data-lucide="sparkles"></i>
+                        <span>자동 재계산</span>
+                    </button>
+                </div>
             </div>
             <div class="indicator-shell" id="tech-price-shell" style="position:relative;">
                 <canvas id="tech-price-chart" width="1000" height="300"></canvas>
@@ -454,7 +522,11 @@
     </main>
 
     <nav id="mobile-tabbar" class="mobile-tabbar hidden" aria-label="모바일 섹션 전환">
-        <button class="mobile-tab-btn active" type="button" data-mobile-tab-target="chart-finance" aria-pressed="true">
+        <button class="mobile-tab-btn active" type="button" data-mobile-tab-target="home" aria-pressed="true">
+            <i data-lucide="house"></i>
+            <span>Home</span>
+        </button>
+        <button class="mobile-tab-btn" type="button" data-mobile-tab-target="chart-finance" aria-pressed="false">
             <i data-lucide="panels-top-left"></i>
             <span>차트/재무</span>
         </button>

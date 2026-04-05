@@ -235,10 +235,30 @@ InvestmentLogic.clearKakaoSessionState(
     }
 );
 assert(
-    removedKeys.join(',') === 'invest_nav_kakao_token,invest_nav_kakao_error,invest_nav_kakao_return_url',
+    removedKeys.join(',') === 'invest_nav_kakao_token,invest_nav_kakao_error,invest_nav_kakao_return_url,invest_nav_kakao_profile',
     'Kakao session cleanup should remove every stored auth key'
 );
 assert(clearedAccessToken === null, 'Kakao session cleanup should clear the SDK access token');
+
+const kakaoProfileFromNestedAccount = InvestmentLogic.extractKakaoProfile({
+    kakao_account: {
+        profile: {
+            nickname: '모하이',
+            thumbnail_image_url: 'https://example.com/kakao-thumb.png'
+        }
+    }
+});
+assert(kakaoProfileFromNestedAccount.nickname === '모하이', 'Kakao profile helper should read nickname from kakao_account.profile when properties are missing');
+assert(kakaoProfileFromNestedAccount.image === 'https://example.com/kakao-thumb.png', 'Kakao profile helper should read thumbnail image from kakao_account.profile');
+
+const kakaoProfileFromLegacyProperties = InvestmentLogic.extractKakaoProfile({
+    properties: {
+        nickname: '레거시유저',
+        thumbnail_image: 'https://example.com/legacy-thumb.png'
+    }
+});
+assert(kakaoProfileFromLegacyProperties.nickname === '레거시유저', 'Kakao profile helper should continue supporting legacy properties.nickname');
+assert(kakaoProfileFromLegacyProperties.image === 'https://example.com/legacy-thumb.png', 'Kakao profile helper should continue supporting legacy properties.thumbnail_image');
 
 const chart = InvestmentLogic.generateAnchoredSyntheticChart({
     stockCode: '005930',
@@ -297,6 +317,18 @@ assert(clampedWindow.start === 80 && clampedWindow.end === 100, 'Chart window sh
 
 const zoomedWindow = InvestmentLogic.zoomChartWindow({ start: 0, end: 100 }, 100, 0.5, 0.5, 20);
 assert(zoomedWindow.start === 25 && zoomedWindow.end === 75, 'Chart zoom helper should zoom toward the anchor point');
+
+const hoveredAnchorRatio = InvestmentLogic.resolveChartAnchorRatio({ start: 80, end: 100 }, 99, 0.35);
+assert(Math.round(hoveredAnchorRatio * 1000) / 1000 === 0.975, 'Hovered chart dates should resolve to a right-anchored zoom ratio near the latest candle');
+
+const fallbackAnchorRatio = InvestmentLogic.resolveChartAnchorRatio({ start: 80, end: 100 }, null, 0.35);
+assert(fallbackAnchorRatio === 0.35, 'Chart anchor helper should fall back to the pointer ratio when no hovered candle exists');
+
+const pinchZoomInFactor = InvestmentLogic.resolvePinchZoomFactor(100, 130);
+assert(Math.round(pinchZoomInFactor * 1000) / 1000 === 0.769, 'Pinch-out gestures should zoom into fewer candles');
+
+const pinchZoomOutFactor = InvestmentLogic.resolvePinchZoomFactor(100, 70);
+assert(Math.round(pinchZoomOutFactor * 1000) / 1000 === 1.429, 'Pinch-in gestures should zoom back out to a wider window');
 
 const pannedWindow = InvestmentLogic.panChartWindow({ start: 25, end: 75 }, 20, 100);
 assert(pannedWindow.start === 45 && pannedWindow.end === 95, 'Chart pan helper should move the window without changing its size');
@@ -508,6 +540,26 @@ assert(scriptSource.includes("document.getElementById('mobile-tabbar')"), 'Mobil
 assert(scriptSource.includes("dashboard.dataset.mobileTab = tab"), 'Mobile UX should store the active mobile tab on the dashboard root');
 assert(scriptSource.includes("window.matchMedia('(max-width: 768px)')"), 'Mobile UX should explicitly gate the hybrid layout to mobile widths');
 assert(scriptSource.includes("document.querySelectorAll('[data-mobile-tab-target]')"), 'Mobile UX should bind click handlers to bottom-tab buttons');
+assert(scriptSource.includes('InvestmentLogic.extractKakaoProfile('), 'Kakao session restore should normalize profile payloads through shared logic');
+assert(scriptSource.includes("document.getElementById('btn-kakao-login').classList.add('hidden');"), 'Kakao profile application should hide the login button after session restore');
+assert(scriptSource.includes('syncKakaoAuthUI('), 'Kakao auth rendering should sync desktop and mobile auth surfaces through one helper');
+assert(scriptSource.includes("localStorage.setItem(KAKAO_STORAGE_RETURN_URL, location.href);"), 'Kakao login should persist the return URL to localStorage for mobile redirect resilience');
+assert(scriptSource.includes("localStorage.getItem(KAKAO_STORAGE_TOKEN)"), 'Kakao session restore should also read the localStorage token fallback');
+assert(scriptSource.includes("const KAKAO_STORAGE_PROFILE = 'invest_nav_kakao_profile';"), 'Kakao auth should define a dedicated storage key for the cached profile payload');
+assert(scriptSource.includes("writeKakaoStorage(KAKAO_STORAGE_PROFILE"), 'Kakao auth should persist the normalized profile payload for later session restoration');
+assert(scriptSource.includes("const storedProfile = readStoredKakaoProfile();"), 'Kakao session restore should load a cached profile before requesting a fresh one');
+assert(scriptSource.includes("if (storedProfile) {\n            applyKakaoProfile(storedProfile, { fallback: true });"), 'Kakao session restore should immediately reflect a cached profile when available');
+assert(scriptSource.includes("document.getElementById('mobile-fx-usdkrw').textContent"), 'Mobile market strip should render the USD/KRW quick tab value');
+assert(scriptSource.includes("document.getElementById('mobile-kakao-login')"), 'Mobile auth strip should wire the compact Kakao login button');
+assert(scriptSource.includes("document.querySelectorAll('[data-mobile-content-target]')"), 'Mobile chart/finance area should bind the secondary horizontal content tabs');
+assert(scriptSource.includes("const allowedTabs = new Set(['home', 'chart-finance', 'valuation', 'briefing']);"), 'Mobile UX should include a dedicated Home tab alongside analysis tabs');
+assert(scriptSource.includes("const shouldShowHome = !isMobile || !dashboardVisible || state.mobileTab === 'home';"), 'Mobile UX should keep the search screen visible only on the Home tab');
+assert(scriptSource.includes("dashboard.classList.toggle('mobile-home-hidden'"), 'Mobile UX should hide dashboard cards entirely while the Home tab is active');
+assert(scriptSource.includes("setMobileTab('chart-finance');"), 'Searching should still jump directly into the chart/finance analysis tab');
+assert(scriptSource.includes("body.classList.toggle('mobile-dashboard-active'"), 'Mobile header chrome should collapse once the dashboard is visible');
+assert(!scriptSource.includes('drawXP();'), 'XP UI should no longer initialize on page load');
+assert(!scriptSource.includes('function addXP('), 'XP progression logic should be removed from the frontend');
+assert(!scriptSource.includes("localStorage.getItem('invest_nav_xp')"), 'XP localStorage state should be removed from the frontend');
 assert(scriptSource.includes("EPS 기준:"), 'Valuation output should annotate the active EPS source in small helper text');
 assert(scriptSource.includes("이익 미발생 구간 - PBR 밴드 활용 권장"), 'Loss-making sectors should render the negative-EPS fallback message in the final-target card');
 assert(scriptSource.includes("preset.badgeTone"), 'Valuation preset rendering should apply sector-specific badge tone classes');
@@ -533,12 +585,16 @@ assert(pythonProxySource.includes('https://api.gold-api.com/price/XAU'), 'Python
 assert(pythonProxySource.includes('GC=F'), 'Python proxy should include the Yahoo gold futures fallback');
 assert(pythonProxySource.includes('/company-directory'), 'Python proxy should expose the company directory endpoint');
 assert(pythonProxySource.includes('name_hint = params.get("name_hint", "").strip()'), 'Python proxy should forward company name hints to the yfinance bridge');
+assert(pythonProxySource.includes('KAKAO_CLIENT_SECRET = env_or_aws("KAKAO_CLIENT_SECRET"'), 'Python proxy should load an optional Kakao client secret');
+assert(pythonProxySource.includes('"client_secret": KAKAO_CLIENT_SECRET'), 'Python proxy should include the Kakao client secret during token exchange');
 
 const rubyProxySource = readText(`${cwd}/api_proxy.rb`);
 assert(rubyProxySource.includes('https://api.gold-api.com/price/XAU'), 'Ruby proxy should include the gold-api fallback source');
 assert(rubyProxySource.includes('GC=F'), 'Ruby proxy should include the Yahoo gold futures fallback');
 assert(rubyProxySource.includes('/company-directory'), 'Ruby proxy should expose the company directory endpoint');
 assert(rubyProxySource.includes('name_hint = (req.query[\'name_hint\'] || \'\').strip'), 'Ruby proxy should forward company name hints to the yfinance bridge');
+assert(rubyProxySource.includes("KAKAO_CLIENT_SECRET = env_or_aws('KAKAO_CLIENT_SECRET'"), 'Ruby proxy should load an optional Kakao client secret');
+assert(rubyProxySource.includes('client_secret: KAKAO_CLIENT_SECRET'), 'Ruby proxy should include the Kakao client secret during token exchange');
 
 const yfinanceBridgeSource = readText(`${cwd}/yfinance_bridge.py`);
 assert(yfinanceBridgeSource.includes('--name-hint'), 'yfinance bridge should accept company name hints for AUTO market resolution');
@@ -549,6 +605,10 @@ assert(yfinanceBridgeSource.includes('"trailingEps"'), 'yfinance bridge should e
 
 assert(scriptSource.includes('name_hint'), 'Frontend yfinance requests should forward company name hints');
 assert(phpProxySource.includes('$nameHint = trim((string) ($_GET[\'name_hint\'] ?? \'\'));'), 'PHP proxy should read company name hints for yfinance bridge requests');
+assert(phpProxySource.includes('function kakao_client_secret(): string'), 'PHP proxy should expose a Kakao client-secret helper for token exchange');
+assert(phpProxySource.includes("'client_secret' => kakao_client_secret()"), 'PHP proxy should include the Kakao client secret during token exchange');
+assert(phpProxySource.includes('https://kapi.kakao.com/v2/user/me'), 'PHP proxy should fetch Kakao profile data after exchanging the login token');
+assert(phpProxySource.includes("$responsePayload['profile'] = $profilePayload;"), 'PHP proxy should return the Kakao profile payload with the token response when available');
 assert(scriptSource.includes("document.getElementById('kospi-value').textContent"), 'Market summary rendering should populate the KOSPI card value');
 assert(scriptSource.includes("setMarketChg('kospi-chg'"), 'Market summary rendering should populate the KOSPI change badge');
 assert(scriptSource.includes("document.getElementById('kospi-note').textContent = '코스피 종합지수';"), 'KOSPI card note should describe the composite index');
@@ -610,6 +670,16 @@ assert(styleSource.includes('.mobile-tabbar'), 'Styles should include the fixed 
 assert(styleSource.includes('position: fixed;'), 'Mobile bottom tab bar should be fixed to the viewport bottom');
 assert(styleSource.includes('backdrop-filter: blur(18px);'), 'Mobile bottom tab bar should use a glassmorphism blur treatment');
 assert(styleSource.includes('[data-mobile-panel]'), 'Styles should target dashboard cards by mobile panel group');
+assert(styleSource.includes('.mobile-utility-strip'), 'Styles should include the compact mobile utility strip');
+assert(styleSource.includes('.mobile-market-tabs'), 'Styles should include the horizontal market quick-tab row');
+assert(styleSource.includes('.mobile-market-tab'), 'Styles should include the compact market quick-tab card');
+assert(styleSource.includes('.mobile-header-auth'), 'Styles should include the compact mobile header auth area');
+assert(styleSource.includes('.mobile-auth-chip'), 'Styles should include the compact mobile Kakao auth chip');
+assert(styleSource.includes('.mobile-content-tabbar'), 'Styles should include the secondary horizontal tab bar for chart/finance/technical content');
+assert(styleSource.includes('.mobile-dashboard-active'), 'Styles should include the collapsed mobile header mode');
+assert(styleSource.includes('min-height: 44px;'), 'Mobile bottom-tab buttons should be shorter to save vertical space');
+assert(styleSource.includes('.dashboard.mobile-home-hidden'), 'Styles should hide dashboard cards entirely while the mobile Home tab is active');
+assert(styleSource.includes('.mobile-header-auth .mobile-auth-meta span:last-child'), 'Mobile auth chip should hide the subtitle text to save header space');
 assert(styleSource.includes('border-left: 1px solid'), 'Domestic market group should be visually separated from the global group on wide screens');
 assert(styleSource.includes('.valuation-preset-row'), 'Styles should include the sector preset row treatment');
 assert(styleSource.includes('.sector-badge'), 'Styles should include the premium badge treatment');
@@ -619,6 +689,12 @@ assert(styleSource.includes('.field-label-row'), 'Styles should include the inli
 assert(styleSource.includes('.metric-result-primary'), 'Styles should include the emphasized final-target card treatment');
 assert(styleSource.includes('.sector-badge-ai'), 'Styles should include the AI-sector glow badge tone');
 assert(styleSource.includes('.sector-badge-bio'), 'Styles should include the biotech-sector glow badge tone');
+assert(styleSource.includes('.btn-kakao'), 'Styles should include the Kakao login button treatment');
+assert(styleSource.includes('@media (max-width: 560px)'), 'Styles should include the smallest mobile breakpoint');
+assert(!styleSource.includes('.xp-pill'), 'XP pill styles should be removed once the gamification header is deleted');
+assert(!styleSource.includes('.xp-track'), 'XP progress-track styles should be removed once the gamification header is deleted');
+assert(!styleSource.includes('.helper-row'), 'Search helper chip styles should be removed with the mobile-home cleanup');
+assert(!styleSource.includes('.helper-chip'), 'Search helper chips should no longer be styled once removed from the UI');
 
 const htmlSource = readText(`${cwd}/index.html`);
 assert(htmlSource.includes('API 연동값 (읽기 전용)'), 'Valuation form should include a read-only API track');
@@ -657,7 +733,17 @@ assert(htmlSource.includes('class="vix-tooltip"'), 'Market bar should include th
 assert(htmlSource.includes('class="market-groups"'), 'Top market area should wrap global and domestic cards into grouped layout containers');
 assert(htmlSource.includes('class="market-card-group market-global-group"'), 'Top market area should include the global market-card group');
 assert(htmlSource.includes('class="market-card-group market-domestic-group"'), 'Top market area should include the domestic market-card group');
+assert(htmlSource.includes('id="mobile-utility-strip"'), 'HTML should include the compact mobile utility strip');
+assert(htmlSource.includes('id="mobile-fx-usdkrw"'), 'HTML should include the USD/KRW mobile quick-tab value slot');
+assert(htmlSource.includes('id="mobile-vix-value"'), 'HTML should include the VIX mobile quick-tab value slot');
+assert(htmlSource.includes('id="mobile-kakao-login"'), 'HTML should include the compact mobile Kakao login button');
+assert(htmlSource.includes('id="mobile-kakao-profile"'), 'HTML should include the compact mobile Kakao profile chip');
+assert(htmlSource.includes('class="mobile-content-tabbar"'), 'HTML should include the secondary mobile content tab bar');
+assert(htmlSource.includes('data-mobile-content-target="chart"'), 'HTML should include the chart content tab');
+assert(htmlSource.includes('data-mobile-content-target="finance"'), 'HTML should include the finance content tab');
+assert(htmlSource.includes('data-mobile-content-target="technical"'), 'HTML should include the technical content tab');
 assert(htmlSource.includes('id="mobile-tabbar"'), 'HTML should include the fixed mobile bottom tab bar container');
+assert(htmlSource.includes('data-mobile-tab-target="home"'), 'HTML should include a dedicated mobile Home tab button');
 assert(htmlSource.includes('data-mobile-tab-target="chart-finance"'), 'HTML should include the chart/finance mobile tab button');
 assert(htmlSource.includes('data-mobile-tab-target="valuation"'), 'HTML should include the valuation mobile tab button');
 assert(htmlSource.includes('data-mobile-tab-target="briefing"'), 'HTML should include the AI briefing mobile tab button');
@@ -665,6 +751,7 @@ assert(htmlSource.includes('data-mobile-panel="chart-finance"'), 'Dashboard card
 assert(htmlSource.includes('data-mobile-panel="valuation"'), 'Dashboard cards should mark the valuation mobile panel membership');
 assert(htmlSource.includes('data-mobile-panel="briefing"'), 'Dashboard cards should mark the briefing mobile panel membership');
 assert(htmlSource.includes('차트/재무'), 'Mobile tab bar should include the chart/finance label');
+assert(htmlSource.includes('Home'), 'Mobile tab bar should include the Home label');
 assert(htmlSource.includes('가치 평가'), 'Mobile tab bar should include the valuation label');
 assert(htmlSource.includes('AI 리포트'), 'Mobile tab bar should include the AI report label');
 assert(htmlSource.includes('id="kospi-value"'), 'Market bar should include a KOSPI value slot');
@@ -675,5 +762,16 @@ assert(htmlSource.includes('VIX 대비 S&amp;P 500 1년 뒤 기대 수익'), 'VI
 assert(htmlSource.includes('27~35'), 'VIX tooltip should include the 27~35 historical probability row');
 assert(htmlSource.includes('50이상'), 'VIX tooltip should include the panic-range historical probability row');
 assert(htmlSource.includes('인사이트: VIX 30 이상은 역사적 분할 매수 구간입니다.'), 'VIX tooltip should include the highlighted insight callout');
+assert(!htmlSource.includes('class="xp-pill"'), 'Header should remove the XP pill from the UI');
+assert(!htmlSource.includes('id="xp-text"'), 'Header should remove the XP progress text');
+assert(!htmlSource.includes('class="helper-row"'), 'Search helper chips should be removed from the Home search screen');
+
+const authCallbackSource = readText(`${cwd}/auth/kakao/callback`);
+assert(authCallbackSource.includes("profile: 'invest_nav_kakao_profile'"), 'Auth callback should treat the cached Kakao profile as first-class persisted state');
+assert(authCallbackSource.includes('if (data.profile)'), 'Auth callback should persist the Kakao profile when the token exchange returns one');
+
+const legacyCallbackSource = readText(`${cwd}/kakao_callback.php`);
+assert(legacyCallbackSource.includes("profile: 'invest_nav_kakao_profile'"), 'Legacy Kakao callback should also persist the cached profile state');
+assert(legacyCallbackSource.includes('if (data.profile)'), 'Legacy Kakao callback should persist the Kakao profile when available');
 
 console.log('dashboard_logic_test: ok');

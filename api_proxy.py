@@ -25,6 +25,7 @@ KIWOOM_TOKEN_URL = "https://api.kiwoom.com/oauth2/token"
 NAVER_STOCK_BASE = "https://m.stock.naver.com/api/stock"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 KAKAO_TOKEN_URL = "https://kauth.kakao.com/oauth/token"
+KAKAO_USER_URL = "https://kapi.kakao.com/v2/user/me"
 KST = dt.timezone(dt.timedelta(hours=9))
 
 
@@ -72,6 +73,7 @@ DART_KEY = env_or_aws("DART_API_KEY", next_label="DART 오픈 API")
 KRX_KEY = env_or_aws("KRX_AUTH_KEY", next_label="KRX Open API")
 GEMINI_KEY = env_or_aws("GEMINI_API_KEY", next_label="Gemini API KEY")
 KAKAO_REST_KEY = env_or_aws("KAKAO_REST_API_KEY", inline_prefix="Rest API:")
+KAKAO_CLIENT_SECRET = env_or_aws("KAKAO_CLIENT_SECRET", inline_prefix="Client Secret:")
 KIWOOM_APP_KEY = os.getenv("KIWOOM_APP_KEY", "").strip()
 KIWOOM_SECRET_KEY = os.getenv("KIWOOM_SECRET_KEY", "").strip()
 KIWOOM_TOKEN_CACHE = pathlib.Path(tempfile.gettempdir()) / "investment-navigator-kiwoom-token.json"
@@ -767,13 +769,27 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             status, raw = request_json(
                 KAKAO_TOKEN_URL,
                 method="POST",
-                form_body={
+                form_body={key: value for key, value in {
                     "grant_type": "authorization_code",
                     "client_id": KAKAO_REST_KEY,
+                    "client_secret": KAKAO_CLIENT_SECRET,
                     "redirect_uri": redirect_uri,
                     "code": code,
-                },
+                }.items() if value},
             )
+            response_payload = safe_json(raw)
+            if 200 <= status < 300 and isinstance(response_payload, dict) and response_payload.get("access_token"):
+                profile_status, profile_raw = request_json(
+                    KAKAO_USER_URL,
+                    headers={
+                        "Authorization": f"Bearer {str(response_payload.get('access_token')).strip()}"
+                    }
+                )
+                if 200 <= profile_status < 300:
+                    profile_payload = safe_json(profile_raw)
+                    if isinstance(profile_payload, dict) and profile_payload:
+                        response_payload["profile"] = profile_payload
+                    raw = json.dumps(response_payload, ensure_ascii=False)
             self.send_response(status)
             self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin", "*"))
             self.send_header("Content-Type", "application/json; charset=utf-8")

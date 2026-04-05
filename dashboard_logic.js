@@ -6,7 +6,8 @@
     const KAKAO_STORAGE_KEYS = Object.freeze({
         token: 'invest_nav_kakao_token',
         error: 'invest_nav_kakao_error',
-        returnUrl: 'invest_nav_kakao_return_url'
+        returnUrl: 'invest_nav_kakao_return_url',
+        profile: 'invest_nav_kakao_profile'
     });
 
     const VALUATION_SECTOR_PRESETS = Object.freeze({
@@ -669,6 +670,31 @@
         return normalizeChartWindow(total, nextStart, nextSize, minPoints);
     }
 
+    function resolveChartAnchorRatio(window, absoluteIndex, fallbackRatio) {
+        const safeFallback = Math.max(0, Math.min(1, Number(fallbackRatio) || 0));
+        const start = Math.max(0, Math.round(Number(window?.start) || 0));
+        const end = Math.max(start, Math.round(Number(window?.end) || start));
+        const size = Math.max(1, end - start);
+        if (absoluteIndex === null || absoluteIndex === undefined || absoluteIndex === '') {
+            return safeFallback;
+        }
+
+        const numericIndex = Number(absoluteIndex);
+        if (!Number.isFinite(numericIndex)) {
+            return safeFallback;
+        }
+
+        const clampedIndex = Math.max(start, Math.min(end - 1, Math.round(numericIndex)));
+        return Math.max(0, Math.min(1, ((clampedIndex - start) + 0.5) / size));
+    }
+
+    function resolvePinchZoomFactor(startDistance, currentDistance) {
+        const start = Math.max(1, Number(startDistance) || 0);
+        const current = Math.max(1, Number(currentDistance) || 0);
+        if (!start || !current) return 1;
+        return Math.max(0.5, Math.min(1.8, start / current));
+    }
+
     function panChartWindow(window, deltaPoints, totalPoints) {
         const current = normalizeChartWindow(
             totalPoints,
@@ -893,11 +919,36 @@
             storage.removeItem(KAKAO_STORAGE_KEYS.token);
             storage.removeItem(KAKAO_STORAGE_KEYS.error);
             storage.removeItem(KAKAO_STORAGE_KEYS.returnUrl);
+            storage.removeItem(KAKAO_STORAGE_KEYS.profile);
         }
 
         if (auth && typeof auth.setAccessToken === 'function') {
             auth.setAccessToken(null);
         }
+    }
+
+    function extractKakaoProfile(profile) {
+        const properties = profile && typeof profile === 'object' ? (profile.properties || {}) : {};
+        const accountProfile = profile && typeof profile === 'object'
+            ? (((profile.kakao_account || {}).profile) || {})
+            : {};
+
+        const nickname = [
+            properties.nickname,
+            accountProfile.nickname
+        ].find((value) => typeof value === 'string' && value.trim()) || '카카오 사용자';
+
+        const image = [
+            properties.thumbnail_image,
+            properties.profile_image,
+            accountProfile.thumbnail_image_url,
+            accountProfile.profile_image_url
+        ].find((value) => typeof value === 'string' && value.trim()) || '';
+
+        return {
+            nickname,
+            image
+        };
     }
 
     root.InvestmentLogic = {
@@ -908,6 +959,7 @@
         chartBucketKey,
         clearKakaoSessionState,
         describePriceDelta,
+        extractKakaoProfile,
         generateAnchoredSyntheticChart,
         groupReportsBySection,
         getQuarterlyReportConfigs,
@@ -923,7 +975,9 @@
         computeValuationOutputs,
         parseFormattedNumber,
         panChartWindow,
+        resolveChartAnchorRatio,
         resolveBaseValuationVariables,
+        resolvePinchZoomFactor,
         resolveValuationSectorPreset,
         sliceChartSeriesWindow,
         sliceTechnicalSeriesWindow,

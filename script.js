@@ -5,8 +5,8 @@ const KAKAO_JS_KEY = '88cd449d612399a0219090bbcfc20b24';
 const KAKAO_STORAGE_TOKEN = 'invest_nav_kakao_token';
 const KAKAO_STORAGE_ERROR = 'invest_nav_kakao_error';
 const KAKAO_STORAGE_RETURN_URL = 'invest_nav_kakao_return_url';
+const KAKAO_STORAGE_PROFILE = 'invest_nav_kakao_profile';
 const KAKAO_REDIRECT_URI = InvestmentLogic.resolveKakaoRedirectUri(location.href);
-const XP_MAX = 100;
 const CHART_HISTORY_YEARS = 5;
 const CHART_DEFAULT_WINDOWS = {
     DAY: 120,
@@ -97,6 +97,11 @@ const state = {
     chartWindow: null,
     chartDrag: null,
     techDrag: null,
+    chartPinch: null,
+    techPinch: null,
+    chartPointers: new Map(),
+    techPointers: new Map(),
+    chartHoverAbsoluteIndex: null,
     chartSource: 'idle',
     technicalsFull: null,
     technicalsFullSignature: '',
@@ -108,23 +113,20 @@ const state = {
     metrics: null,
     summaries: [],
     briefingMode: 'idle',
-    mobileTab: 'chart-finance',
+    mobileTab: 'home',
+    mobileContentTab: 'chart',
     lastAnalysis: { fin: {}, scores: {}, totalPct: 0, metrics: {} },
     selectedIndicators: new Set(['RSI', 'MACD', 'STOCH', 'BOLL', 'MA']),
     analysisToken: 0
 };
-
-let xpData = JSON.parse(localStorage.getItem('invest_nav_xp') || '{"xp":0,"lv":1}');
 let priceHoverIndex = null;
 
 lucide.createIcons();
-
-drawXP();
 bindEvents();
 startClock();
 initKakao();
-restoreKakaoSession();
-consumeKakaoMessage();
+syncKakaoAuthUI(null, { loggedIn: false });
+restoreKakaoSession().finally(consumeKakaoMessage);
 loadMarketSummary();
 loadCompanyDirectory();
 syncMobileTabUI();
@@ -173,9 +175,14 @@ function bindEvents() {
     document.getElementById('pdf-btn').addEventListener('click', exportPdf);
     document.getElementById('btn-kakao-login').addEventListener('click', beginKakaoLogin);
     document.getElementById('btn-kakao-logout').addEventListener('click', logoutKakao);
+    document.getElementById('mobile-kakao-login')?.addEventListener('click', beginKakaoLogin);
+    document.getElementById('mobile-kakao-logout')?.addEventListener('click', logoutKakao);
     document.getElementById('kakao-send-btn').addEventListener('click', sendBriefingToKakao);
     document.getElementById('chart-range-controls').addEventListener('click', onChartRangeClick);
     document.getElementById('chart-reset-btn').addEventListener('click', resetChartZoom);
+    document.querySelectorAll('[data-chart-zoom]').forEach((button) => {
+        button.addEventListener('click', onChartZoomClick);
+    });
     document.getElementById('indicator-toggle').addEventListener('click', onIndicatorToggle);
     if (sectorPresetSelect) {
         sectorPresetSelect.addEventListener('change', onValuationSectorPresetChange);
@@ -187,6 +194,9 @@ function bindEvents() {
     });
     document.querySelectorAll('[data-mobile-tab-target]').forEach((button) => {
         button.addEventListener('click', onMobileTabClick);
+    });
+    document.querySelectorAll('[data-mobile-content-target]').forEach((button) => {
+        button.addEventListener('click', onMobileContentTabClick);
     });
     ['m-adjusted-eps', 'm-target-per', 'm-eps-growth', 'm-required-return'].forEach((id) => {
         const input = document.getElementById(id);
@@ -205,22 +215,6 @@ function bindEvents() {
             hideCompanySuggestions();
         }
     });
-}
-
-function addXP(amount) {
-    xpData.xp += amount;
-    while (xpData.xp >= XP_MAX) {
-        xpData.xp -= XP_MAX;
-        xpData.lv += 1;
-    }
-    localStorage.setItem('invest_nav_xp', JSON.stringify(xpData));
-    drawXP();
-}
-
-function drawXP() {
-    document.getElementById('level-badge').textContent = `Lv.${xpData.lv}`;
-    document.getElementById('xp-bar').style.width = `${(xpData.xp / XP_MAX) * 100}%`;
-    document.getElementById('xp-text').textContent = `${xpData.xp}/${XP_MAX}`;
 }
 
 function renderCompanySuggestions(rawQuery = '') {
@@ -348,18 +342,133 @@ function updateClock() {
         hour12: false
     }).format(now);
     document.getElementById('market-datetime').textContent = dateLabel;
+    const mobileClock = document.getElementById('mobile-market-datetime');
+    if (mobileClock) {
+        mobileClock.textContent = dateLabel.replace(/\s+/g, ' ');
+    }
+}
+
+function setTextIfPresent(id, value) {
+    const element = document.getElementById(id);
+    if (!element) return;
+    element.textContent = value;
+}
+
+function writeKakaoStorage(key, value) {
+    try {
+        if (value === null || value === undefined || value === '') {
+            sessionStorage.removeItem(key);
+        } else {
+            sessionStorage.setItem(key, value);
+        }
+    } catch (error) {
+        console.warn('sessionStorage write failed', error);
+    }
+
+    try {
+        if (value === null || value === undefined || value === '') {
+            localStorage.removeItem(key);
+        } else {
+            localStorage.setItem(key, value);
+        }
+    } catch (error) {
+        console.warn('localStorage write failed', error);
+    }
+}
+
+function readKakaoStorage(key) {
+    try {
+        const sessionValue = sessionStorage.getItem(key);
+        if (sessionValue) return sessionValue;
+    } catch (error) {
+        console.warn('sessionStorage read failed', error);
+    }
+
+    try {
+        return localStorage.getItem(key) || '';
+    } catch (error) {
+        console.warn('localStorage read failed', error);
+        return '';
+    }
+}
+
+function readStoredKakaoProfile() {
+    const raw = readKakaoStorage(KAKAO_STORAGE_PROFILE);
+    if (!raw) return null;
+    try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (error) {
+        console.warn('Kakao profile storage parse failed', error);
+        writeKakaoStorage(KAKAO_STORAGE_PROFILE, '');
+        return null;
+    }
+}
+
+function syncKakaoAuthUI(profile, options = {}) {
+    const isLoggedIn = options.loggedIn === true;
+    const isFallback = options.fallback === true;
+    const nickname = profile?.nickname || '카카오 사용자';
+    const image = profile?.image || '';
+    const stateText = isFallback ? '카카오 로그인 유지 중' : '카카오 프로필 동기화 완료';
+
+    if (isLoggedIn) {
+        document.getElementById('btn-kakao-login').classList.add('hidden');
+        document.getElementById('kakao-user-profile').classList.remove('hidden');
+        document.getElementById('mobile-kakao-login')?.classList.add('hidden');
+        document.getElementById('mobile-kakao-profile')?.classList.remove('hidden');
+        document.getElementById('mobile-kakao-logout')?.classList.remove('hidden');
+    } else {
+        document.getElementById('btn-kakao-login').classList.remove('hidden');
+        document.getElementById('kakao-user-profile').classList.add('hidden');
+        document.getElementById('mobile-kakao-login')?.classList.remove('hidden');
+        document.getElementById('mobile-kakao-profile')?.classList.add('hidden');
+        document.getElementById('mobile-kakao-logout')?.classList.add('hidden');
+    }
+
+    if (!isLoggedIn) {
+        setTextIfPresent('kakao-nickname', '카카오 로그인');
+        setTextIfPresent('kakao-login-state', '로그인이 필요합니다');
+        setTextIfPresent('mobile-kakao-nickname', '카카오 로그인');
+        setTextIfPresent('mobile-kakao-login-state', '간편 로그인');
+        document.getElementById('kakao-profile-img').removeAttribute('src');
+        document.getElementById('mobile-kakao-profile-img')?.removeAttribute('src');
+        return;
+    }
+
+    setTextIfPresent('kakao-nickname', nickname);
+    setTextIfPresent('kakao-login-state', stateText);
+    setTextIfPresent('mobile-kakao-nickname', nickname);
+    setTextIfPresent('mobile-kakao-login-state', stateText);
+    if (image) {
+        document.getElementById('kakao-profile-img').src = image;
+        document.getElementById('mobile-kakao-profile-img')?.setAttribute('src', image);
+    } else {
+        document.getElementById('kakao-profile-img').removeAttribute('src');
+        document.getElementById('mobile-kakao-profile-img')?.removeAttribute('src');
+    }
 }
 
 function isMobileHybridViewport() {
     return window.matchMedia('(max-width: 768px)').matches;
 }
 
+function syncMobileHeaderChrome() {
+    const dashboard = document.getElementById('dashboard');
+    const body = document.body;
+    const dashboardVisible = !!dashboard && !dashboard.classList.contains('hidden');
+    body.classList.toggle('mobile-dashboard-active', isMobileHybridViewport() && dashboardVisible && state.mobileTab !== 'home');
+}
+
 function setMobileTab(tab, options = {}) {
     const dashboard = document.getElementById('dashboard');
     const tabbar = document.getElementById('mobile-tabbar');
     if (!dashboard || !tabbar) return;
-    const allowedTabs = new Set(['chart-finance', 'valuation', 'briefing']);
+    const allowedTabs = new Set(['home', 'chart-finance', 'valuation', 'briefing']);
     tab = allowedTabs.has(tab) ? tab : 'chart-finance';
+    if (tab !== 'home' && dashboard.classList.contains('hidden')) {
+        tab = 'home';
+    }
     state.mobileTab = tab;
     dashboard.dataset.mobileTab = tab;
     tabbar.querySelectorAll('[data-mobile-tab-target]').forEach((button) => {
@@ -373,23 +482,73 @@ function setMobileTab(tab, options = {}) {
         });
     }
     if (options.scroll && isMobileHybridViewport()) {
-        dashboard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const target = tab === 'home'
+            ? document.getElementById('search-hero')
+            : dashboard;
+        target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+function setMobileContentTab(tab, options = {}) {
+    const dashboard = document.getElementById('dashboard');
+    const contentTabbar = document.getElementById('mobile-content-tabbar');
+    if (!dashboard || !contentTabbar) return;
+
+    const allowedTabs = new Set(['chart', 'finance', 'technical']);
+    tab = allowedTabs.has(tab) ? tab : 'chart';
+    state.mobileContentTab = tab;
+    dashboard.dataset.mobileContentTab = tab;
+
+    contentTabbar.querySelectorAll('[data-mobile-content-target]').forEach((button) => {
+        const active = button.dataset.mobileContentTarget === tab;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+
+    if (options.scroll && isMobileHybridViewport()) {
+        contentTabbar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    if (!dashboard.classList.contains('hidden') && state.mobileTab === 'chart-finance' && (tab === 'chart' || tab === 'technical')) {
+        requestAnimationFrame(() => {
+            renderCharts();
+        });
     }
 }
 
 function syncMobileTabUI() {
     const dashboard = document.getElementById('dashboard');
     const tabbar = document.getElementById('mobile-tabbar');
+    const contentTabbar = document.getElementById('mobile-content-tabbar');
+    const utilityStrip = document.getElementById('mobile-utility-strip');
+    const searchHero = document.getElementById('search-hero');
     if (!dashboard || !tabbar) return;
-    const shouldShowTabbar = isMobileHybridViewport() && !dashboard.classList.contains('hidden');
+    const isMobile = isMobileHybridViewport();
+    const dashboardVisible = !dashboard.classList.contains('hidden');
+    const shouldShowTabbar = isMobile;
+    const shouldShowHome = !isMobile || !dashboardVisible || state.mobileTab === 'home';
     tabbar.classList.toggle('hidden', !shouldShowTabbar);
+    utilityStrip?.classList.toggle('hidden', !(isMobile && shouldShowHome));
+    searchHero?.classList.toggle('hidden', isMobile && !shouldShowHome);
+    dashboard.classList.toggle('mobile-home-hidden', isMobile && dashboardVisible && state.mobileTab === 'home');
     setMobileTab(state.mobileTab || dashboard.dataset.mobileTab || 'chart-finance');
+    const shouldShowContentTabbar = isMobile && dashboardVisible && state.mobileTab === 'chart-finance';
+    contentTabbar?.classList.toggle('hidden', !shouldShowContentTabbar);
+    setMobileContentTab(state.mobileContentTab || dashboard.dataset.mobileContentTab || 'chart');
+    syncMobileHeaderChrome();
 }
 
 function onMobileTabClick(event) {
     const button = event.target.closest('[data-mobile-tab-target]');
     if (!button) return;
     setMobileTab(button.dataset.mobileTabTarget, { scroll: true });
+    syncMobileTabUI();
+}
+
+function onMobileContentTabClick(event) {
+    const button = event.target.closest('[data-mobile-content-target]');
+    if (!button) return;
+    setMobileContentTab(button.dataset.mobileContentTarget, { scroll: false });
 }
 
 function setMarketChg(id, changePct, options = {}) {
@@ -433,46 +592,62 @@ async function loadMarketSummary() {
         const data = await fetchJson(buildProxyUrl('market', '/summary'));
         if (data.usdKrw) {
             document.getElementById('fx-usdkrw').textContent = `${data.usdKrw.toFixed(2)}원`;
+            document.getElementById('mobile-fx-usdkrw').textContent = `${data.usdKrw.toFixed(2)}원`;
             document.getElementById('fx-usdkrw-note').textContent = '1달러 기준';
             setMarketChg('fx-usdkrw-chg', data.usdKrwChangePct ?? null);
+            setMarketChg('mobile-fx-usdkrw-chg', data.usdKrwChangePct ?? null);
         }
         if (data.jpyKrw) {
             document.getElementById('fx-jpykrw').textContent = `${(data.jpyKrw * 100).toFixed(2)}원`;
+            document.getElementById('mobile-fx-jpykrw').textContent = `${(data.jpyKrw * 100).toFixed(2)}원`;
             document.getElementById('fx-jpykrw-note').textContent = '100엔 기준';
             setMarketChg('fx-jpykrw-chg', data.jpyKrwChangePct ?? null);
+            setMarketChg('mobile-fx-jpykrw-chg', data.jpyKrwChangePct ?? null);
         }
         if (data.goldKrwPerGram) {
             document.getElementById('gold-krw').textContent = `${Math.round(data.goldKrwPerGram).toLocaleString()}원`;
+            document.getElementById('mobile-gold-krw').textContent = `${Math.round(data.goldKrwPerGram).toLocaleString()}원`;
             document.getElementById('gold-note').textContent = '금 1g 추정';
             setMarketChg('gold-chg', data.goldChangePct ?? null);
+            setMarketChg('mobile-gold-chg', data.goldChangePct ?? null);
         } else {
             document.getElementById('gold-note').textContent = '외부 시세 연결 대기';
         }
         if (data.vix) {
             document.getElementById('vix-value').textContent = data.vix.toFixed(2);
+            document.getElementById('mobile-vix-value').textContent = data.vix.toFixed(2);
             setMarketChg('vix-chg', data.vixChangePct ?? null);
+            setMarketChg('mobile-vix-chg', data.vixChangePct ?? null);
             const vixLevel = data.vix < 15 ? '극도 낙관' : data.vix < 20 ? '안정' : data.vix < 30 ? '경계' : data.vix < 40 ? '공포' : '극도 공포';
             document.getElementById('vix-note').textContent = vixLevel;
         }
         if (data.wti) {
             document.getElementById('wti-value').textContent = formatCommodityUsd(data.wti);
+            document.getElementById('mobile-wti-value').textContent = formatCommodityUsd(data.wti);
             document.getElementById('wti-note').textContent = '미국 원유 벤치마크';
             setMarketChg('wti-chg', data.wtiChangePct ?? null, { inverse: true });
+            setMarketChg('mobile-wti-chg', data.wtiChangePct ?? null, { inverse: true });
         }
         if (data.brent) {
             document.getElementById('brent-value').textContent = formatCommodityUsd(data.brent);
+            document.getElementById('mobile-brent-value').textContent = formatCommodityUsd(data.brent);
             document.getElementById('brent-note').textContent = '글로벌 실물 원유 기준';
             setMarketChg('brent-chg', data.brentChangePct ?? null, { inverse: true });
+            setMarketChg('mobile-brent-chg', data.brentChangePct ?? null, { inverse: true });
         }
         if (data.kospi) {
             document.getElementById('kospi-value').textContent = formatMarketIndexValue(data.kospi);
+            document.getElementById('mobile-kospi-value').textContent = formatMarketIndexValue(data.kospi);
             document.getElementById('kospi-note').textContent = '코스피 종합지수';
             setMarketChg('kospi-chg', data.kospiChangePct ?? null);
+            setMarketChg('mobile-kospi-chg', data.kospiChangePct ?? null);
         }
         if (data.kosdaq) {
             document.getElementById('kosdaq-value').textContent = formatMarketIndexValue(data.kosdaq);
+            document.getElementById('mobile-kosdaq-value').textContent = formatMarketIndexValue(data.kosdaq);
             document.getElementById('kosdaq-note').textContent = '코스닥 종합지수';
             setMarketChg('kosdaq-chg', data.kosdaqChangePct ?? null);
+            setMarketChg('mobile-kosdaq-chg', data.kosdaqChangePct ?? null);
         }
     } catch (error) {
         document.getElementById('fx-usdkrw-note').textContent = '연동 실패';
@@ -498,22 +673,47 @@ function beginKakaoLogin() {
         alert('카카오 SDK를 불러오지 못했습니다.');
         return;
     }
-    sessionStorage.setItem(KAKAO_STORAGE_RETURN_URL, location.href);
+    try {
+        sessionStorage.setItem(KAKAO_STORAGE_RETURN_URL, location.href);
+        localStorage.setItem(KAKAO_STORAGE_RETURN_URL, location.href);
+    } catch (error) {
+        console.warn('Kakao return URL storage fallback', error);
+    }
+    writeKakaoStorage(KAKAO_STORAGE_RETURN_URL, location.href);
+    writeKakaoStorage(KAKAO_STORAGE_ERROR, '');
     Kakao.Auth.authorize({
         redirectUri: KAKAO_REDIRECT_URI
     });
 }
 
 async function restoreKakaoSession() {
-    const accessToken = sessionStorage.getItem(KAKAO_STORAGE_TOKEN) || (window.Kakao ? Kakao.Auth.getAccessToken() : '');
-    if (!window.Kakao || !accessToken) return;
+    const accessToken = sessionStorage.getItem(KAKAO_STORAGE_TOKEN) || localStorage.getItem(KAKAO_STORAGE_TOKEN) || (window.Kakao ? Kakao.Auth.getAccessToken() : '');
+    const storedProfile = readStoredKakaoProfile();
+    if (!accessToken) return;
     try {
-        Kakao.Auth.setAccessToken(accessToken);
-        sessionStorage.setItem(KAKAO_STORAGE_TOKEN, accessToken);
+        if (window.Kakao) {
+            Kakao.Auth.setAccessToken(accessToken);
+        }
+        writeKakaoStorage(KAKAO_STORAGE_TOKEN, accessToken);
+        if (storedProfile) {
+            applyKakaoProfile(storedProfile, { fallback: true });
+        } else {
+            syncKakaoAuthUI({ nickname: '카카오 사용자', image: '' }, { loggedIn: true, fallback: true });
+        }
+        if (!window.Kakao) return;
         const profile = await Kakao.API.request({ url: '/v2/user/me' });
         applyKakaoProfile(profile);
+        writeKakaoStorage(KAKAO_STORAGE_ERROR, '');
     } catch (error) {
-        clearKakaoSession();
+        console.warn('Kakao profile restore fallback', error);
+        writeKakaoStorage(KAKAO_STORAGE_TOKEN, accessToken);
+        if (storedProfile) {
+            applyKakaoProfile(storedProfile, { fallback: true });
+            writeKakaoStorage(KAKAO_STORAGE_ERROR, '');
+            return;
+        }
+        syncKakaoAuthUI({ nickname: '카카오 사용자', image: '' }, { loggedIn: true, fallback: true });
+        writeKakaoStorage(KAKAO_STORAGE_ERROR, '카카오 프로필을 기본 상태로 연결했습니다.');
     }
 }
 
@@ -530,28 +730,21 @@ async function logoutKakao() {
 
 function clearKakaoSession() {
     InvestmentLogic.clearKakaoSessionState(sessionStorage, window.Kakao ? Kakao.Auth : null);
-    document.getElementById('btn-kakao-login').classList.remove('hidden');
-    document.getElementById('kakao-user-profile').classList.add('hidden');
-    document.getElementById('kakao-nickname').textContent = '로그인됨';
-    document.getElementById('kakao-login-state').textContent = '카카오 연동 활성화';
-    document.getElementById('kakao-profile-img').removeAttribute('src');
+    InvestmentLogic.clearKakaoSessionState(localStorage, null);
+    syncKakaoAuthUI(null, { loggedIn: false });
 }
 
-function applyKakaoProfile(profile) {
-    const nickname = profile?.properties?.nickname || '카카오 사용자';
-    const image = profile?.properties?.thumbnail_image || '';
-    document.getElementById('btn-kakao-login').classList.add('hidden');
-    document.getElementById('kakao-user-profile').classList.remove('hidden');
-    document.getElementById('kakao-nickname').textContent = nickname;
-    document.getElementById('kakao-profile-img').src = image;
-    addXP(8);
+function applyKakaoProfile(profile, options = {}) {
+    const { nickname, image } = InvestmentLogic.extractKakaoProfile(profile);
+    writeKakaoStorage(KAKAO_STORAGE_PROFILE, JSON.stringify(profile || {}));
+    syncKakaoAuthUI({ nickname, image }, { loggedIn: true, fallback: options.fallback === true });
 }
 
 function consumeKakaoMessage() {
-    const error = sessionStorage.getItem(KAKAO_STORAGE_ERROR);
+    const error = readKakaoStorage(KAKAO_STORAGE_ERROR);
     if (!error) return;
     setStatus(`카카오 로그인 안내: ${error}`, 'warn');
-    sessionStorage.removeItem(KAKAO_STORAGE_ERROR);
+    writeKakaoStorage(KAKAO_STORAGE_ERROR, '');
 }
 
 async function sendBriefingToKakao() {
@@ -580,7 +773,6 @@ async function sendBriefingToKakao() {
                 }
             }
         });
-        addXP(5);
         alert('카카오톡 나에게 보내기가 완료되었습니다.');
     } catch (error) {
         alert('카카오톡 전송에 실패했습니다. 메시지 API 권한과 로그인 상태를 확인해주세요.');
@@ -618,6 +810,11 @@ async function startSearch() {
     state.chartWindow = null;
     state.chartDrag = null;
     state.techDrag = null;
+    state.chartPinch = null;
+    state.techPinch = null;
+    state.chartPointers.clear();
+    state.techPointers.clear();
+    state.chartHoverAbsoluteIndex = null;
     state.chartFullSeries = [];
     state.chartVisible = [];
     state.chartSource = 'idle';
@@ -638,6 +835,7 @@ async function startSearch() {
     document.getElementById('dart-link').href = buildDartCompanySearchUrl(company);
     document.getElementById('dashboard').classList.remove('hidden');
     setMobileTab('chart-finance');
+    setMobileContentTab('chart');
     syncMobileTabUI();
     document.getElementById('stock-realtime').classList.add('hidden');
     document.getElementById('stock-realtime').innerHTML = '';
@@ -750,7 +948,6 @@ async function startSearch() {
             buildRatings();
         }
 
-        addXP(18);
         if (state.summaries.length) {
             await generateBriefing();
             if (analysisToken !== state.analysisToken) return;
@@ -759,7 +956,11 @@ async function startSearch() {
         }
 
         setStatus(`${company.name} 분석이 완료되었습니다.`, 'success');
-        document.getElementById('dashboard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (isMobileHybridViewport()) {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+            document.getElementById('dashboard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
     } catch (error) {
         console.error(error);
         setStatus(error.message || '분석 중 알 수 없는 오류가 발생했습니다.', 'error');
@@ -1997,6 +2198,96 @@ function getDefaultChartWindowSize(range, totalPoints) {
     return Math.max(minimum, Math.min(Math.max(1, totalPoints || 0), requested));
 }
 
+function syncHoveredCandleToViewport() {
+    if (!state.chartWindow || !Number.isFinite(Number(state.chartHoverAbsoluteIndex))) {
+        priceHoverIndex = null;
+        return;
+    }
+    const absoluteIndex = Math.round(Number(state.chartHoverAbsoluteIndex));
+    if (absoluteIndex < state.chartWindow.start || absoluteIndex >= state.chartWindow.end) {
+        priceHoverIndex = null;
+        return;
+    }
+    priceHoverIndex = absoluteIndex - state.chartWindow.start;
+}
+
+function setHoveredCandleIndex(relativeIndex) {
+    if (!Number.isFinite(Number(relativeIndex)) || !state.chartWindow) {
+        priceHoverIndex = null;
+        state.chartHoverAbsoluteIndex = null;
+        return;
+    }
+    const nextIndex = Math.max(0, Math.round(Number(relativeIndex)));
+    priceHoverIndex = nextIndex;
+    state.chartHoverAbsoluteIndex = state.chartWindow.start + nextIndex;
+}
+
+function clearHoveredCandle() {
+    priceHoverIndex = null;
+    state.chartHoverAbsoluteIndex = null;
+}
+
+function getChartZoomAnchorRatio(fallbackRatio = 0.5) {
+    return InvestmentLogic.resolveChartAnchorRatio(
+        state.chartWindow,
+        state.chartHoverAbsoluteIndex,
+        fallbackRatio
+    );
+}
+
+function zoomSharedChartViewport(factor, fallbackRatio = 0.5) {
+    if (!state.chartFullSeries.length || !state.chartWindow) return;
+    state.chartDrag = null;
+    state.techDrag = null;
+    state.chartPinch = null;
+    state.techPinch = null;
+    state.chartWindow = InvestmentLogic.zoomChartWindow(
+        state.chartWindow,
+        state.chartFullSeries.length,
+        factor,
+        getChartZoomAnchorRatio(fallbackRatio),
+        getChartWindowMinimum(state.chartRange, state.chartFullSeries.length)
+    );
+    syncHoveredCandleToViewport();
+    renderCharts({ viewport: 'preserve' });
+}
+
+function getCanvasLocalX(canvas, clientX) {
+    const rect = canvas.getBoundingClientRect();
+    return (clientX - rect.left) * (canvas.width / Math.max(1, rect.width));
+}
+
+function getCanvasAnchorRatio(canvas, clientX, padLeft, padRight) {
+    const drawWidth = canvas.width - padLeft - padRight;
+    const localX = getCanvasLocalX(canvas, clientX) - padLeft;
+    return Math.max(0, Math.min(1, localX / Math.max(1, drawWidth)));
+}
+
+function getCanvasClientDrawWidth(canvas, padLeft, padRight) {
+    const rect = canvas.getBoundingClientRect();
+    const scale = rect.width / Math.max(1, canvas.width);
+    return Math.max(1, rect.width - ((padLeft + padRight) * scale));
+}
+
+function getPointerDistance(pointerMap) {
+    const pointers = Array.from(pointerMap.values());
+    if (pointers.length < 2) return 0;
+    const [first, second] = pointers;
+    const dx = Number(second.clientX || 0) - Number(first.clientX || 0);
+    const dy = Number(second.clientY || 0) - Number(first.clientY || 0);
+    return Math.hypot(dx, dy);
+}
+
+function getPointerMidpoint(pointerMap) {
+    const pointers = Array.from(pointerMap.values());
+    if (pointers.length < 2) return null;
+    const [first, second] = pointers;
+    return {
+        clientX: (Number(first.clientX || 0) + Number(second.clientX || 0)) / 2,
+        clientY: (Number(first.clientY || 0) + Number(second.clientY || 0)) / 2
+    };
+}
+
 function updateChartViewport(mode = 'preserve') {
     const fullSeries = InvestmentLogic.resolveChartSeries(state.chartDaily, state.chartRange, {
         currentYear: getCurrentYearKst(),
@@ -2029,6 +2320,7 @@ function updateChartViewport(mode = 'preserve') {
     }
 
     state.chartVisible = fullSeries.slice(state.chartWindow.start, state.chartWindow.end);
+    syncHoveredCandleToViewport();
     updateChartResetButton();
 }
 
@@ -2046,8 +2338,26 @@ function updateChartResetButton() {
 function resetChartZoom() {
     if (!state.chartDaily.length) return;
     state.chartDrag = null;
-    priceHoverIndex = null;
+    state.techDrag = null;
+    state.chartPinch = null;
+    state.techPinch = null;
+    state.chartPointers.clear();
+    state.techPointers.clear();
+    clearHoveredCandle();
     renderCharts({ viewport: 'full' });
+}
+
+function onChartZoomClick(event) {
+    const button = event.target.closest('[data-chart-zoom]');
+    if (!button || !state.chartFullSeries.length || !state.chartWindow) return;
+    const action = button.dataset.chartZoom;
+    if (action === 'reset') {
+        resetChartZoom();
+        return;
+    }
+
+    const factor = action === 'in' ? 0.82 : 1.22;
+    zoomSharedChartViewport(factor, 1);
 }
 
 function onChartRangeClick(event) {
@@ -2056,7 +2366,12 @@ function onChartRangeClick(event) {
     state.chartRange = button.dataset.range;
     state.chartWindow = null;
     state.chartDrag = null;
-    priceHoverIndex = null;
+    state.techDrag = null;
+    state.chartPinch = null;
+    state.techPinch = null;
+    state.chartPointers.clear();
+    state.techPointers.clear();
+    clearHoveredCandle();
     renderCharts({ viewport: 'recent' });
 }
 
@@ -2238,58 +2553,98 @@ function renderPriceChart(data) {
     canvas.style.cursor = state.chartDrag ? 'grabbing' : 'crosshair';
 
     const clearHover = () => {
-        if (priceHoverIndex === null) return;
-        priceHoverIndex = null;
+        if (priceHoverIndex === null && state.chartHoverAbsoluteIndex === null) return;
+        clearHoveredCandle();
         renderPriceChart(state.chartVisible);
     };
 
+    const updatePointerRecord = (event) => {
+        state.chartPointers.set(event.pointerId, {
+            clientX: event.clientX,
+            clientY: event.clientY
+        });
+    };
+
+    const startPinchGesture = () => {
+        if (state.chartPointers.size < 2 || !state.chartWindow) return false;
+        const midpoint = getPointerMidpoint(state.chartPointers);
+        if (!midpoint) return false;
+        state.chartDrag = null;
+        state.chartPinch = {
+            distance: getPointerDistance(state.chartPointers),
+            window: { ...state.chartWindow },
+            anchorRatio: getCanvasAnchorRatio(canvas, midpoint.clientX, padding.left, padding.right)
+        };
+        canvas.style.cursor = 'grabbing';
+        return true;
+    };
+
     const releaseDrag = (pointerId) => {
-        if (!state.chartDrag) return;
-        if (pointerId !== undefined && state.chartDrag.pointerId !== pointerId) return;
         try {
-            if (state.chartDrag.pointerId !== undefined) {
-                canvas.releasePointerCapture?.(state.chartDrag.pointerId);
-            }
+            if (pointerId !== undefined) canvas.releasePointerCapture?.(pointerId);
         } catch (error) {
             // Pointer capture release can fail when the pointer was already lost.
         }
-        state.chartDrag = null;
-        canvas.style.cursor = 'crosshair';
+        state.chartPointers.delete(pointerId);
+        if (state.chartDrag && (pointerId === undefined || state.chartDrag.pointerId === pointerId)) {
+            state.chartDrag = null;
+        }
+        if (state.chartPointers.size < 2) {
+            state.chartPinch = null;
+        }
+        if (!state.chartPointers.size) {
+            canvas.style.cursor = 'crosshair';
+        }
     };
 
     canvas.onwheel = (event) => {
         if (!state.chartFullSeries.length || !state.chartWindow) return;
         event.preventDefault();
-        const rect = canvas.getBoundingClientRect();
-        const localX = event.clientX - rect.left - padding.left;
-        const anchorRatio = Math.max(0, Math.min(1, localX / Math.max(1, width)));
         const factor = event.deltaY < 0 ? 0.82 : 1.22;
-        state.chartWindow = InvestmentLogic.zoomChartWindow(
-            state.chartWindow,
-            state.chartFullSeries.length,
-            factor,
-            anchorRatio,
-            getChartWindowMinimum(state.chartRange, state.chartFullSeries.length)
-        );
         state.chartDrag = null;
-        priceHoverIndex = null;
-        renderCharts({ viewport: 'preserve' });
+        state.chartPinch = null;
+        zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, event.clientX, padding.left, padding.right));
     };
 
     canvas.onpointerdown = (event) => {
         if (!state.chartVisible.length || !state.chartWindow) return;
+        updatePointerRecord(event);
+        if (state.chartPointers.size >= 2 && startPinchGesture()) {
+            canvas.setPointerCapture?.(event.pointerId);
+            return;
+        }
         state.chartDrag = {
             pointerId: event.pointerId,
             startX: event.clientX,
             window: { ...state.chartWindow }
         };
+        state.chartPinch = null;
         canvas.setPointerCapture?.(event.pointerId);
         canvas.style.cursor = 'grabbing';
     };
 
     canvas.onpointermove = (event) => {
+        if (state.chartPointers.has(event.pointerId)) {
+            updatePointerRecord(event);
+        }
+        if (state.chartPinch && state.chartPointers.size >= 2) {
+            const factor = InvestmentLogic.resolvePinchZoomFactor(
+                state.chartPinch.distance,
+                getPointerDistance(state.chartPointers)
+            );
+            state.chartWindow = InvestmentLogic.zoomChartWindow(
+                state.chartPinch.window,
+                state.chartFullSeries.length,
+                factor,
+                state.chartPinch.anchorRatio,
+                getChartWindowMinimum(state.chartRange, state.chartFullSeries.length)
+            );
+            syncHoveredCandleToViewport();
+            renderCharts({ viewport: 'preserve' });
+            return;
+        }
         if (state.chartDrag && state.chartDrag.pointerId === event.pointerId) {
-            const dragWidth = Math.max(1, width);
+            const dragWidth = getCanvasClientDrawWidth(canvas, padding.left, padding.right);
             const visiblePoints = Math.max(1, state.chartDrag.window.end - state.chartDrag.window.start);
             const deltaRatio = (event.clientX - state.chartDrag.startX) / dragWidth;
             const deltaPoints = Math.round(-deltaRatio * visiblePoints);
@@ -2298,20 +2653,19 @@ function renderPriceChart(data) {
                 deltaPoints,
                 state.chartFullSeries.length
             );
-            priceHoverIndex = null;
+            clearHoveredCandle();
             renderCharts({ viewport: 'preserve' });
             return;
         }
 
-        const rect = canvas.getBoundingClientRect();
-        const x = event.clientX - rect.left - padding.left;
+        const x = getCanvasLocalX(canvas, event.clientX) - padding.left;
         if (x < 0 || x > width) {
             clearHover();
             return;
         }
         const nextIndex = Math.min(data.length - 1, Math.max(0, Math.floor(x / xGap)));
         if (nextIndex === priceHoverIndex) return;
-        priceHoverIndex = nextIndex;
+        setHoveredCandleIndex(nextIndex);
         renderPriceChart(state.chartVisible);
     };
 
@@ -2343,43 +2697,86 @@ function renderPriceChart(data) {
 function setupZoomPan(canvas, padLeft, padRight, onHoverMove, onHoverEnd) {
     canvas.style.cursor = onHoverMove ? 'crosshair' : 'grab';
 
+    const endHover = () => {
+        clearHoveredCandle();
+        if (onHoverEnd) onHoverEnd();
+    };
+
+    const updatePointerRecord = (event) => {
+        state.techPointers.set(event.pointerId, {
+            clientX: event.clientX,
+            clientY: event.clientY
+        });
+    };
+
+    const startPinchGesture = () => {
+        if (state.techPointers.size < 2 || !state.chartWindow) return false;
+        const midpoint = getPointerMidpoint(state.techPointers);
+        if (!midpoint) return false;
+        state.techDrag = null;
+        state.techPinch = {
+            canvas,
+            distance: getPointerDistance(state.techPointers),
+            window: { ...state.chartWindow },
+            anchorRatio: getCanvasAnchorRatio(canvas, midpoint.clientX, padLeft, padRight)
+        };
+        canvas.style.cursor = 'grabbing';
+        return true;
+    };
+
     canvas.onwheel = (e) => {
         if (!state.chartFullSeries.length || !state.chartWindow) return;
         e.preventDefault();
-        const rect = canvas.getBoundingClientRect();
-        const drawWidth = canvas.width - padLeft - padRight;
-        const localX = (e.clientX - rect.left) * (canvas.width / rect.width) - padLeft;
-        const anchorRatio = Math.max(0, Math.min(1, localX / Math.max(1, drawWidth)));
         const factor = e.deltaY < 0 ? 0.82 : 1.22;
-        state.chartWindow = InvestmentLogic.zoomChartWindow(
-            state.chartWindow,
-            state.chartFullSeries.length,
-            factor,
-            anchorRatio,
-            getChartWindowMinimum(state.chartRange, state.chartFullSeries.length)
-        );
         state.techDrag = null;
+        state.techPinch = null;
+        zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, e.clientX, padLeft, padRight));
         if (onHoverEnd) onHoverEnd();
-        renderCharts({ viewport: 'preserve' });
     };
 
     canvas.onpointerdown = (e) => {
         if (!state.chartWindow) return;
+        updatePointerRecord(e);
+        if (state.techPointers.size >= 2 && startPinchGesture()) {
+            canvas.setPointerCapture?.(e.pointerId);
+            endHover();
+            return;
+        }
         state.techDrag = {
             canvas,
             pointerId: e.pointerId,
             startX: e.clientX,
             window: { ...state.chartWindow }
         };
+        state.techPinch = null;
         canvas.setPointerCapture?.(e.pointerId);
         canvas.style.cursor = 'grabbing';
-        if (onHoverEnd) onHoverEnd();
+        endHover();
     };
 
     canvas.onpointermove = (e) => {
+        if (state.techPointers.has(e.pointerId)) {
+            updatePointerRecord(e);
+        }
+        if (state.techPinch && state.techPinch.canvas === canvas && state.techPointers.size >= 2) {
+            const factor = InvestmentLogic.resolvePinchZoomFactor(
+                state.techPinch.distance,
+                getPointerDistance(state.techPointers)
+            );
+            state.chartWindow = InvestmentLogic.zoomChartWindow(
+                state.techPinch.window,
+                state.chartFullSeries.length,
+                factor,
+                state.techPinch.anchorRatio,
+                getChartWindowMinimum(state.chartRange, state.chartFullSeries.length)
+            );
+            syncHoveredCandleToViewport();
+            renderCharts({ viewport: 'preserve' });
+            return;
+        }
         const drag = state.techDrag;
         if (drag && drag.canvas === canvas && drag.pointerId === e.pointerId) {
-            const drawWidth = canvas.width - padLeft - padRight;
+            const drawWidth = getCanvasClientDrawWidth(canvas, padLeft, padRight);
             const visiblePoints = Math.max(1, drag.window.end - drag.window.start);
             const deltaRatio = (e.clientX - drag.startX) / Math.max(1, drawWidth);
             const deltaPoints = Math.round(-deltaRatio * visiblePoints);
@@ -2388,7 +2785,7 @@ function setupZoomPan(canvas, padLeft, padRight, onHoverMove, onHoverEnd) {
                 deltaPoints,
                 state.chartFullSeries.length
             );
-            if (onHoverEnd) onHoverEnd();
+            endHover();
             renderCharts({ viewport: 'preserve' });
             return;
         }
@@ -2400,21 +2797,28 @@ function setupZoomPan(canvas, padLeft, padRight, onHoverMove, onHoverEnd) {
 
     const releasePointer = (e) => {
         const drag = state.techDrag;
-        if (!drag || drag.canvas !== canvas || drag.pointerId !== e.pointerId) return;
         try { canvas.releasePointerCapture?.(e.pointerId); } catch (_) { /* ignore */ }
-        state.techDrag = null;
-        canvas.style.cursor = onHoverMove ? 'crosshair' : 'grab';
+        state.techPointers.delete(e.pointerId);
+        if (drag && drag.canvas === canvas && drag.pointerId === e.pointerId) {
+            state.techDrag = null;
+        }
+        if (state.techPointers.size < 2) {
+            state.techPinch = null;
+        }
+        if (!state.techPointers.size) {
+            canvas.style.cursor = onHoverMove ? 'crosshair' : 'grab';
+        }
     };
 
     canvas.onpointerup = releasePointer;
     canvas.onpointercancel = (e) => {
         releasePointer(e);
-        if (onHoverEnd) onHoverEnd();
+        endHover();
     };
     canvas.onpointerleave = (e) => {
         const drag = state.techDrag;
         if (drag && drag.canvas === canvas && drag.pointerId === e.pointerId) return;
-        if (onHoverEnd) onHoverEnd();
+        endHover();
         canvas.style.cursor = onHoverMove ? 'crosshair' : 'grab';
     };
     // Suppress default touch scroll inside the chart
@@ -2575,7 +2979,12 @@ function renderTechPriceChart(data, visibleTechnicals) {
         (e, rect) => {
             const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
             const idx = Math.round((mouseX - padding.left - xGap / 2) / xGap);
-            if (idx < 0 || idx >= data.length) { hideTechTooltip(); return; }
+            if (idx < 0 || idx >= data.length) {
+                clearHoveredCandle();
+                hideTechTooltip();
+                return;
+            }
+            state.chartHoverAbsoluteIndex = (state.chartWindow?.start || 0) + idx;
             const chartWidth = canvas.width - padding.left - padding.right;
             const cursorFraction = Math.max(0, Math.min(1, (mouseX - padding.left) / chartWidth));
             showTechTooltip(idx, data, localTech, cursorFraction);
