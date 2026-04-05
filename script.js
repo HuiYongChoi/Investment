@@ -3344,31 +3344,50 @@ async function generateBriefing() {
     const technicalCards = state.technicals?.cards || [];
     const summary = state.summaries[0]?.summary;
     const totalPct = state.lastAnalysis.totalPct || 0;
+    const anomalies = [
+        ...(Array.isArray(state.lastAnalysis?.anomalies) ? state.lastAnalysis.anomalies : []),
+        ...(Array.isArray(state.lastAnalysis?.redFlags) ? state.lastAnalysis.redFlags : []),
+        ...(Array.isArray(summary?.anomalies) ? summary.anomalies : []),
+        ...(Array.isArray(summary?.redFlags) ? summary.redFlags : [])
+    ]
+        .map((item) => {
+            if (typeof item === 'string') return item.trim();
+            if (item && typeof item === 'object') {
+                return String(item.label || item.title || item.reason || item.message || '').trim();
+            }
+            return '';
+        })
+        .filter(Boolean);
+    const anomalyText = anomalies.length ? anomalies.join(', ') : '-';
 
     const prompt = `
-${company}에 대한 한국어 투자 브리핑을 작성하세요.
+당신은 월스트리트 탑티어 헤지펀드의 수석 퀀트 애널리스트입니다. 
+제공된 거시 경제(Macro) 지표와 개별 기업의 퀀트 데이터를 종합하여, 기관 투자자 클라이언트를 위한 냉철하고 날카로운 투자 브리핑을 작성하세요.
 
-[입력 데이터]
-- 가치투자 부합도: ${totalPct}%
-- 매출액: ${formatMetricValue(summary?.revenue, 'money')}
-- 영업이익: ${formatMetricValue(summary?.operatingIncome, 'money')}
-- 순이익: ${formatMetricValue(summary?.netIncome, 'money')}
-- ROE: ${summary?.roe?.toFixed(1) ?? '-'}%
-- 부채비율: ${summary?.debtRatio?.toFixed(1) ?? '-'}%
-- 적정주가: ${state.metrics.targetPrice ? `${state.metrics.targetPrice.toLocaleString()}원` : '-'}
-- 상승여력: ${state.metrics.upside?.toFixed(1) ?? '-'}%
-- 수익성 점수: ${state.ratings.profitability.score}/5
-- 건전성 점수: ${state.ratings.stability.score}/5
-- 효율성 점수: ${state.ratings.efficiency.score}/5
-- 기술적 판단: ${technicalCards.map((card) => `${card.label} ${card.signal}`).join(', ')}
+[거시 경제(Macro) 환경]
+- 환율(USD/KRW): ${document.getElementById('fx-usdkrw')?.innerText || '-'}
+- VIX 공포지수: ${document.getElementById('vix-value')?.innerText || '-'}
+- WTI 원유: ${document.getElementById('wti-value')?.innerText || '-'}
+
+[기업(${company}) 핵심 퀀트 데이터]
+- 종합 재무 건전성 랭킹: ${totalPct}% (수익성 ${state.ratings.profitability.score}/5, 건전성 ${state.ratings.stability.score}/5)
+- 주요 지표: 영업이익률 ${summary?.operatingMargin?.toFixed(1) ?? '-'}%, 부채비율 ${summary?.debtRatio?.toFixed(1) ?? '-'}%, ROE ${summary?.roe?.toFixed(1) ?? '-'}%
+- 밸류에이션: 적정주가 ${state.metrics.targetPrice ? state.metrics.targetPrice.toLocaleString() + '원' : '-'} (현재가 대비 상승여력 ${state.metrics.upside?.toFixed(1) ?? '-'}%)
+- 기술적 시그널: ${technicalCards.map((card) => `${card.label}(${card.signal})`).join(', ') || '-'}
 - 차트 소스: ${formatChartSourceName()}
 
-[출력 형식]
-1. 한 줄 요약
-2. 강점 3가지
-3. 리스크 3가지
-4. 최종 의견(매수/관망/주의 중 하나)과 근거
-5. 너무 길지 않게 작성
+[재무 이상치 / Red Flags]
+- ${anomalyText}
+
+[작성 지침 - 반드시 준수할 것]
+1. 데이터의 단순 나열을 엄격히 금지합니다. 숫자가 의미하는 바(Context)를 통찰력 있게 해석하세요. (예: "이익률은 높으나 부채가 과도하여 흑자 부도 리스크 잠재됨")
+2. 현재 환율과 유가 등 거시 환경이 해당 기업의 실적(수출/수입/원가 등)에 미칠 영향을 반드시 1~2문장으로 추론하여 포함하세요.
+3. 경어체를 사용하되, 감정을 배제한 매우 건조하고 전문적인 '보고서 문체(존댓말)'를 사용하세요.
+4. 마크다운을 사용하여 다음 4가지 섹션으로 정확히 나누어 출력하세요:
+   🎯 **핵심 요약 (Investment Thesis)**
+   📈 **상승 촉매 및 강점 (Catalysts & Strengths)**
+   ⚠️ **핵심 리스크 및 매크로 역풍 (Risks & Headwinds)**
+   ⚖️ **최종 투자의견 (Strong Buy / Buy / Hold / Reduce) 및 대응 전략**
     `.trim();
 
     try {
@@ -3379,7 +3398,7 @@ ${company}에 대한 한국어 투자 브리핑을 작성하세요.
                 contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: {
                     temperature: 0.4,
-                    maxOutputTokens: 850
+                    maxOutputTokens: 1200
                 }
             })
         });

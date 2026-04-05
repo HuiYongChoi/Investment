@@ -560,6 +560,15 @@ assert(scriptSource.includes("body.classList.toggle('mobile-dashboard-active'"),
 assert(!scriptSource.includes('drawXP();'), 'XP UI should no longer initialize on page load');
 assert(!scriptSource.includes('function addXP('), 'XP progression logic should be removed from the frontend');
 assert(!scriptSource.includes("localStorage.getItem('invest_nav_xp')"), 'XP localStorage state should be removed from the frontend');
+assert(scriptSource.includes('당신은 월스트리트 탑티어 헤지펀드의 수석 퀀트 애널리스트입니다.'), 'Gemini prompt should use the hedge-fund quant analyst persona');
+assert(scriptSource.includes("[거시 경제(Macro) 환경]"), 'Gemini prompt should include a dedicated macro environment section');
+assert(scriptSource.includes("document.getElementById('fx-usdkrw')?.innerText || '-'"), 'Gemini prompt should inject USD/KRW from the market bar');
+assert(scriptSource.includes("document.getElementById('vix-value')?.innerText || '-'"), 'Gemini prompt should inject VIX from the market bar');
+assert(scriptSource.includes("document.getElementById('wti-value')?.innerText || '-'"), 'Gemini prompt should inject WTI from the market bar');
+assert(scriptSource.includes('[재무 이상치 / Red Flags]'), 'Gemini prompt should include the anomaly/red-flag section when briefing data exists');
+assert(scriptSource.includes('기관 투자자 클라이언트를 위한 냉철하고 날카로운 투자 브리핑'), 'Gemini prompt should frame the output as an institutional investor briefing');
+assert(scriptSource.includes('현재 환율과 유가 등 거시 환경이 해당 기업의 실적'), 'Gemini prompt should explicitly require macro impact inference');
+assert(scriptSource.includes('Strong Buy / Buy / Hold / Reduce'), 'Gemini prompt should require the four-tier final opinion scale');
 assert(scriptSource.includes("EPS 기준:"), 'Valuation output should annotate the active EPS source in small helper text');
 assert(scriptSource.includes("이익 미발생 구간 - PBR 밴드 활용 권장"), 'Loss-making sectors should render the negative-EPS fallback message in the final-target card');
 assert(scriptSource.includes("preset.badgeTone"), 'Valuation preset rendering should apply sector-specific badge tone classes');
