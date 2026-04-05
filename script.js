@@ -174,6 +174,11 @@ function bindEvents() {
     document.getElementById('chart-range-controls').addEventListener('click', onChartRangeClick);
     document.getElementById('chart-reset-btn').addEventListener('click', resetChartZoom);
     document.getElementById('indicator-toggle').addEventListener('click', onIndicatorToggle);
+    document.querySelectorAll('[data-number-format="won"]').forEach((input) => {
+        if (input.readOnly) return;
+        input.addEventListener('input', onWonInputFormat);
+        input.addEventListener('blur', onWonInputFormat);
+    });
     window.addEventListener('resize', debounce(() => {
         if (!document.getElementById('dashboard').classList.contains('hidden')) {
             renderCharts();
@@ -603,7 +608,7 @@ async function startSearch() {
             renderFinancialTable('fin-annual-table', state.annuals);
             renderFinancialTable('fin-quarterly-table', state.quarterlies);
             const valuationSnapshot = state.quote || latestChartPoint || null;
-            autoFillMetrics(state.summaries[0]?.summary || {}, valuationSnapshot);
+            autoFillMetrics(state.summaries[0]?.summary || {}, valuationSnapshot, state.summaries[1]?.summary || null);
             calcMetrics();
             buildRatings();
             setSourceBadge('source-dart', 'DART 공시 연동됨', 'success');
@@ -631,7 +636,7 @@ async function startSearch() {
         }
         renderStockStrip(state.quote, latestChartPoint);
         if (state.summaries.length) {
-            autoFillMetrics(state.summaries[0]?.summary || {}, state.quote || latestChartPoint || null);
+            autoFillMetrics(state.summaries[0]?.summary || {}, state.quote || latestChartPoint || null, state.summaries[1]?.summary || null);
             calcMetrics();
             buildRatings();
         }
@@ -1325,47 +1330,118 @@ function formatStripDeltaText(delta) {
     return `전일 대비 ${sign}${delta.change.toLocaleString()}원 (${sign}${delta.changePct.toFixed(2)}%)`;
 }
 
-function autoFillMetrics(summary, lastTrade) {
-    document.getElementById('m-price').value = lastTrade?.close || 0;
-    document.getElementById('m-shares').value = lastTrade?.listedShares || 0;
-    document.getElementById('m-expected-op').value = Math.max(summary.operatingIncome || 0, 0);
-    document.getElementById('m-target-per').value = 15;
+function onWonInputFormat(event) {
+    const input = event.target;
+    if (!input || input.readOnly) return;
+    input.value = InvestmentLogic.formatWonInputValue(input.value);
+}
+
+function setFormattedInputValue(id, value) {
+    const input = document.getElementById(id);
+    if (!input) return;
+    const numeric = Number(value);
+    input.value = Number.isFinite(numeric) && numeric !== 0
+        ? InvestmentLogic.formatWonInputValue(String(Math.round(numeric)))
+        : '';
+}
+
+function setPlainInputValue(id, value, digits = 1) {
+    const input = document.getElementById(id);
+    if (!input) return;
+    const numeric = Number(value);
+    input.value = Number.isFinite(numeric) && numeric !== 0
+        ? numeric.toFixed(digits)
+        : '';
+}
+
+function getNumericInputValue(id) {
+    const input = document.getElementById(id);
+    if (!input) return 0;
+    return InvestmentLogic.parseFormattedNumber(input.value);
+}
+
+function resolveValuationInputs(summary, lastTrade, previousSummary) {
+    const price = Number(lastTrade?.close) || 0;
+    const fallbackRoe = Number(summary?.roe) || percentage(summary?.netIncome || 0, summary?.equity || 0);
+    const fallbackGrowth = computeGrowth(summary?.netIncome, previousSummary?.netIncome) ?? 0;
+    const fallbackBps = Number(lastTrade?.sharesOutstanding)
+        ? safeDivide(summary?.equity || 0, lastTrade.sharesOutstanding)
+        : 0;
+    const fallbackEps = Number(lastTrade?.sharesOutstanding)
+        ? safeDivide(summary?.netIncome || 0, lastTrade.sharesOutstanding)
+        : (fallbackBps && fallbackRoe ? fallbackBps * (fallbackRoe / 100) : 0);
+    const forwardEps = Number(lastTrade?.forwardEps) || fallbackEps || 0;
+    const bps = Number(lastTrade?.bps) || fallbackBps || 0;
+    const roe = Number(lastTrade?.roe) || fallbackRoe || 0;
+    const forwardPer = Number(lastTrade?.forwardPer) || safeDivide(price, forwardEps) || 0;
+
+    return {
+        price,
+        forwardEps,
+        forwardPer,
+        bps,
+        roe,
+        growthRate: fallbackGrowth
+    };
+}
+
+function autoFillMetrics(summary, lastTrade, previousSummary) {
+    const valuation = resolveValuationInputs(summary, lastTrade, previousSummary);
+    setFormattedInputValue('m-price', valuation.price);
+    setFormattedInputValue('m-forward-eps', valuation.forwardEps);
+    setPlainInputValue('m-forward-per', valuation.forwardPer, 1);
+    setFormattedInputValue('m-bps', valuation.bps);
+    setPlainInputValue('m-roe', valuation.roe, 1);
+    setFormattedInputValue('m-adjusted-eps', valuation.forwardEps);
+    document.getElementById('m-target-per').value = valuation.forwardPer > 0 ? valuation.forwardPer.toFixed(1) : '15.0';
+    document.getElementById('m-eps-growth').value = valuation.growthRate ? valuation.growthRate.toFixed(1) : '0.0';
+    document.getElementById('m-required-return').value = '8';
     state.lastAnalysis.fin = {
         rev: summary.revenue || 0,
         op: summary.operatingIncome || 0,
         net: summary.netIncome || 0,
         eq: summary.equity || 0,
         debt: summary.liabilities || 0,
-        assets: summary.assets || 0
+        assets: summary.assets || 0,
+        valuation
     };
 }
 
 function calcMetrics() {
-    const price = Number(document.getElementById('m-price').value) || 0;
-    const shares = Number(document.getElementById('m-shares').value) || 0;
-    const expectedOp = Number(document.getElementById('m-expected-op').value) || 0;
-    const targetPer = Number(document.getElementById('m-target-per').value) || 15;
+    const price = getNumericInputValue('m-price');
+    const forwardEps = getNumericInputValue('m-forward-eps');
+    const forwardPer = Number(document.getElementById('m-forward-per').value) || safeDivide(price, forwardEps) || 0;
+    const bps = getNumericInputValue('m-bps');
+    const roe = Number(document.getElementById('m-roe').value) || 0;
+    const adjustedEps = getNumericInputValue('m-adjusted-eps') || forwardEps;
+    const targetPer = Number(document.getElementById('m-target-per').value) || forwardPer || 15;
+    const epsGrowth = Number(document.getElementById('m-eps-growth').value) || 0;
+    const requiredReturn = Number(document.getElementById('m-required-return').value) || 8;
     const fin = state.lastAnalysis.fin;
 
-    const eps = safeDivide(fin.net, shares);
-    const per = safeDivide(price, eps);
-    const roe = percentage(fin.net, fin.eq);
     const debtRatio = percentage(fin.debt, fin.eq);
     const operatingMargin = percentage(fin.op, fin.rev);
-    const targetPrice = shares ? Math.round(((expectedOp > 0 ? expectedOp : fin.net) * targetPer) / shares) : 0;
-    const upside = percentage(targetPrice - price, price);
+    const projectedEps = adjustedEps * (1 + (epsGrowth / 100));
+    const targetPrice = projectedEps * targetPer;
+    const discountFactor = 1 + (requiredReturn / 100);
+    const discountedFairValue = discountFactor > 0 ? targetPrice / discountFactor : targetPrice;
+    const upside = percentage(discountedFairValue - price, price);
+    const pbr = safeDivide(price, bps);
 
-    state.lastAnalysis.metrics = { per, roe, debtR: debtRatio, opM: operatingMargin, targetPrice, upside };
+    state.lastAnalysis.metrics = { forwardPer, roe, debtR: debtRatio, opM: operatingMargin, targetPrice: discountedFairValue, upside, projectedEps, pbr, requiredReturn };
     state.metrics = state.lastAnalysis.metrics;
 
     const items = [
-        { label: 'EPS', value: `${Math.round(eps || 0).toLocaleString()}원`, hint: '순이익 / 상장주식수' },
-        { label: '현재 PER', value: per ? `${per.toFixed(1)}배` : '-', tone: per && per <= targetPer ? 'good' : per && per <= targetPer * 1.4 ? 'warn' : 'bad', hint: `목표 PER ${targetPer}배 기준` },
+        { label: '선행 EPS', value: forwardEps ? `${Math.round(forwardEps).toLocaleString()}원` : '-', hint: 'API 연동 기준 EPS' },
+        { label: '선행 PER', value: forwardPer ? `${forwardPer.toFixed(1)}배` : '-', tone: forwardPer && forwardPer <= targetPer ? 'good' : forwardPer && forwardPer <= targetPer * 1.4 ? 'warn' : 'bad', hint: `목표 PER ${targetPer.toFixed(1)}배 비교` },
+        { label: 'BPS', value: bps ? `${Math.round(bps).toLocaleString()}원` : '-', hint: '주당순자산가치' },
         { label: 'ROE', value: `${roe.toFixed(1)}%`, tone: roe > 12 ? 'good' : roe > 8 ? 'warn' : 'bad', hint: '당기순이익 / 자본' },
+        { label: 'PBR', value: pbr ? `${pbr.toFixed(2)}배` : '-', tone: pbr && pbr <= 1.5 ? 'good' : pbr && pbr <= 2.5 ? 'warn' : 'bad', hint: '현재 주가 / BPS' },
         { label: '영업이익률', value: `${operatingMargin.toFixed(1)}%`, tone: operatingMargin > 10 ? 'good' : operatingMargin > 5 ? 'warn' : 'bad', hint: '영업이익 / 매출액' },
         { label: '부채비율', value: `${debtRatio.toFixed(1)}%`, tone: debtRatio < 100 ? 'good' : debtRatio < 180 ? 'warn' : 'bad', hint: '부채총계 / 자본총계' },
-        { label: '적정주가', value: targetPrice ? `${targetPrice.toLocaleString()}원` : '-', hint: '예상 영업이익 x 목표 PER' },
-        { label: '상승여력', value: `${upside > 0 ? '+' : ''}${upside.toFixed(1)}%`, tone: upside > 0 ? 'good' : 'bad', hint: '적정주가 대비' }
+        { label: '1년 후 EPS', value: projectedEps ? `${Math.round(projectedEps).toLocaleString()}원` : '-', hint: `조정 EPS에 성장률 ${epsGrowth.toFixed(1)}% 반영` },
+        { label: '적정주가', value: discountedFairValue ? `${Math.round(discountedFairValue).toLocaleString()}원` : '-', hint: `목표 PER 적용 후 요구수익률 ${requiredReturn.toFixed(1)}% 할인` },
+        { label: '상승여력', value: `${upside > 0 ? '+' : ''}${upside.toFixed(1)}%`, tone: upside > 0 ? 'good' : 'bad', hint: '할인 적용 적정주가 대비' }
     ];
 
     document.getElementById('metrics-grid').innerHTML = items.map((item) => `

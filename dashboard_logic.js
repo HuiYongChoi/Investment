@@ -17,6 +17,19 @@
         return Number.isFinite(numeric) ? numeric : null;
     }
 
+    function parseFormattedNumber(value) {
+        return parseNumberText(value) ?? 0;
+    }
+
+    function formatWonInputValue(value) {
+        const raw = String(value || '').trim();
+        const negative = raw.startsWith('-');
+        const digits = raw.replace(/\D/g, '');
+        if (!digits) return '';
+        const formatted = Number.parseInt(digits, 10).toLocaleString('en-US');
+        return negative ? `-${formatted}` : formatted;
+    }
+
     function parseSignedNumberText(value) {
         return parseNumberText(value);
     }
@@ -324,6 +337,11 @@
             high: parseNumberText(payload?.dayHigh ?? payload?.high ?? payload?.regularMarketDayHigh) ?? 0,
             low: parseNumberText(payload?.dayLow ?? payload?.low ?? payload?.regularMarketDayLow) ?? 0,
             volume: parseNumberText(payload?.volume ?? payload?.regularMarketVolume ?? payload?.lastVolume) ?? 0,
+            forwardEps: parseNumberText(payload?.epsForward ?? payload?.forwardEps ?? payload?.trailingEps),
+            forwardPer: parseNumberText(payload?.forwardPE ?? payload?.forwardPer ?? payload?.trailingPE),
+            bps: parseNumberText(payload?.bookValue ?? payload?.bps),
+            roe: parseNumberText(payload?.returnOnEquity ?? payload?.roe),
+            sharesOutstanding: parseNumberText(payload?.sharesOutstanding),
             asOf: String(payload?.regularMarketTime ?? payload?.asOf ?? fetchedAt ?? ''),
             source: 'yfinance_python'
         };
@@ -779,10 +797,12 @@
         normalizePublicQuote,
         normalizeYfinanceChartRows,
         normalizeYfinanceQuote,
+        parseFormattedNumber,
         panChartWindow,
         sliceChartSeriesWindow,
         sliceTechnicalSeriesWindow,
         buildChartSeriesSignature,
+        formatWonInputValue,
         resolveChartTooltipLayout,
         resolveChartSeries,
         resolveKakaoCallbackUri,

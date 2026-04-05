@@ -1181,6 +1181,46 @@ header#header {
     outline: none;
 }
 
+.tech-in-readonly {
+    background: rgba(148, 163, 184, 0.12);
+    border-color: rgba(148, 163, 184, 0.22);
+    color: #dbe7f5;
+    cursor: not-allowed;
+}
+
+.valuation-tracks {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.valuation-track {
+    padding: 18px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.valuation-track-readonly {
+    background: linear-gradient(180deg, rgba(148, 163, 184, 0.12), rgba(15, 23, 42, 0.38));
+}
+
+.valuation-track-head h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.valuation-track-head p {
+    margin: 6px 0 0;
+    color: var(--text-muted);
+    font-size: 0.86rem;
+    line-height: 1.5;
+}
+
+.valuation-grid {
+    margin-top: 16px;
+}
+
 .metrics-grid,
 .technical-grid {
     display: grid;
@@ -1516,6 +1556,10 @@ header#header {
 
     .input-grid,
     .summary-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .valuation-tracks {
         grid-template-columns: 1fr;
     }
 

@@ -374,6 +374,26 @@ def fetch_quote_payload(stock_code: str, market: str = "KOSPI", name_hint: str =
                 or info.get("regularMarketVolume")
                 or volume
             )
+            shares_outstanding = normalize_number(
+                fast_info.get("shares")
+                or info.get("sharesOutstanding")
+                or info.get("impliedSharesOutstanding")
+            )
+            forward_eps = normalize_number(
+                info.get("epsForward")
+                or info.get("forwardEps")
+                or info.get("trailingEps")
+            )
+            forward_pe = normalize_number(
+                info.get("forwardPE")
+                or info.get("trailingPE")
+            )
+            book_value = normalize_number(
+                info.get("bookValue")
+            )
+            return_on_equity = normalize_number(info.get("returnOnEquity"))
+            if return_on_equity is not None and abs(return_on_equity) <= 1:
+                return_on_equity *= 100
 
             if current_price is None:
                 last_error = "Yahoo Finance returned no quote data"
@@ -391,6 +411,11 @@ def fetch_quote_payload(stock_code: str, market: str = "KOSPI", name_hint: str =
                 "dayHigh": day_high,
                 "dayLow": day_low,
                 "volume": volume,
+                "sharesOutstanding": shares_outstanding,
+                "epsForward": forward_eps,
+                "forwardPE": forward_pe,
+                "bookValue": book_value,
+                "returnOnEquity": return_on_equity,
                 "regularMarketTime": isoformat_kst(last_timestamp),
                 "fetched_at": now_kst().isoformat(),
             }

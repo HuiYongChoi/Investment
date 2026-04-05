@@ -336,6 +336,10 @@ const daySignature = InvestmentLogic.buildChartSeriesSignature([
 ]);
 assert(daySignature === '2|20260401|20260402|110|1200', 'Chart series signatures should summarize the current full-series identity for technical caching');
 assert(InvestmentLogic.buildChartSeriesSignature([]) === '0|||0|0', 'Empty chart series should still produce a stable signature');
+assert(InvestmentLogic.formatWonInputValue('1234567') === '1,234,567', 'Won input formatting should add thousands separators');
+assert(InvestmentLogic.formatWonInputValue('0012300원') === '12,300', 'Won input formatting should strip non-digits and leading zeros');
+assert(InvestmentLogic.parseFormattedNumber('1,234,567') === 1234567, 'Formatted numeric text should parse back to a number');
+assert(InvestmentLogic.parseFormattedNumber('') === 0, 'Blank numeric text should parse to 0');
 
 const tooltipRight = InvestmentLogic.resolveChartTooltipLayout({
     anchorX: 60,
@@ -374,6 +378,10 @@ const scriptSource = readText(`${cwd}/script.js`);
 assert(scriptSource.includes("context.textAlign = 'left';"), 'Tooltip text should explicitly left-align inside the box');
 assert(scriptSource.includes("context.textBaseline = 'top';"), 'Tooltip text should use top baseline for consistent vertical rhythm');
 assert(scriptSource.includes("context.fillStyle = 'rgba(255, 255, 255, 0.84)';"), 'Tooltip should use a translucent white background for readability');
+assert(scriptSource.includes("document.querySelectorAll('[data-number-format=\"won\"]')"), 'Won-denominated valuation inputs should register live comma formatting');
+assert(scriptSource.includes("setFormattedInputValue('m-forward-eps'"), 'Auto-filled valuation data should populate the forward EPS read-only field');
+assert(scriptSource.includes("setFormattedInputValue('m-bps'"), 'Auto-filled valuation data should populate the BPS read-only field');
+assert(scriptSource.includes("document.getElementById('m-required-return').value = '8';"), 'Required return should default to 8%');
 
 const phpProxySource = readText(`${cwd}/proxy.php`);
 assert(phpProxySource.includes('https://api.gold-api.com/price/XAU'), 'PHP proxy should include the gold-api fallback source');
@@ -397,6 +405,7 @@ const yfinanceBridgeSource = readText(`${cwd}/yfinance_bridge.py`);
 assert(yfinanceBridgeSource.includes('--name-hint'), 'yfinance bridge should accept company name hints for AUTO market resolution');
 assert(yfinanceBridgeSource.includes('read_cached_payload('), 'yfinance bridge should read short-lived cached payloads before calling Yahoo Finance');
 assert(yfinanceBridgeSource.includes('write_cached_payload('), 'yfinance bridge should persist successful Yahoo Finance responses for reuse');
+assert(yfinanceBridgeSource.includes('"sharesOutstanding"'), 'yfinance bridge should expose sharesOutstanding for valuation inputs');
 
 assert(scriptSource.includes('name_hint'), 'Frontend yfinance requests should forward company name hints');
 assert(phpProxySource.includes('$nameHint = trim((string) ($_GET[\'name_hint\'] ?? \'\'));'), 'PHP proxy should read company name hints for yfinance bridge requests');
@@ -426,5 +435,17 @@ const styleSource = readText(`${cwd}/style.css`);
 assert(styleSource.includes('.report-year-toggle'), 'Styles should include the yearly quarterly-report toggle treatment');
 assert(styleSource.includes('.report-section'), 'Styles should include grouped report section layout');
 assert(styleSource.includes('.report-section-toggle'), 'Styles should include the report section toggle treatment');
+
+const htmlSource = readText(`${cwd}/index.html`);
+assert(htmlSource.includes('API 연동값 (읽기 전용)'), 'Valuation form should include a read-only API track');
+assert(htmlSource.includes('수동 입력 / 가정 조정'), 'Valuation form should include a manual override track');
+assert(htmlSource.includes('id="m-forward-eps"'), 'Valuation form should expose the forward EPS read-only field');
+assert(htmlSource.includes('id="m-forward-per"'), 'Valuation form should expose the forward PER read-only field');
+assert(htmlSource.includes('id="m-bps"'), 'Valuation form should expose the BPS read-only field');
+assert(htmlSource.includes('id="m-adjusted-eps"'), 'Valuation form should expose the adjusted EPS input');
+assert(htmlSource.includes('id="m-eps-growth"'), 'Valuation form should expose the EPS growth input');
+assert(htmlSource.includes('id="m-required-return"'), 'Valuation form should expose the required return input');
+assert(!htmlSource.includes('id="m-shares"'), 'Valuation form should remove the listed shares input');
+assert(!htmlSource.includes('id="m-expected-op"'), 'Valuation form should remove the expected operating income input');
 
 console.log('dashboard_logic_test: ok');
