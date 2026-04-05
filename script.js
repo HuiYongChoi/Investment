@@ -96,6 +96,7 @@ const state = {
     chartRange: 'DAY',
     chartWindow: null,
     chartDrag: null,
+    techDrag: null,
     chartSource: 'idle',
     searchQuery: '',
     searchMatches: [],
@@ -325,22 +326,44 @@ function updateClock() {
     document.getElementById('market-datetime').textContent = dateLabel;
 }
 
+function setMarketChg(id, changePct) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (changePct === null || changePct === undefined) {
+        el.textContent = '';
+        el.className = 'market-chg';
+        return;
+    }
+    const sign = changePct > 0 ? '+' : '';
+    el.textContent = `${sign}${changePct.toFixed(2)}%`;
+    el.className = `market-chg ${changePct > 0 ? 'up' : changePct < 0 ? 'down' : ''}`;
+}
+
 async function loadMarketSummary() {
     try {
         const data = await fetchJson(buildProxyUrl('market', '/summary'));
         if (data.usdKrw) {
             document.getElementById('fx-usdkrw').textContent = `${data.usdKrw.toFixed(2)}원`;
             document.getElementById('fx-usdkrw-note').textContent = '1달러 기준';
+            setMarketChg('fx-usdkrw-chg', data.usdKrwChangePct ?? null);
         }
         if (data.jpyKrw) {
             document.getElementById('fx-jpykrw').textContent = `${(data.jpyKrw * 100).toFixed(2)}원`;
             document.getElementById('fx-jpykrw-note').textContent = '100엔 기준';
+            setMarketChg('fx-jpykrw-chg', data.jpyKrwChangePct ?? null);
         }
         if (data.goldKrwPerGram) {
             document.getElementById('gold-krw').textContent = `${Math.round(data.goldKrwPerGram).toLocaleString()}원`;
             document.getElementById('gold-note').textContent = '금 1g 추정';
+            setMarketChg('gold-chg', data.goldChangePct ?? null);
         } else {
             document.getElementById('gold-note').textContent = '외부 시세 연결 대기';
+        }
+        if (data.vix) {
+            document.getElementById('vix-value').textContent = data.vix.toFixed(2);
+            setMarketChg('vix-chg', data.vixChangePct ?? null);
+            const vixLevel = data.vix < 15 ? '극도 낙관' : data.vix < 20 ? '안정' : data.vix < 30 ? '경계' : data.vix < 40 ? '공포' : '극도 공포';
+            document.getElementById('vix-note').textContent = vixLevel;
         }
     } catch (error) {
         document.getElementById('fx-usdkrw-note').textContent = '연동 실패';
@@ -1492,6 +1515,14 @@ function computeTechnicals(data) {
     return { ma5, ma20, rsi, macd, stoch, boll, cards };
 }
 
+const INDICATOR_TOOLTIPS = {
+    RSI: 'RSI (상대강도지수) 14일 기준\n🟢 매수: RSI ≤ 30 (과매도)\n🔴 매도: RSI ≥ 70 (과매수)\n⚪ 중립: 30 ~ 70 구간',
+    MACD: 'MACD (이동평균수렴확산)\n단기(12일) - 장기(26일) EMA 차이\n🟢 매수: MACD가 Signal 상향돌파\n🔴 매도: MACD가 Signal 하향돌파',
+    STOCH: '스토캐스틱 (14, 3)\n%K / %D 모멘텀 오실레이터\n🟢 매수: %K 상향돌파 & K < 25\n🔴 매도: %K 하향돌파 & K > 75\n⚪ 중립: 25 ~ 75 구간',
+    MA: '골든 / 데드크로스 (MA5/MA20)\n🟢 골든크로스(매수): MA5 > MA20\n🔴 데드크로스(매도): MA5 < MA20',
+    BOLL: '볼린저 밴드 (20일, 2σ)\n가격 변동성 기반 채널\n🟢 매수: 현재가 ≤ 하단 밴드\n🔴 매도: 현재가 ≥ 상단 밴드\n중간선 = 20일 이동평균'
+};
+
 function renderTechnicalCards() {
     const container = document.getElementById('technical-grid');
     if (!state.technicals) {
@@ -1501,9 +1532,13 @@ function renderTechnicalCards() {
 
     container.innerHTML = state.technicals.cards.map((card) => {
         const tone = card.signal === '매수' ? 'good' : card.signal === '매도' ? 'bad' : 'warn';
+        const tipText = (INDICATOR_TOOLTIPS[card.key] || '').replace(/\n/g, '<br>');
         return `
             <div class="signal-card">
-                <div class="signal-label">${card.label}</div>
+                <div class="signal-card-label">
+                    <span class="signal-label">${card.label}</span>
+                    ${tipText ? `<span class="signal-card-hint">?<span class="signal-card-tooltip">${tipText}</span></span>` : ''}
+                </div>
                 <div class="signal-value">${card.value}</div>
                 <div class="signal-note">${card.note}</div>
                 <div class="signal-note ${tone}">${card.signal}</div>
@@ -1623,6 +1658,7 @@ function onChartRangeClick(event) {
 }
 
 function onIndicatorToggle(event) {
+    if (event.target.closest('.chip-hint')) return; // ? 클릭은 무시
     const button = event.target.closest('.indicator-chip');
     if (!button) return;
     const indicator = button.dataset.indicator;
@@ -1638,8 +1674,11 @@ function onIndicatorToggle(event) {
 function renderCharts(options = {}) {
     syncChartRangeButtons();
     updateChartViewport(options.viewport || 'preserve');
+    const fullRangeTechnicals = computeTechnicals(state.chartFullSeries);
+    const visibleTechnicals = InvestmentLogic.sliceTechnicalSeriesWindow(fullRangeTechnicals, state.chartWindow);
     renderPriceChart(state.chartVisible);
-    renderIndicatorChart(state.chartVisible);
+    renderTechPriceChart(state.chartVisible, visibleTechnicals);
+    renderIndicatorChart(state.chartVisible, visibleTechnicals);
     renderChartLegend();
     renderTechLegend();
     document.getElementById('chart-status').textContent = formatChartSourceStatus();
@@ -1669,6 +1708,17 @@ function aggregateCandles(data, mode) {
     return aggregated;
 }
 
+function clearCanvasInteractions(canvas, cursor = 'default') {
+    if (!canvas) return;
+    canvas.style.cursor = cursor;
+    canvas.onwheel = null;
+    canvas.onpointerdown = null;
+    canvas.onpointermove = null;
+    canvas.onpointerup = null;
+    canvas.onpointerleave = null;
+    canvas.onpointercancel = null;
+}
+
 function renderPriceChart(data) {
     const canvas = document.getElementById('candle-chart');
     const context = canvas.getContext('2d');
@@ -1681,13 +1731,7 @@ function renderPriceChart(data) {
         context.fillStyle = '#94a3b8';
         context.font = '14px Inter';
         context.fillText('차트 데이터가 없습니다.', 24, 32);
-        canvas.style.cursor = 'default';
-        canvas.onwheel = null;
-        canvas.onpointerdown = null;
-        canvas.onpointermove = null;
-        canvas.onpointerup = null;
-        canvas.onpointerleave = null;
-        canvas.onpointercancel = null;
+        clearCanvasInteractions(canvas);
         return;
     }
 
@@ -1883,78 +1927,491 @@ function renderPriceChart(data) {
     };
 }
 
-function renderIndicatorChart(data) {
+/**
+ * Attach synchronized zoom (wheel) + pan (pointer drag) to a canvas.
+ * All canvases share state.chartWindow / state.chartFullSeries with the main chart.
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {number} padLeft   - drawing area left padding
+ * @param {number} padRight  - drawing area right padding
+ * @param {Function} [onHoverMove] - (e, rect) callback when hovering (no drag)
+ * @param {Function} [onHoverEnd]  - () callback when pointer leaves or drag starts
+ */
+function setupZoomPan(canvas, padLeft, padRight, onHoverMove, onHoverEnd) {
+    canvas.style.cursor = onHoverMove ? 'crosshair' : 'grab';
+
+    canvas.onwheel = (e) => {
+        if (!state.chartFullSeries.length || !state.chartWindow) return;
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const drawWidth = canvas.width - padLeft - padRight;
+        const localX = (e.clientX - rect.left) * (canvas.width / rect.width) - padLeft;
+        const anchorRatio = Math.max(0, Math.min(1, localX / Math.max(1, drawWidth)));
+        const factor = e.deltaY < 0 ? 0.82 : 1.22;
+        state.chartWindow = InvestmentLogic.zoomChartWindow(
+            state.chartWindow,
+            state.chartFullSeries.length,
+            factor,
+            anchorRatio,
+            getChartWindowMinimum(state.chartRange, state.chartFullSeries.length)
+        );
+        state.techDrag = null;
+        if (onHoverEnd) onHoverEnd();
+        renderCharts({ viewport: 'preserve' });
+    };
+
+    canvas.onpointerdown = (e) => {
+        if (!state.chartWindow) return;
+        state.techDrag = {
+            canvas,
+            pointerId: e.pointerId,
+            startX: e.clientX,
+            window: { ...state.chartWindow }
+        };
+        canvas.setPointerCapture?.(e.pointerId);
+        canvas.style.cursor = 'grabbing';
+        if (onHoverEnd) onHoverEnd();
+    };
+
+    canvas.onpointermove = (e) => {
+        const drag = state.techDrag;
+        if (drag && drag.canvas === canvas && drag.pointerId === e.pointerId) {
+            const drawWidth = canvas.width - padLeft - padRight;
+            const visiblePoints = Math.max(1, drag.window.end - drag.window.start);
+            const deltaRatio = (e.clientX - drag.startX) / Math.max(1, drawWidth);
+            const deltaPoints = Math.round(-deltaRatio * visiblePoints);
+            state.chartWindow = InvestmentLogic.panChartWindow(
+                drag.window,
+                deltaPoints,
+                state.chartFullSeries.length
+            );
+            if (onHoverEnd) onHoverEnd();
+            renderCharts({ viewport: 'preserve' });
+            return;
+        }
+        if (onHoverMove) {
+            const rect = canvas.getBoundingClientRect();
+            onHoverMove(e, rect);
+        }
+    };
+
+    const releasePointer = (e) => {
+        const drag = state.techDrag;
+        if (!drag || drag.canvas !== canvas || drag.pointerId !== e.pointerId) return;
+        try { canvas.releasePointerCapture?.(e.pointerId); } catch (_) { /* ignore */ }
+        state.techDrag = null;
+        canvas.style.cursor = onHoverMove ? 'crosshair' : 'grab';
+    };
+
+    canvas.onpointerup = releasePointer;
+    canvas.onpointercancel = (e) => {
+        releasePointer(e);
+        if (onHoverEnd) onHoverEnd();
+    };
+    canvas.onpointerleave = (e) => {
+        const drag = state.techDrag;
+        if (drag && drag.canvas === canvas && drag.pointerId === e.pointerId) return;
+        if (onHoverEnd) onHoverEnd();
+        canvas.style.cursor = onHoverMove ? 'crosshair' : 'grab';
+    };
+    // Suppress default touch scroll inside the chart
+    canvas.style.touchAction = 'none';
+}
+
+function renderTechPriceChart(data, visibleTechnicals) {
+    const canvas = document.getElementById('tech-price-chart');
+    if (!canvas) return;
+    const context = canvas.getContext('2d');
+    const wrapperWidth = canvas.parentElement.clientWidth - 36;
+    canvas.width = Math.max(wrapperWidth, 320);
+    const SIGNAL_STRIP = 34;
+    canvas.height = 300;
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (!data || !data.length) {
+        context.fillStyle = '#94a3b8';
+        context.font = '13px Inter';
+        context.fillText('차트 데이터가 없습니다.', 18, 30);
+        clearCanvasInteractions(canvas);
+        hideTechTooltip();
+        return;
+    }
+
+    const localTech = visibleTechnicals;
+    const bollActive = state.selectedIndicators.has('BOLL') && localTech;
+    const maActive = state.selectedIndicators.has('MA') && localTech;
+
+    const padding = { top: 18, right: 72, bottom: 28 + SIGNAL_STRIP, left: 18 };
+    const width = canvas.width - padding.left - padding.right;
+    const priceHeight = canvas.height - padding.top - padding.bottom;
+
+    // Price range — extend to include BB bands and MA lines
+    let allPrices = data.flatMap((d) => [d.high, d.low]);
+    if (bollActive) {
+        localTech.boll.forEach((b) => { if (b) { allPrices.push(b.upper, b.lower); } });
+    }
+    if (maActive) {
+        localTech.ma5.forEach((v) => { if (v !== null) allPrices.push(v); });
+        localTech.ma20.forEach((v) => { if (v !== null) allPrices.push(v); });
+    }
+    const maxPrice = Math.max(...allPrices) * 1.01;
+    const minPrice = Math.min(...allPrices) * 0.99;
+
+    const xGap = width / Math.max(1, data.length);
+    const candleW = Math.max(3, Math.min(14, xGap * 0.55));
+    const xAt = (i) => padding.left + xGap * i + xGap / 2;
+    const yAt = (v) => padding.top + priceHeight - ((v - minPrice) / (maxPrice - minPrice || 1)) * priceHeight;
+
+    // Grid lines + price labels
+    context.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+        const y = padding.top + (priceHeight / 4) * i;
+        context.strokeStyle = 'rgba(255,255,255,0.06)';
+        context.beginPath();
+        context.moveTo(padding.left, y);
+        context.lineTo(canvas.width - padding.right, y);
+        context.stroke();
+        const price = maxPrice - ((maxPrice - minPrice) / 4) * i;
+        context.fillStyle = '#64748b';
+        context.font = '11px Inter';
+        context.textAlign = 'left';
+        context.fillText(Math.round(price).toLocaleString(), canvas.width - padding.right + 8, y + 4);
+    }
+
+    // Bollinger Band shaded area
+    if (bollActive) {
+        const validBoll = localTech.boll.map((b, i) => ({ b, i })).filter(({ b }) => b !== null);
+        if (validBoll.length > 1) {
+            context.beginPath();
+            validBoll.forEach(({ b, i }, vi) => {
+                if (vi === 0) context.moveTo(xAt(i), yAt(b.upper));
+                else context.lineTo(xAt(i), yAt(b.upper));
+            });
+            for (let vi = validBoll.length - 1; vi >= 0; vi--) {
+                const { b, i } = validBoll[vi];
+                context.lineTo(xAt(i), yAt(b.lower));
+            }
+            context.closePath();
+            context.fillStyle = 'rgba(143,211,255,0.07)';
+            context.fill();
+        }
+        drawLineSeries(context, localTech.boll.map((b) => (b ? b.upper : null)), xAt, yAt, 'rgba(143,211,255,0.55)', 1.2);
+        drawLineSeries(context, localTech.boll.map((b) => (b ? b.middle : null)), xAt, yAt, 'rgba(143,211,255,0.3)', 1);
+        drawLineSeries(context, localTech.boll.map((b) => (b ? b.lower : null)), xAt, yAt, 'rgba(143,211,255,0.55)', 1.2);
+    }
+
+    // MA5 / MA20 overlay
+    if (maActive) {
+        drawLineSeries(context, localTech.ma5, xAt, yAt, '#8fd3ff', 1.6);
+        drawLineSeries(context, localTech.ma20, xAt, yAt, '#f59e0b', 1.6);
+    }
+
+    // Candles
+    data.forEach((point, i) => {
+        const x = xAt(i);
+        const rising = point.close >= point.open;
+        const color = rising ? '#22c55e' : '#ef4444';
+        context.strokeStyle = color;
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(x, yAt(point.high));
+        context.lineTo(x, yAt(point.low));
+        context.stroke();
+        context.fillStyle = color;
+        const topY = Math.min(yAt(point.open), yAt(point.close));
+        const bodyH = Math.max(1, Math.abs(yAt(point.open) - yAt(point.close)));
+        context.fillRect(x - candleW / 2, topY, candleW, bodyH);
+    });
+
+    // Date axis
+    const labelStep = Math.max(1, Math.floor(data.length / 6));
+    context.fillStyle = '#64748b';
+    context.textAlign = 'center';
+    context.font = '11px Inter';
+    data.forEach((point, i) => {
+        if (i % labelStep !== 0 && i !== data.length - 1) return;
+        context.fillText(formatAxisDate(point.date, state.chartRange), xAt(i), padding.top + priceHeight + 16);
+    });
+
+    // Signal strip separator
+    const stripTop = canvas.height - SIGNAL_STRIP;
+    context.strokeStyle = 'rgba(255,255,255,0.07)';
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(padding.left, stripTop);
+    context.lineTo(canvas.width - padding.right, stripTop);
+    context.stroke();
+    context.fillStyle = '#475569';
+    context.font = '10px Inter';
+    context.textAlign = 'left';
+    context.fillText('매수/매도 시그널', padding.left, stripTop + 12);
+
+    // Collect & draw buy/sell markers in strip
+    if (localTech) {
+        const allMarkers = [];
+        if (state.selectedIndicators.has('RSI') || state.selectedIndicators.has('STOCH')) {
+            buildOscillatorMarkers(localTech, state.selectedIndicators).forEach((m) => allMarkers.push(m));
+        }
+        if (state.selectedIndicators.has('MACD')) {
+            buildMacdMarkers(localTech.macd).forEach((m) => allMarkers.push(m));
+        }
+        if (state.selectedIndicators.has('MA')) {
+            buildMAMarkers(localTech).forEach((m) => allMarkers.push(m));
+        }
+        const stripMidY = stripTop + SIGNAL_STRIP / 2 + 2;
+        allMarkers.forEach((marker) => {
+            drawSignalMarker(context, xAt(marker.index), stripMidY, marker.type);
+        });
+    }
+
+    // ── 줌/패닝 + 호버 툴팁 (연동) ──
+    setupZoomPan(
+        canvas,
+        padding.left,
+        padding.right,
+        (e, rect) => {
+            const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const idx = Math.round((mouseX - padding.left - xGap / 2) / xGap);
+            if (idx < 0 || idx >= data.length) { hideTechTooltip(); return; }
+            const chartWidth = canvas.width - padding.left - padding.right;
+            const cursorFraction = Math.max(0, Math.min(1, (mouseX - padding.left) / chartWidth));
+            showTechTooltip(idx, data, localTech, cursorFraction);
+        },
+        hideTechTooltip
+    );
+}
+
+function hideTechTooltip() {
+    const el = document.getElementById('tech-tooltip');
+    if (el) el.style.display = 'none';
+}
+
+function showTechTooltip(idx, data, tech, cursorFraction = 0.5) {
+    const el = document.getElementById('tech-tooltip');
+    if (!el) return;
+    const pt = data[idx];
+    if (!pt) return;
+
+    const fmt = (v) => (v != null ? Math.round(v).toLocaleString() : '-');
+    const fmtF = (v, d = 1) => (v != null ? v.toFixed(d) : '-');
+
+    // 지표별 시그널 뱃지 생성 헬퍼
+    const buyBadge  = (label) => `<span class="sig-buy">▲ ${label}</span>`;
+    const sellBadge = (label) => `<span class="sig-sell">▼ ${label}</span>`;
+
+    // 각 지표 값
+    const rsi    = tech?.rsi?.[idx];
+    const stochK = tech?.stoch?.k?.[idx];
+    const stochD = tech?.stoch?.d?.[idx];
+    const macdV  = tech?.macd?.macd?.[idx];
+    const macdS  = tech?.macd?.signal?.[idx];
+    const boll   = tech?.boll?.[idx];
+    const ma5    = tech?.ma5?.[idx];
+    const ma20   = tech?.ma20?.[idx];
+
+    // 지표별 고유 시그널
+    const rsiSig   = rsi != null
+        ? (rsi <= 30 ? buyBadge('RSI 과매도') : rsi >= 70 ? sellBadge('RSI 과매수') : '') : '';
+    const stochSig = (stochK != null && stochD != null)
+        ? (stochK > stochD && stochK < 25 ? buyBadge('%K 상향교차')
+            : stochK < stochD && stochK > 75 ? sellBadge('%K 하향교차') : '') : '';
+    const macdSig  = (macdV != null && macdS != null)
+        ? (macdV > macdS ? buyBadge('MACD 골든') : sellBadge('MACD 데드')) : '';
+    const bollSig  = boll
+        ? (pt.close <= boll.lower ? buyBadge('BB 하단이탈')
+            : pt.close >= boll.upper ? sellBadge('BB 상단돌파') : '') : '';
+    const maSig    = (ma5 != null && ma20 != null)
+        ? (ma5 > ma20 ? buyBadge('골든크로스') : sellBadge('데드크로스')) : '';
+
+    const sep = '<div style="border-top:1px solid rgba(255,255,255,0.10);margin:5px 0"></div>';
+
+    let html = `<div style="font-weight:800;color:#e2e8f0;margin-bottom:4px">${formatDateToken(pt.date)}</div>`;
+    html += `<div>시가 <strong>${fmt(pt.open)}원</strong></div>`;
+    html += `<div>고가 <strong style="color:#f87171">${fmt(pt.high)}원</strong></div>`;
+    html += `<div>저가 <strong style="color:#4ade80">${fmt(pt.low)}원</strong></div>`;
+    html += `<div>종가 <strong>${fmt(pt.close)}원</strong></div>`;
+
+    let hasPrev = false;
+    if (state.selectedIndicators.has('RSI') && rsi != null) {
+        html += sep; hasPrev = true;
+        html += `<div>RSI&nbsp;<strong>${fmtF(rsi)}</strong>${rsiSig}</div>`;
+    }
+    if (state.selectedIndicators.has('STOCH') && stochK != null) {
+        if (!hasPrev) { html += sep; hasPrev = true; }
+        html += `<div>%K&nbsp;<strong>${fmtF(stochK)}</strong>&nbsp;%D&nbsp;<strong>${fmtF(stochD)}</strong>${stochSig}</div>`;
+    }
+    if (state.selectedIndicators.has('MACD') && macdV != null) {
+        html += sep;
+        html += `<div>MACD&nbsp;<strong>${fmtF(macdV, 0)}</strong>&nbsp;/&nbsp;Sig&nbsp;<strong>${fmtF(macdS, 0)}</strong>${macdSig}</div>`;
+    }
+    if (state.selectedIndicators.has('BOLL') && boll) {
+        html += sep;
+        html += `<div>BB상단&nbsp;<strong>${fmt(boll.upper)}</strong></div>`;
+        html += `<div>BB하단&nbsp;<strong>${fmt(boll.lower)}</strong>${bollSig}</div>`;
+    }
+    if (state.selectedIndicators.has('MA') && ma5 != null) {
+        html += sep;
+        html += `<div>MA5&nbsp;<strong>${fmt(ma5)}</strong>&nbsp;/&nbsp;MA20&nbsp;<strong>${fmt(ma20)}</strong>${maSig}</div>`;
+    }
+
+    el.innerHTML = html;
+    el.style.display = 'block';
+
+    // 커서 위치에 따라 툴팁을 반대쪽에 배치
+    if (cursorFraction > 0.5) {
+        // 커서가 오른쪽 → 툴팁은 왼쪽
+        el.style.left = '14px';
+        el.style.right = 'auto';
+    } else {
+        // 커서가 왼쪽 → 툴팁은 오른쪽
+        el.style.left = 'auto';
+        el.style.right = '14px';
+    }
+}
+
+function buildMAMarkers(technicals) {
+    const markers = [];
+    for (let i = 1; i < technicals.ma5.length; i++) {
+        const prevMa5 = technicals.ma5[i - 1];
+        const prevMa20 = technicals.ma20[i - 1];
+        const currMa5 = technicals.ma5[i];
+        const currMa20 = technicals.ma20[i];
+        if (prevMa5 === null || prevMa20 === null || currMa5 === null || currMa20 === null) continue;
+        if (prevMa5 <= prevMa20 && currMa5 > currMa20) {
+            markers.push({ index: i, type: 'buy', value: currMa5 });
+        } else if (prevMa5 >= prevMa20 && currMa5 < currMa20) {
+            markers.push({ index: i, type: 'sell', value: currMa5 });
+        }
+    }
+    return markers.slice(-10);
+}
+
+function renderIndicatorChart(data, visibleTechnicals) {
     const canvas = document.getElementById('indicator-chart');
     const context = canvas.getContext('2d');
     const wrapperWidth = canvas.parentElement.clientWidth - 36;
     canvas.width = Math.max(wrapperWidth, 320);
-    canvas.height = 280;
 
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    if (!data.length || !state.technicals) {
-        return;
-    }
-
-    const selectedOscillators = [
-        state.selectedIndicators.has('RSI') || state.selectedIndicators.has('STOCH') ? 'OSC' : null,
+    // Build panel list: each oscillator gets its own panel
+    const panels = [
+        state.selectedIndicators.has('RSI') ? 'RSI' : null,
+        state.selectedIndicators.has('STOCH') ? 'STOCH' : null,
         state.selectedIndicators.has('MACD') ? 'MACD' : null
     ].filter(Boolean);
 
-    if (!selectedOscillators.length) {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (!data.length || !panels.length) {
+        canvas.height = 48;
         context.fillStyle = '#94a3b8';
         context.font = '13px Inter';
         context.fillText('RSI, 스토캐스틱, MACD 중 하나를 선택하면 보조 차트가 표시됩니다.', 18, 30);
+        clearCanvasInteractions(canvas);
         return;
     }
 
-    const padding = { top: 16, right: 24, bottom: 22, left: 24 };
-    const panelHeight = (canvas.height - padding.top - padding.bottom - 12 * (selectedOscillators.length - 1)) / selectedOscillators.length;
-    const width = canvas.width - padding.left - padding.right;
-    const xGap = width / data.length;
-    const xAt = (index) => padding.left + xGap * index + xGap / 2;
-    const localTechnicals = computeTechnicals(data);
+    const localTechnicals = visibleTechnicals;
     if (!localTechnicals) {
+        canvas.height = 48;
         context.fillStyle = '#94a3b8';
         context.font = '13px Inter';
         context.fillText('선택한 기간의 봉 수가 충분할 때 보조 차트가 표시됩니다.', 18, 30);
+        clearCanvasInteractions(canvas);
         return;
     }
 
-    selectedOscillators.forEach((panel, panelIndex) => {
-        const top = padding.top + panelIndex * (panelHeight + 12);
-        const bottom = top + panelHeight;
-        context.strokeStyle = 'rgba(255,255,255,0.08)';
-        context.strokeRect(padding.left, top, width, panelHeight);
+    const PANEL_H = 110;
+    const GAP = 10;
+    const padding = { top: 10, right: 36, bottom: 10, left: 24 };
+    canvas.height = padding.top + panels.length * PANEL_H + (panels.length - 1) * GAP + padding.bottom;
 
-        if (panel === 'OSC') {
-            const yAt = (value) => bottom - (value / 100) * panelHeight;
-            if (state.selectedIndicators.has('RSI')) {
-                drawLineSeries(context, localTechnicals.rsi, xAt, yAt, '#8fd3ff', 2);
-            }
-            if (state.selectedIndicators.has('STOCH')) {
-                drawLineSeries(context, localTechnicals.stoch.k, xAt, yAt, '#f59e0b', 1.6);
-                drawLineSeries(context, localTechnicals.stoch.d, xAt, yAt, '#a855f7', 1.4);
-            }
+    const width = canvas.width - padding.left - padding.right;
+    const xGap = width / data.length;
+    const xAt = (index) => padding.left + xGap * index + xGap / 2;
+
+    panels.forEach((panel, panelIndex) => {
+        const top = padding.top + panelIndex * (PANEL_H + GAP);
+        const bottom = top + PANEL_H;
+
+        // ── 패널 클리핑: 다른 패널로 선이 넘치지 않도록 ──
+        context.save();
+        context.beginPath();
+        context.rect(padding.left - 2, top, width + 4, PANEL_H);
+        context.clip();
+
+        // Panel border
+        context.strokeStyle = 'rgba(255,255,255,0.07)';
+        context.lineWidth = 1;
+        context.setLineDash([]);
+        context.strokeRect(padding.left, top, width, PANEL_H);
+
+        if (panel === 'RSI') {
+            const yAt = (value) => bottom - (value / 100) * PANEL_H;
+            context.fillStyle = 'rgba(239,68,68,0.05)';
+            context.fillRect(padding.left, top, width, yAt(70) - top);
+            context.fillStyle = 'rgba(34,197,94,0.05)';
+            context.fillRect(padding.left, yAt(30), width, bottom - yAt(30));
+            [70, 50, 30].forEach((lvl) => {
+                context.strokeStyle = lvl === 50 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.15)';
+                context.setLineDash(lvl === 50 ? [] : [3, 3]);
+                context.beginPath();
+                context.moveTo(padding.left, yAt(lvl));
+                context.lineTo(canvas.width - padding.right, yAt(lvl));
+                context.stroke();
+                context.setLineDash([]);
+            });
+            drawLineSeries(context, localTechnicals.rsi, xAt, yAt, '#8fd3ff', 2);
             context.fillStyle = '#94a3b8';
             context.font = '11px Inter';
-            context.fillText('RSI / Stochastic', padding.left + 8, top + 14);
-            context.fillText('70', canvas.width - 18, yAt(70) + 4);
-            context.fillText('30', canvas.width - 18, yAt(30) + 4);
-            buildOscillatorMarkers(localTechnicals, state.selectedIndicators).forEach((marker) => {
-                drawSignalMarker(context, xAt(marker.index), yAt(marker.value), marker.type);
+            context.textAlign = 'left';
+            context.fillText('RSI (14)', padding.left + 8, top + 14);
+        }
+
+        if (panel === 'STOCH') {
+            const yAt = (value) => bottom - (value / 100) * PANEL_H;
+            context.fillStyle = 'rgba(239,68,68,0.05)';
+            context.fillRect(padding.left, top, width, yAt(75) - top);
+            context.fillStyle = 'rgba(34,197,94,0.05)';
+            context.fillRect(padding.left, yAt(25), width, bottom - yAt(25));
+            [75, 50, 25].forEach((lvl) => {
+                context.strokeStyle = lvl === 50 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.15)';
+                context.setLineDash(lvl === 50 ? [] : [3, 3]);
+                context.beginPath();
+                context.moveTo(padding.left, yAt(lvl));
+                context.lineTo(canvas.width - padding.right, yAt(lvl));
+                context.stroke();
+                context.setLineDash([]);
             });
-        } else {
+            drawLineSeries(context, localTechnicals.stoch.k, xAt, yAt, '#f59e0b', 1.8);
+            drawLineSeries(context, localTechnicals.stoch.d, xAt, yAt, '#a855f7', 1.4);
+            context.fillStyle = '#94a3b8';
+            context.font = '11px Inter';
+            context.textAlign = 'left';
+            context.fillText('Stochastic %K / %D', padding.left + 8, top + 14);
+        }
+
+        if (panel === 'MACD') {
+            const hist   = localTechnicals.macd.histogram;
             const series = localTechnicals.macd.macd;
             const signal = localTechnicals.macd.signal;
-            const hist = localTechnicals.macd.histogram;
-            const values = hist.filter((value) => value !== null);
-            const maxAbs = Math.max(...values.map((value) => Math.abs(value)), 1);
-            const yAt = (value) => top + panelHeight / 2 - (value / maxAbs) * (panelHeight / 2 - 16);
-
+            // ── scale을 hist + macd line + signal line 전체 범위 기준으로 계산 ──
+            const allVals = [...hist, ...series, ...signal].filter((v) => v !== null);
+            const maxAbs  = Math.max(...allVals.map((v) => Math.abs(v)), 1);
+            const midY    = top + PANEL_H / 2;
+            const yAt     = (value) => midY - (value / maxAbs) * (PANEL_H / 2 - 10);
+            // Zero line
+            context.strokeStyle = 'rgba(255,255,255,0.12)';
+            context.setLineDash([]);
+            context.lineWidth = 1;
+            context.beginPath();
+            context.moveTo(padding.left, midY);
+            context.lineTo(canvas.width - padding.right, midY);
+            context.stroke();
+            // Histogram bars
             hist.forEach((value, index) => {
                 if (value === null) return;
                 const x = xAt(index);
-                context.strokeStyle = value >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.8)';
+                context.strokeStyle = value >= 0 ? 'rgba(34,197,94,0.75)' : 'rgba(239,68,68,0.8)';
                 context.lineWidth = Math.max(2, xGap * 0.45);
                 context.beginPath();
                 context.moveTo(x, yAt(0));
@@ -1965,12 +2422,27 @@ function renderIndicatorChart(data) {
             drawLineSeries(context, signal, xAt, yAt, '#f59e0b', 1.6);
             context.fillStyle = '#94a3b8';
             context.font = '11px Inter';
+            context.textAlign = 'left';
             context.fillText('MACD', padding.left + 8, top + 14);
-            buildMacdMarkers(localTechnicals.macd).forEach((marker) => {
-                drawSignalMarker(context, xAt(marker.index), yAt(marker.value), marker.type);
-            });
+        }
+
+        context.restore(); // 클리핑 해제
+
+        // 라벨은 클리핑 밖 (오른쪽 숫자)
+        context.fillStyle = '#64748b';
+        context.font = '10px Inter';
+        context.textAlign = 'left';
+        if (panel === 'RSI') {
+            const yAt = (v) => bottom - (v / 100) * PANEL_H;
+            [70, 50, 30].forEach((lvl) => context.fillText(String(lvl), canvas.width - padding.right + 4, yAt(lvl) + 4));
+        }
+        if (panel === 'STOCH') {
+            const yAt = (v) => bottom - (v / 100) * PANEL_H;
+            [75, 50, 25].forEach((lvl) => context.fillText(String(lvl), canvas.width - padding.right + 4, yAt(lvl) + 4));
         }
     });
+
+    setupZoomPan(canvas, padding.left, padding.right);
 }
 
 function renderChartLegend() {
@@ -1993,12 +2465,32 @@ function renderChartLegend() {
 }
 
 function renderTechLegend() {
-    const items = [
-        { type: 'line', color: '#8fd3ff', label: '기술 지표선' },
-        { type: 'line', color: '#f59e0b', label: '보조 신호선' },
+    const base = [
+        { type: 'dot', color: '#22c55e', label: '상승 봉' },
+        { type: 'dot', color: '#ef4444', label: '하락 봉' },
         { type: 'dot', color: '#22c55e', label: '매수 시그널' },
         { type: 'dot', color: '#ef4444', label: '매도 시그널' }
     ];
+    const optional = [];
+    if (state.selectedIndicators.has('BOLL')) {
+        optional.push({ type: 'line', color: 'rgba(143,211,255,0.7)', label: '볼린저 밴드' });
+    }
+    if (state.selectedIndicators.has('MA')) {
+        optional.push({ type: 'line', color: '#8fd3ff', label: 'MA5' });
+        optional.push({ type: 'line', color: '#f59e0b', label: 'MA20' });
+    }
+    if (state.selectedIndicators.has('RSI')) {
+        optional.push({ type: 'line', color: '#8fd3ff', label: 'RSI' });
+    }
+    if (state.selectedIndicators.has('STOCH')) {
+        optional.push({ type: 'line', color: '#f59e0b', label: 'Stoch %K' });
+        optional.push({ type: 'line', color: '#a855f7', label: 'Stoch %D' });
+    }
+    if (state.selectedIndicators.has('MACD')) {
+        optional.push({ type: 'line', color: '#8fd3ff', label: 'MACD' });
+        optional.push({ type: 'line', color: '#f59e0b', label: 'Signal' });
+    }
+    const items = [...base, ...optional];
 
     document.getElementById('tech-legend').innerHTML = items.map((item) => `
         <span class="legend-chip">

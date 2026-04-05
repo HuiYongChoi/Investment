@@ -538,6 +538,38 @@
         return normalizeChartWindow(totalPoints, current.start + (Number(deltaPoints) || 0), current.end - current.start, 1);
     }
 
+    function sliceChartSeriesWindow(series, window) {
+        const list = Array.isArray(series) ? series : [];
+        const total = list.length;
+        const normalized = normalizeChartWindow(
+            total,
+            window?.start ?? 0,
+            (window?.end ?? total) - (window?.start ?? 0),
+            1
+        );
+        return list.slice(normalized.start, normalized.end);
+    }
+
+    function sliceTechnicalSeriesWindow(technicals, window) {
+        if (!technicals) return null;
+        return {
+            ...technicals,
+            ma5: sliceChartSeriesWindow(technicals.ma5, window),
+            ma20: sliceChartSeriesWindow(technicals.ma20, window),
+            rsi: sliceChartSeriesWindow(technicals.rsi, window),
+            macd: {
+                macd: sliceChartSeriesWindow(technicals.macd?.macd, window),
+                signal: sliceChartSeriesWindow(technicals.macd?.signal, window),
+                histogram: sliceChartSeriesWindow(technicals.macd?.histogram, window)
+            },
+            stoch: {
+                k: sliceChartSeriesWindow(technicals.stoch?.k, window),
+                d: sliceChartSeriesWindow(technicals.stoch?.d, window)
+            },
+            boll: sliceChartSeriesWindow(technicals.boll, window)
+        };
+    }
+
     function resolveChartTooltipLayout(options) {
         const config = options || {};
         const bounds = config.bounds || {};
@@ -733,6 +765,8 @@
         normalizeYfinanceChartRows,
         normalizeYfinanceQuote,
         panChartWindow,
+        sliceChartSeriesWindow,
+        sliceTechnicalSeriesWindow,
         resolveChartTooltipLayout,
         resolveChartSeries,
         resolveKakaoCallbackUri,

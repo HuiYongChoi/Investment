@@ -301,6 +301,35 @@ assert(zoomedWindow.start === 25 && zoomedWindow.end === 75, 'Chart zoom helper 
 const pannedWindow = InvestmentLogic.panChartWindow({ start: 25, end: 75 }, 20, 100);
 assert(pannedWindow.start === 45 && pannedWindow.end === 95, 'Chart pan helper should move the window without changing its size');
 
+const slicedSeries = InvestmentLogic.sliceChartSeriesWindow([10, 20, 30, 40], { start: 1, end: 3 });
+assert(slicedSeries.length === 2 && slicedSeries[0] === 20 && slicedSeries[1] === 30, 'Chart series slicing should follow the shared viewport window');
+
+const slicedTechnicals = InvestmentLogic.sliceTechnicalSeriesWindow({
+    ma5: [1, 2, 3, 4],
+    ma20: [10, 20, 30, 40],
+    rsi: [11, 22, 33, 44],
+    macd: {
+        macd: [101, 102, 103, 104],
+        signal: [201, 202, 203, 204],
+        histogram: [301, 302, 303, 304]
+    },
+    stoch: {
+        k: [51, 52, 53, 54],
+        d: [61, 62, 63, 64]
+    },
+    boll: [
+        null,
+        { upper: 1, middle: 2, lower: 3 },
+        { upper: 4, middle: 5, lower: 6 },
+        { upper: 7, middle: 8, lower: 9 }
+    ],
+    cards: [{ key: 'RSI' }]
+}, { start: 1, end: 4 });
+assert(slicedTechnicals.ma5.join(',') === '2,3,4', 'Sliced technical overlays should follow the chart window');
+assert(slicedTechnicals.macd.signal.join(',') === '202,203,204', 'Nested MACD series should slice with the shared viewport');
+assert(slicedTechnicals.stoch.k.join(',') === '52,53,54', 'Nested stochastic series should slice with the shared viewport');
+assert(slicedTechnicals.boll[0].middle === 2 && slicedTechnicals.boll[2].middle === 8, 'Bollinger window slicing should preserve visible indicator points');
+
 const tooltipRight = InvestmentLogic.resolveChartTooltipLayout({
     anchorX: 60,
     anchorY: 20,
@@ -365,6 +394,9 @@ assert(phpProxySource.includes('$nameHint = trim((string) ($_GET[\'name_hint\'] 
 assert(scriptSource.includes("event.key === 'ArrowDown'"), 'Search input should support arrow-down autocomplete navigation');
 assert(scriptSource.includes('syncCompanyInputValue(company);'), 'Search should synchronize the input text with the resolved autocomplete match');
 assert(!scriptSource.includes('companyInput.value = selected.displayLabel;'), 'Arrow-key navigation should not overwrite the typed input before the selection is committed');
+assert(scriptSource.includes('const fullRangeTechnicals = computeTechnicals(state.chartFullSeries);'), 'Charts should compute technical series from the full selected range before slicing the viewport');
+assert(scriptSource.includes('InvestmentLogic.sliceTechnicalSeriesWindow(fullRangeTechnicals, state.chartWindow)'), 'Technical overlays should slice from the shared viewport state');
+assert(scriptSource.includes('setupZoomPan(canvas, padding.left, padding.right);'), 'Indicator chart should attach the shared zoom/pan behavior');
 assert(scriptSource.includes('InvestmentLogic.groupReportsBySection(reports)'), 'Report rendering should use grouped annual and quarterly sections');
 assert(scriptSource.includes('class="report-year-toggle"'), 'Quarterly report groups should render toggle buttons per fiscal year');
 assert(scriptSource.includes('class="report-section-toggle"'), 'Report sections should render toggle buttons so annual and quarterly blocks can start collapsed');
