@@ -1408,6 +1408,87 @@ header#header {
     overflow-x: auto;
 }
 
+.fin-toolbar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+}
+
+.fin-period-control {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 220px;
+}
+
+.fin-period-control span {
+    font-size: 0.76rem;
+    font-weight: 800;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.fin-period-select {
+    max-width: 220px;
+}
+
+.fin-period-loading {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(79, 140, 255, 0.14);
+    background: rgba(79, 140, 255, 0.08);
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.fin-spinner {
+    width: 14px;
+    height: 14px;
+    display: inline-block;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    border-top-color: #7dd3fc;
+    animation: spin 0.85s linear infinite;
+}
+
+.fin-history-section {
+    position: relative;
+}
+
+.fin-history-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    backdrop-filter: blur(6px);
+    background: rgba(2, 6, 23, 0.24);
+    border-radius: 18px;
+}
+
+.fin-history-overlay-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(79, 140, 255, 0.18);
+    background: rgba(10, 16, 28, 0.88);
+    color: var(--text-primary);
+    font-size: 0.86rem;
+    font-weight: 700;
+    box-shadow: 0 20px 48px rgba(2, 6, 23, 0.32);
+}
+
 .section-title {
     margin-bottom: 12px;
     font-size: 0.9rem;
@@ -1473,6 +1554,13 @@ header#header {
 
 .fin-chg.bad {
     color: #f87171;
+}
+
+.fin-meta {
+    display: block;
+    margin-top: 3px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
 }
 
 .input-grid {
@@ -2023,6 +2111,21 @@ header#header {
 
     .valuation-tracks {
         grid-template-columns: 1fr;
+    }
+
+    .fin-toolbar {
+        align-items: stretch;
+    }
+
+    .fin-period-control,
+    .fin-period-select {
+        width: 100%;
+        max-width: none;
+    }
+
+    .fin-period-loading {
+        width: 100%;
+        justify-content: center;
     }
 
     .header-actions {

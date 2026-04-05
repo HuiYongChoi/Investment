@@ -67,6 +67,7 @@ const FALLBACK_COMPANY_DIRECTORY = InvestmentLogic.buildCompanyDirectory(COMPANY
 const state = {
     company: null,
     annuals: [],
+    annualsAll: [],
     quarterlies: [],
     reports: [],
     quote: null,
@@ -96,6 +97,9 @@ const state = {
     technicals: null,
     ratings: null,
     metrics: null,
+    historicalMetrics: [],
+    financialHistoryRange: 3,
+    financialPriceHistory: [],
     summaries: [],
     briefingMode: 'idle',
     mobileTab: 'home',
@@ -120,6 +124,7 @@ function bindEvents() {
     const companyInput = document.getElementById('company-input');
     const suggestionBox = document.getElementById('company-suggestions');
     const sectorPresetSelect = document.getElementById('m-sector-preset');
+    const financialPeriodSelect = document.getElementById('fin-period-select');
     document.getElementById('search-btn').addEventListener('click', startSearch);
     companyInput.addEventListener('input', (event) => {
         updateCompanySuggestions(event.target.value);
@@ -171,6 +176,9 @@ function bindEvents() {
     document.getElementById('indicator-toggle').addEventListener('click', onIndicatorToggle);
     if (sectorPresetSelect) {
         sectorPresetSelect.addEventListener('change', onValuationSectorPresetChange);
+    }
+    if (financialPeriodSelect) {
+        financialPeriodSelect.addEventListener('change', onFinancialPeriodChange);
     }
     document.querySelectorAll('[data-number-format="won"]').forEach((input) => {
         if (input.readOnly) return;
@@ -845,6 +853,7 @@ async function startSearch() {
     state.analysisToken = analysisToken;
     state.company = company;
     state.annuals = [];
+    state.annualsAll = [];
     state.quarterlies = [];
     state.reports = [];
     state.quote = null;
@@ -868,6 +877,9 @@ async function startSearch() {
     state.technicalsFullSignature = '';
     state.ratings = null;
     state.metrics = null;
+    state.historicalMetrics = [];
+    state.financialHistoryRange = 3;
+    state.financialPriceHistory = [];
     state.summaries = [];
     state.lastAnalysis = { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] };
     priceHoverIndex = null;
@@ -885,9 +897,12 @@ async function startSearch() {
     syncMobileTabUI();
     document.getElementById('stock-realtime').classList.add('hidden');
     document.getElementById('stock-realtime').innerHTML = '';
+    document.getElementById('fin-period-select').value = '3';
+    setFinancialHistoryLoading(false);
     resetMetricManualInputs();
     renderReports([]);
     renderFinancialTable('fin-annual-table', []);
+    renderHistoricalMetricsTable('fin-metrics-table', []);
     renderFinancialTable('fin-quarterly-table', []);
     renderTechnicalCards();
     renderTechSummary();
@@ -920,17 +935,20 @@ async function startSearch() {
         if (dailyPoints.length) {
             state.chartDaily = dailyPoints;
             state.chartWeekly = aggregateCandles(dailyPoints, 'week');
+            state.financialPriceHistory = dailyPoints.slice();
             state.chartSource = 'yfinance_python';
             writeChartCache(company.stockCode, state.chartDaily, state.chartWeekly);
             setSourceBadge('source-market', 'Yahoo Finance 차트 연동됨', 'success');
         } else if (cachedChart) {
             state.chartDaily = cachedChart.daily;
             state.chartWeekly = cachedChart.weekly.length ? cachedChart.weekly : aggregateCandles(cachedChart.daily, 'week');
+            state.financialPriceHistory = cachedChart.daily.slice();
             state.chartSource = 'cache';
             setSourceBadge('source-market', 'Yahoo Finance 실패 · 저장된 마지막 차트 사용', 'warn');
         } else {
             state.chartDaily = [];
             state.chartWeekly = [];
+            state.financialPriceHistory = [];
             state.chartSource = 'unavailable';
             setSourceBadge('source-market', dailyChartPayload.error || 'Yahoo Finance 차트를 불러오지 못했습니다.', 'error');
         }
@@ -952,14 +970,10 @@ async function startSearch() {
         renderReports(state.reports);
 
         if (annualsResult.status === 'fulfilled' && annualsResult.value.length) {
-            state.annuals = annualsResult.value;
+            state.annualsAll = annualsResult.value;
+            state.annuals = annualsResult.value.slice(0, state.financialHistoryRange);
             state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
-            state.summaries = state.annuals.map((item) => ({
-                ...item,
-                summary: item.summary || summarizeStatement(item.list)
-            }));
-            applySummaryAnomalies();
-            renderFinancialTable('fin-annual-table', state.annuals);
+            syncFinancialHistoryViews();
             renderFinancialTable('fin-quarterly-table', state.quarterlies);
             const valuationSnapshot = state.quote || latestChartPoint || null;
             autoFillMetrics(state.summaries[0]?.summary || {}, valuationSnapshot, state.summaries[1]?.summary || null);
@@ -968,10 +982,12 @@ async function startSearch() {
             setSourceBadge('source-dart', 'DART 공시 연동됨', 'success');
         } else {
             state.annuals = [];
+            state.annualsAll = [];
             state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
             state.summaries = [];
             applySummaryAnomalies();
             renderFinancialTable('fin-annual-table', []);
+            renderHistoricalMetricsTable('fin-metrics-table', []);
             renderFinancialTable('fin-quarterly-table', state.quarterlies);
             setSourceBadge('source-dart', 'DART 재무제표를 불러오지 못했습니다.', 'error');
         }
@@ -991,6 +1007,9 @@ async function startSearch() {
         }
         renderStockStrip(state.quote, latestChartPoint);
         if (state.summaries.length) {
+            if (state.annualsAll.length) {
+                syncFinancialHistoryViews();
+            }
             autoFillMetrics(state.summaries[0]?.summary || {}, state.quote || latestChartPoint || null, state.summaries[1]?.summary || null);
             calcMetrics();
             buildRatings();
@@ -1217,34 +1236,73 @@ function writeChartCache(stockCode, daily, weekly) {
     }
 }
 
-async function fetchMultiYearDart(corpCode) {
-    const currentYear = getCurrentYearKst();
-    const results = [];
+async function fetchAnnualDartYear(corpCode, year) {
+    const [statementResult, shareResult] = await Promise.allSettled([
+        fetchJson(buildProxyUrl('dart', '/fnlttSinglAcnt.json', {
+            corp_code: corpCode,
+            bsns_year: year,
+            reprt_code: '11011'
+        })),
+        fetchJson(buildProxyUrl('dart', '/stockTotqySttus.json', {
+            corp_code: corpCode,
+            bsns_year: year,
+            reprt_code: '11011'
+        }))
+    ]);
 
-    for (let year = currentYear - 1; year >= currentYear - 5 && results.length < 3; year -= 1) {
-        try {
-            const data = await fetchJson(buildProxyUrl('dart', '/fnlttSinglAcnt.json', {
-                corp_code: corpCode,
-                bsns_year: year,
-                reprt_code: '11011'
-            }));
-            if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
-                results.push({
-                    year,
-                    label: `${year} 사업보고서`,
-                    period: 'ANNUAL',
-                    reportCode: '11011',
-                    rank: 4,
-                    annual: true,
-                    list: data.list
-                });
-            }
-        } catch (error) {
-            continue;
-        }
+    if (statementResult.status !== 'fulfilled') {
+        return null;
     }
 
-    return InvestmentLogic.buildDartAnnualPeriods(results, 3);
+    const annualPayload = statementResult.value;
+    if (annualPayload.status !== '000' || !Array.isArray(annualPayload.list) || !annualPayload.list.length) {
+        return null;
+    }
+
+    const shareList = shareResult.status === 'fulfilled' && shareResult.value?.status === '000' && Array.isArray(shareResult.value.list)
+        ? shareResult.value.list
+        : [];
+    const summary = summarizeStatement(annualPayload.list);
+
+    return {
+        year,
+        label: `${year} 사업보고서`,
+        period: 'ANNUAL',
+        reportCode: '11011',
+        rank: 4,
+        annual: true,
+        sortKey: year * 10 + 4,
+        shareCount: InvestmentLogic.extractAnnualShareCount(shareList),
+        list: annualPayload.list,
+        summary
+    };
+}
+
+async function fetchAnnualDartBatch(corpCode, years) {
+    const settled = await Promise.allSettled((years || []).map((year) => fetchAnnualDartYear(corpCode, year)));
+    return settled
+        .filter((result) => result.status === 'fulfilled' && result.value)
+        .map((result) => result.value);
+}
+
+async function fetchMultiYearDart(corpCode, limit = 3, excludedYears = []) {
+    const currentYear = getCurrentYearKst();
+    const skipYears = new Set((excludedYears || []).map((year) => Number(year)).filter(Boolean));
+    const results = [];
+    const candidateYears = [];
+
+    for (let year = currentYear - 1; year >= currentYear - 15; year -= 1) {
+        if (skipYears.has(year)) continue;
+        candidateYears.push(year);
+    }
+
+    for (let index = 0; index < candidateYears.length && results.length < limit; index += 3) {
+        const batchYears = candidateYears.slice(index, index + 3);
+        const batchResults = await fetchAnnualDartBatch(corpCode, batchYears);
+        results.push(...batchResults);
+    }
+
+    return InvestmentLogic.buildDartAnnualPeriods(results, limit);
 }
 
 async function fetchQuarterlyHistory(corpCode) {
@@ -1557,6 +1615,200 @@ function renderFinancialTable(containerId, periods) {
             <tbody>${body}</tbody>
         </table>
     `;
+}
+
+function renderHistoricalMetricsTable(containerId, rows) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (!rows.length) {
+        container.innerHTML = '<div class="report-item">연도별 투자 지표를 계산할 데이터가 아직 없습니다.</div>';
+        return;
+    }
+
+    const metricRows = [
+        { label: '연말 종가', key: 'yearEndClose', type: 'money' },
+        { label: '발행주식수', key: 'shareCount', type: 'shares' },
+        { label: 'EPS', key: 'eps', type: 'money' },
+        { label: 'BPS', key: 'bps', type: 'money' },
+        { label: 'PER', key: 'per', type: 'multiple' },
+        { label: 'PBR', key: 'pbr', type: 'multiple' },
+        { label: 'ROE', key: 'roe', type: 'pct' },
+        { label: 'ROIC', key: 'roic', type: 'pct' }
+    ];
+
+    const headerCells = rows.map((row) => `<th>${row.year}</th>`).join('');
+    const body = metricRows.map((metric) => `
+        <tr>
+            <td>${metric.label}</td>
+            ${rows.map((row) => {
+                const metaText = metric.key === 'yearEndClose' && row.yearEndClose !== null && row.yearEndClose !== undefined
+                    ? '<span class="fin-meta">해당 연도 마지막 종가</span>'
+                    : '';
+                return `<td><span class="fin-val">${formatMetricValue(row[metric.key], metric.type)}</span>${metaText}</td>`;
+            }).join('')}
+        </tr>
+    `).join('');
+
+    container.innerHTML = `
+        <table class="fin-table">
+            <thead>
+                <tr>
+                    <th>항목</th>
+                    ${headerCells}
+                </tr>
+            </thead>
+            <tbody>${body}</tbody>
+        </table>
+    `;
+}
+
+function setFinancialHistoryLoading(isLoading, message = '') {
+    const loadingChip = document.getElementById('fin-period-loading');
+    const overlay = document.getElementById('fin-history-overlay');
+    const periodSelect = document.getElementById('fin-period-select');
+    if (loadingChip) {
+        loadingChip.classList.toggle('hidden', !isLoading);
+        const textNode = loadingChip.querySelector('span:last-child');
+        if (textNode && message) {
+            textNode.textContent = message;
+        }
+    }
+    if (overlay) {
+        overlay.classList.toggle('hidden', !isLoading);
+    }
+    if (periodSelect) {
+        periodSelect.disabled = isLoading;
+    }
+}
+
+function getSelectedFinancialHistoryYears() {
+    const select = document.getElementById('fin-period-select');
+    const value = Number(select?.value || state.financialHistoryRange || 3);
+    return [3, 5, 10].includes(value) ? value : 3;
+}
+
+function mergePriceHistoryRows(existingRows, incomingRows) {
+    const merged = new Map();
+    [...(existingRows || []), ...(incomingRows || [])]
+        .filter((row) => row && row.date)
+        .forEach((row) => {
+            merged.set(row.date, row);
+        });
+
+    return Array.from(merged.values()).sort((left, right) => left.date.localeCompare(right.date));
+}
+
+async function ensureHistoricalPriceCoverage(company, periods, analysisToken) {
+    if (!company?.stockCode || !periods.length) return;
+
+    const years = periods
+        .map((period) => Number(period?.year) || 0)
+        .filter(Boolean);
+    if (!years.length) return;
+
+    const earliestNeededYear = Math.min(...years);
+    const oldestAvailableYear = state.financialPriceHistory.length
+        ? Number(String(state.financialPriceHistory[0].date || '').slice(0, 4)) || Infinity
+        : Infinity;
+
+    if (oldestAvailableYear <= earliestNeededYear) {
+        return;
+    }
+
+    const endDate = Number.isFinite(oldestAvailableYear) && oldestAvailableYear !== Infinity
+        ? `${oldestAvailableYear - 1}1231`
+        : getCurrentDateTokenKst();
+    const pricePayload = await fetchYfinanceChart(
+        company.stockCode,
+        company.market,
+        'daily',
+        `${earliestNeededYear}0101`,
+        endDate,
+        buildCompanyNameHint(company)
+    ).catch(() => ({ live: false, rows: [] }));
+    if (analysisToken !== state.analysisToken || !pricePayload?.live) {
+        return;
+    }
+
+    const normalizedRows = InvestmentLogic.normalizeYfinanceChartRows(pricePayload.rows, {
+        startDate: `${earliestNeededYear}0101`
+    });
+    if (normalizedRows.length) {
+        state.financialPriceHistory = mergePriceHistoryRows(normalizedRows, state.financialPriceHistory);
+    }
+}
+
+function syncFinancialHistoryViews() {
+    state.annuals = state.annualsAll.slice(0, state.financialHistoryRange);
+    state.summaries = state.annuals.map((item) => ({
+        ...item,
+        summary: item.summary || summarizeStatement(item.list)
+    }));
+    applySummaryAnomalies();
+    renderFinancialTable('fin-annual-table', state.annuals);
+    const priceMap = InvestmentLogic.buildYearEndCloseMap(
+        state.financialPriceHistory.length ? state.financialPriceHistory : state.chartDaily
+    );
+    state.historicalMetrics = InvestmentLogic.buildHistoricalInvestmentRows(
+        state.annuals,
+        priceMap,
+        state.quote?.sharesOutstanding || 0
+    );
+    renderHistoricalMetricsTable('fin-metrics-table', state.historicalMetrics);
+}
+
+async function ensureFinancialHistoryCoverage(desiredYears, analysisToken = state.analysisToken) {
+    if (!state.company?.corpCode) return;
+
+    const nextYears = [3, 5, 10].includes(Number(desiredYears)) ? Number(desiredYears) : 3;
+    const loadedYears = new Set((state.annualsAll || []).map((period) => Number(period?.year)).filter(Boolean));
+    const missingCount = Math.max(0, nextYears - loadedYears.size);
+
+    if (missingCount > 0) {
+        const fetchedPeriods = await fetchMultiYearDart(state.company.corpCode, missingCount, Array.from(loadedYears));
+        if (analysisToken !== state.analysisToken) return;
+        state.annualsAll = InvestmentLogic.mergeAnnualHistoryPeriods(state.annualsAll, fetchedPeriods);
+    }
+
+    state.financialHistoryRange = nextYears;
+    await ensureHistoricalPriceCoverage(state.company, state.annualsAll.slice(0, nextYears), analysisToken);
+    if (analysisToken !== state.analysisToken) return;
+
+    syncFinancialHistoryViews();
+}
+
+async function onFinancialPeriodChange(event) {
+    const targetYears = Number(event.target?.value || 3);
+    if (!state.company || !state.annualsAll.length) {
+        state.financialHistoryRange = targetYears;
+        return;
+    }
+
+    const activeToken = state.analysisToken;
+    setFinancialHistoryLoading(true, `${targetYears}년 조회를 위해 과거 연도를 추가 조회하는 중입니다.`);
+    setStatus(`${state.company.name}의 최근 ${targetYears}년 재무와 투자 지표를 불러오는 중입니다.`);
+    try {
+        await ensureFinancialHistoryCoverage(targetYears, activeToken);
+        if (activeToken !== state.analysisToken) return;
+        if (state.quote || state.chartDaily.length) {
+            autoFillMetrics(
+                state.summaries[0]?.summary || {},
+                state.quote || state.chartDaily[state.chartDaily.length - 1] || null,
+                state.summaries[1]?.summary || null
+            );
+            calcMetrics();
+            buildRatings();
+        }
+        setStatus(`${state.company.name}의 최근 ${targetYears}년 재무와 투자 지표를 갱신했습니다.`, 'success');
+    } catch (error) {
+        console.error(error);
+        if (activeToken !== state.analysisToken) return;
+        setStatus(error.message || '과거 재무 조회 중 오류가 발생했습니다.', 'error');
+    } finally {
+        if (activeToken === state.analysisToken) {
+            setFinancialHistoryLoading(false);
+        }
+    }
 }
 
 function renderStockStrip(quote, chartPoint) {
@@ -3742,6 +3994,8 @@ function formatMetricValue(value, type) {
     if (value === null || value === undefined || Number.isNaN(value)) return '-';
     if (type === 'money') return formatKoreanMoney(value);
     if (type === 'pct') return `${value.toFixed(1)}%`;
+    if (type === 'multiple') return `${value.toFixed(1)}배`;
+    if (type === 'shares') return `${formatCompact(value)}주`;
     return String(value);
 }
 

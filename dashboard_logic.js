@@ -1240,6 +1240,107 @@
         return periods.slice().sort((left, right) => right.sortKey - left.sortKey);
     }
 
+    function extractAnnualShareCount(rows) {
+        const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
+        if (!list.length) return 0;
+
+        const preferredRows = [
+            ...list.filter((row) => String(row?.se || '').trim() === '합계'),
+            ...list.filter((row) => String(row?.se || '').trim() !== '합계')
+        ];
+
+        for (const row of preferredRows) {
+            const candidates = [
+                row?.istc_totqy,
+                row?.distb_stock_co,
+                row?.now_to_isu_stock_totqy,
+                row?.isu_stock_totqy
+            ];
+            for (const candidate of candidates) {
+                const parsed = parseNumberText(candidate);
+                if (parsed && parsed > 0) {
+                    return parsed;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    function mergeAnnualHistoryPeriods(existingPeriods, incomingPeriods) {
+        const merged = new Map();
+        [...(existingPeriods || []), ...(incomingPeriods || [])]
+            .filter(Boolean)
+            .forEach((period) => {
+                const year = Number(period?.year) || 0;
+                if (!year) return;
+                const previous = merged.get(year);
+                merged.set(year, {
+                    ...(previous || {}),
+                    ...period,
+                    year
+                });
+            });
+
+        return Array.from(merged.values())
+            .sort((left, right) => (right.year || 0) - (left.year || 0))
+            .map((period) => ({
+                ...period,
+                sortKey: period.sortKey || ((period.year || 0) * 10) + 4
+            }));
+    }
+
+    function buildYearEndCloseMap(points) {
+        return (Array.isArray(points) ? points : []).reduce((accumulator, point) => {
+            const date = String(point?.date || '').trim();
+            const year = Number(date.slice(0, 4)) || 0;
+            const close = parseNumberText(point?.close);
+            if (!year || !Number.isFinite(close)) return accumulator;
+            accumulator[year] = close;
+            return accumulator;
+        }, {});
+    }
+
+    function computeHistoricalRoic(summary) {
+        const operatingIncome = parseNumberText(summary?.operatingIncome) ?? 0;
+        const equity = parseNumberText(summary?.equity) ?? 0;
+        const liabilities = parseNumberText(summary?.liabilities) ?? 0;
+        const currentLiabilities = parseNumberText(summary?.currentLiabilities) ?? 0;
+        const investedCapital = equity + Math.max(liabilities - currentLiabilities, 0);
+        return percentage(operatingIncome, investedCapital);
+    }
+
+    function buildHistoricalInvestmentRows(periods, yearEndCloseMap, fallbackShareCount) {
+        const closeMap = yearEndCloseMap || {};
+        const defaultShareCount = parseNumberText(fallbackShareCount) ?? 0;
+
+        return (Array.isArray(periods) ? periods : [])
+            .filter(Boolean)
+            .map((period) => {
+                const summary = period?.summary || {};
+                const shareCount = parseNumberText(period?.shareCount) ?? defaultShareCount;
+                const close = parseNumberText(closeMap[period?.year]);
+                const eps = shareCount > 0 ? safeDivide(parseNumberText(summary?.netIncome) ?? 0, shareCount) : null;
+                const bps = shareCount > 0 ? safeDivide(parseNumberText(summary?.equity) ?? 0, shareCount) : null;
+                const per = close !== null && eps && eps > 0 ? safeDivide(close, eps) : null;
+                const pbr = close !== null && bps && bps > 0 ? safeDivide(close, bps) : null;
+
+                return {
+                    year: Number(period?.year) || 0,
+                    label: period?.label || '',
+                    yearEndClose: close,
+                    shareCount: shareCount || null,
+                    eps,
+                    bps,
+                    per,
+                    pbr,
+                    roe: parseNumberText(summary?.roe),
+                    roic: computeHistoricalRoic(summary)
+                };
+            })
+            .sort((left, right) => (right.year || 0) - (left.year || 0));
+    }
+
     function parseAbsoluteUrl(value) {
         const match = String(value || '').trim().match(/^(https?):\/\/([^\/?#]+)(\/[^?#]*)?(\?[^#]*)?(#.*)?$/i);
         if (!match) return null;
@@ -1339,11 +1440,15 @@
         clearKakaoSessionState,
         describePriceDelta,
         detectAnomalies,
+        extractAnnualShareCount,
         extractKakaoProfile,
         generateAnchoredSyntheticChart,
         groupReportsBySection,
         getQuarterlyReportConfigs,
+        buildHistoricalInvestmentRows,
+        buildYearEndCloseMap,
         matchCompanies,
+        mergeAnnualHistoryPeriods,
         mergeCompanyDirectories,
         moveSuggestionSelectionIndex,
         normalizeChartWindow,

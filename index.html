@@ -323,9 +323,33 @@
                     <p class="card-sub">연간/분기 실적과 주요 비율을 함께 보여줍니다.</p>
                 </div>
             </div>
-            <div class="fin-section">
+            <div class="fin-toolbar">
+                <label class="fin-period-control" for="fin-period-select">
+                    <span>조회 기간</span>
+                    <select id="fin-period-select" class="tech-in tech-select fin-period-select">
+                        <option value="3">최근 3년</option>
+                        <option value="5">최근 5년</option>
+                        <option value="10">최근 10년</option>
+                    </select>
+                </label>
+                <div class="fin-period-loading hidden" id="fin-period-loading" aria-live="polite">
+                    <span class="fin-spinner" aria-hidden="true"></span>
+                    <span>부족한 과거 연도를 추가 조회하는 중입니다.</span>
+                </div>
+            </div>
+            <div class="fin-section fin-history-section">
+                <div class="fin-history-overlay hidden" id="fin-history-overlay" aria-hidden="true">
+                    <div class="fin-history-overlay-card">
+                        <span class="fin-spinner" aria-hidden="true"></span>
+                        <span>과거 연도 재무와 투자 지표를 불러오는 중입니다.</span>
+                    </div>
+                </div>
                 <h3 class="section-title">연간 실적</h3>
                 <div id="fin-annual-table" class="table-wrap"></div>
+                <h3 class="section-title">투자 지표</h3>
+                <div id="fin-metrics-table" class="table-wrap"></div>
+            </div>
+            <div class="fin-section">
                 <h3 class="section-title">분기 실적</h3>
                 <div id="fin-quarterly-table" class="table-wrap"></div>
             </div>
