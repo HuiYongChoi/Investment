@@ -1424,12 +1424,48 @@ header#header {
     color: var(--text-secondary);
     font-size: 0.78rem;
     font-weight: 800;
+    transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
 }
 
 .sector-badge-accent {
     background: rgba(34, 211, 238, 0.12);
     color: #d8fbff;
     border-color: rgba(34, 211, 238, 0.18);
+}
+
+.sector-badge-ai {
+    color: #dcebff;
+    background: linear-gradient(180deg, rgba(79, 140, 255, 0.22), rgba(38, 72, 150, 0.14));
+    border-color: rgba(116, 173, 255, 0.42);
+    box-shadow: 0 0 0 1px rgba(116, 173, 255, 0.08), 0 10px 24px rgba(59, 130, 246, 0.16);
+}
+
+.sector-badge-bio {
+    color: #dcfff1;
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.2), rgba(5, 97, 72, 0.14));
+    border-color: rgba(52, 211, 153, 0.36);
+    box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.08), 0 10px 24px rgba(16, 185, 129, 0.14);
+}
+
+.sector-badge-growth {
+    color: #ffeac7;
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.22), rgba(120, 66, 18, 0.14));
+    border-color: rgba(251, 191, 36, 0.38);
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.08), 0 10px 24px rgba(245, 158, 11, 0.16);
+}
+
+.sector-badge-value {
+    color: #f1f6ff;
+    background: linear-gradient(180deg, rgba(148, 163, 184, 0.2), rgba(71, 85, 105, 0.16));
+    border-color: rgba(148, 163, 184, 0.34);
+    box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.07), 0 10px 24px rgba(71, 85, 105, 0.14);
+}
+
+.sector-badge-industrial {
+    color: #fff0dc;
+    background: linear-gradient(180deg, rgba(249, 115, 22, 0.2), rgba(124, 45, 18, 0.14));
+    border-color: rgba(251, 146, 60, 0.36);
+    box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.08), 0 10px 24px rgba(249, 115, 22, 0.14);
 }
 
 .metrics-guide-copy {
@@ -1470,6 +1506,7 @@ header#header {
 
 .metric-result-primary .mt-value {
     font-size: 1.72rem;
+    line-height: 1.25;
 }
 
 .mt-label,
@@ -1848,6 +1885,10 @@ header#header {
     .technical-grid,
     .metrics-grid {
         grid-template-columns: 1fr;
+    }
+
+    .metric-result-primary {
+        grid-column: span 1;
     }
 
     .card {

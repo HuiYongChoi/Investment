@@ -389,17 +389,21 @@ assert(intelligentMachinesPreset.label === '지능형 기계 (AI/반도체/로�
 assert(intelligentMachinesPreset.targetPer === 22, 'Intelligent machines preset should auto-fill the target PER to 22x');
 assert(intelligentMachinesPreset.requiredReturn === 6, 'Intelligent machines preset should auto-fill the required return to 6%');
 assert(intelligentMachinesPreset.premiumRate === 25, 'Intelligent machines preset should expose a 25% intangible premium');
-assert(intelligentMachinesPreset.guideText.includes('HBM'), 'Intelligent machines preset should expose the AI-cycle guidance copy');
+assert(intelligentMachinesPreset.guideText === 'AI 슈퍼사이클 및 로보틱스 융합 가치 할증 적용 중', 'Intelligent machines preset should expose the final dynamic guide copy');
+assert(intelligentMachinesPreset.badgeTone === 'sector-badge-ai', 'Intelligent machines preset should expose the blue premium badge tone');
 
 const biotechPreset = InvestmentLogic.resolveValuationSectorPreset('biotech_innovation');
 assert(biotechPreset.targetPer === 35, 'Biotech preset should auto-fill the target PER to 35x');
 assert(biotechPreset.requiredReturn === 12, 'Biotech preset should auto-fill the required return to 12%');
 assert(biotechPreset.premiumRate === 40, 'Biotech preset should expose a 40% intangible premium');
+assert(biotechPreset.guideText === '임상 파이프라인 및 미래 신약 특허 가치 집중 반영 중', 'Biotech preset should expose the final dynamic guide copy');
+assert(biotechPreset.badgeTone === 'sector-badge-bio', 'Biotech preset should expose the emerald premium badge tone');
 
 const valueDividendPreset = InvestmentLogic.resolveValuationSectorPreset('value_dividend');
 assert(valueDividendPreset.targetPer === 8, 'Value/dividend preset should auto-fill the target PER to 8x');
 assert(valueDividendPreset.requiredReturn === 9, 'Value/dividend preset should auto-fill the required return to 9%');
 assert(valueDividendPreset.premiumRate === 0, 'Value/dividend preset should carry no intangible premium');
+assert(valueDividendPreset.guideText === '보수적 자산 가치 및 현금흐름 기반 밸류에이션 적용 중', 'Value/dividend preset should expose the final dynamic guide copy');
 
 const valuationCards = InvestmentLogic.computeValuationOutputs({
     currentPrice: '10,000',
@@ -432,6 +436,20 @@ const valuationCardsNegative = InvestmentLogic.computeValuationOutputs({
 assert(valuationCardsNegative.pegTone === 'bad', 'PEG of 1.0 or higher should use the red tone');
 assert(valuationCardsNegative.upsidePct === -50, 'Negative upside should preserve the signed percentage');
 assert(valuationCardsNegative.upsideTone === 'cool', 'Negative upside should use the blue tone');
+
+const lossMakingCards = InvestmentLogic.computeValuationOutputs({
+    currentPrice: '10,000',
+    baseEPS: -500,
+    basePER: 35,
+    bps: '8,000',
+    roe: '-6',
+    epsGrowth: '20',
+    requiredReturn: '12',
+    premiumRate: '40'
+});
+assert(lossMakingCards.lossMaking === true, 'Negative EPS should mark the valuation output as loss-making');
+assert(lossMakingCards.finalTargetPrice === 0, 'Loss-making EPS should suppress the final target price');
+assert(lossMakingCards.upsidePct === 0, 'Loss-making EPS should suppress upside calculations');
 
 const tooltipRight = InvestmentLogic.resolveChartTooltipLayout({
     anchorX: 60,
@@ -487,6 +505,8 @@ assert(scriptSource.includes("document.getElementById('forward-eps-warning')"), 
 assert(scriptSource.includes("최종 목표가"), 'Valuation output should include the premium-adjusted final target card');
 assert(scriptSource.includes("metric-result-primary"), 'Valuation output should mark the final target card as the primary emphasized result');
 assert(scriptSource.includes("EPS 기준:"), 'Valuation output should annotate the active EPS source in small helper text');
+assert(scriptSource.includes("이익 미발생 구간 - PBR 밴드 활용 권장"), 'Loss-making sectors should render the negative-EPS fallback message in the final-target card');
+assert(scriptSource.includes("preset.badgeTone"), 'Valuation preset rendering should apply sector-specific badge tone classes');
 assert(scriptSource.includes("PEG 지표"), 'Valuation output should include the PEG result card');
 assert(scriptSource.includes("S-RIM 적정주가"), 'Valuation output should include the S-RIM result card');
 assert(scriptSource.includes("sector-premium-badge"), 'Valuation output should render the intangible-premium badge');
@@ -577,6 +597,8 @@ assert(styleSource.includes('.metrics-guide'), 'Styles should include the dynami
 assert(styleSource.includes('.field-warning-icon'), 'Styles should include the forward EPS warning indicator');
 assert(styleSource.includes('.field-label-row'), 'Styles should include the inline label/warning row for EPS fields');
 assert(styleSource.includes('.metric-result-primary'), 'Styles should include the emphasized final-target card treatment');
+assert(styleSource.includes('.sector-badge-ai'), 'Styles should include the AI-sector glow badge tone');
+assert(styleSource.includes('.sector-badge-bio'), 'Styles should include the biotech-sector glow badge tone');
 
 const htmlSource = readText(`${cwd}/index.html`);
 assert(htmlSource.includes('API 연동값 (읽기 전용)'), 'Valuation form should include a read-only API track');

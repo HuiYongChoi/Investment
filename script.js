@@ -1395,6 +1395,10 @@ function renderValuationPresetGuide(preset) {
     const guideCopy = document.getElementById('metrics-guide-copy');
     if (!nameBadge || !premiumBadge || !guideCopy) return;
 
+    const badgeToneClasses = ['sector-badge-ai', 'sector-badge-bio', 'sector-badge-growth', 'sector-badge-value', 'sector-badge-industrial'];
+    nameBadge.classList.remove(...badgeToneClasses);
+    premiumBadge.classList.remove(...badgeToneClasses);
+
     if (!preset) {
         nameBadge.textContent = '프리셋 없음';
         premiumBadge.textContent = '무형자산 가산 0%';
@@ -1405,6 +1409,10 @@ function renderValuationPresetGuide(preset) {
     nameBadge.textContent = preset.label;
     premiumBadge.textContent = preset.badgeText || `무형자산 가산 ${preset.premiumRate}%`;
     guideCopy.textContent = preset.guideText;
+    if (preset.badgeTone) {
+        nameBadge.classList.add(preset.badgeTone);
+        premiumBadge.classList.add(preset.badgeTone);
+    }
 }
 
 function applyValuationSectorPreset(preset) {
@@ -1547,7 +1555,7 @@ function calcMetrics() {
         requiredReturn: document.getElementById('m-required-return').value,
         premiumRate: selectedSectorPreset?.premiumRate ?? 0
     });
-    const { perFairValue, finalTargetPrice, premiumRatePct, pegRatio, pegTone, srimFairValue, upsidePct, upsideTone } = valuationOutputs;
+    const { perFairValue, finalTargetPrice, premiumRatePct, lossMaking, pegRatio, pegTone, srimFairValue, upsidePct, upsideTone } = valuationOutputs;
     renderValuationPresetGuide(selectedSectorPreset);
     renderForwardEpsWarning(forwardOverheat);
 
@@ -1558,6 +1566,7 @@ function calcMetrics() {
             : epsSource === 'ttm'
                 ? 'TTM EPS'
                 : 'EPS';
+    const hasUpsideInputs = price > 0 && finalTargetPrice > 0;
 
     state.lastAnalysis.metrics = {
         forwardPer,
@@ -1580,8 +1589,15 @@ function calcMetrics() {
         {
             label: '최종 목표가',
             primary: true,
-            value: finalTargetPrice ? `${Math.round(finalTargetPrice).toLocaleString()}원` : '-',
-            hint: finalTargetPrice
+            value: lossMaking
+                ? '이익 미발생 구간 - PBR 밴드 활용 권장'
+                : finalTargetPrice
+                    ? `${Math.round(finalTargetPrice).toLocaleString()}원`
+                    : '-',
+            tone: lossMaking ? 'warn' : '',
+            hint: lossMaking
+                ? `EPS 기준: ${epsSourceLabel} · 적자 구간은 PER보다 PBR 밴드와 자산가치를 우선 확인하세요.`
+                : finalTargetPrice
                 ? `PER 모델 ${Math.round(perFairValue).toLocaleString()}원 × 무형자산 가산 ${premiumRatePct.toFixed(0)}% · EPS 기준: ${epsSourceLabel}`
                 : 'EPS와 목표 PER가 잡히면 섹터 프리미엄을 반영합니다.'
         },
@@ -1598,9 +1614,13 @@ function calcMetrics() {
         },
         {
             label: '상승여력',
-            value: `${upsidePct > 0 ? '+' : ''}${upsidePct.toFixed(1)}%`,
-            tone: upsideTone,
-            hint: `${usingManualEps ? '조정 EPS' : epsSourceLabel} 기준 최종 목표가 대비`
+            value: hasUpsideInputs
+                ? `${upsidePct > 0 ? '+' : ''}${upsidePct.toFixed(1)}%`
+                : '-',
+            tone: hasUpsideInputs ? upsideTone : '',
+            hint: hasUpsideInputs
+                ? `${usingManualEps ? '조정 EPS' : epsSourceLabel} 기준 최종 목표가 대비`
+                : '현재 주가와 최종 목표가가 모두 잡히면 상승여력을 계산합니다.'
         }
     ];
 

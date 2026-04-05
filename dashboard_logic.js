@@ -17,7 +17,8 @@
             requiredReturn: 6,
             premiumRate: 25,
             badgeText: 'AI 슈퍼사이클 할증 +25%',
-            guideText: 'AI 슈퍼사이클 및 HBM 독점 가치 반영 중'
+            guideText: 'AI 슈퍼사이클 및 로보틱스 융합 가치 할증 적용 중',
+            badgeTone: 'sector-badge-ai'
         }),
         biotech_innovation: Object.freeze({
             key: 'biotech_innovation',
@@ -26,7 +27,8 @@
             requiredReturn: 12,
             premiumRate: 40,
             badgeText: '혁신 파이프라인 프리미엄 +40%',
-            guideText: '임상 파이프라인과 플랫폼 잠재력 프리미엄 반영 중'
+            guideText: '임상 파이프라인 및 미래 신약 특허 가치 집중 반영 중',
+            badgeTone: 'sector-badge-bio'
         }),
         growth_platform: Object.freeze({
             key: 'growth_platform',
@@ -35,7 +37,8 @@
             requiredReturn: 8,
             premiumRate: 20,
             badgeText: '플랫폼 성장 프리미엄 +20%',
-            guideText: '네트워크 효과와 장기 TAM 확장 가치 반영 중'
+            guideText: '산업 표준 멀티플 및 유무형 자산 가치 반영 중',
+            badgeTone: 'sector-badge-growth'
         }),
         value_dividend: Object.freeze({
             key: 'value_dividend',
@@ -44,7 +47,8 @@
             requiredReturn: 9,
             premiumRate: 0,
             badgeText: '현금흐름 프리미엄 0%',
-            guideText: '보수적 현금흐름 기반 밸류에이션 적용 중'
+            guideText: '보수적 자산 가치 및 현금흐름 기반 밸류에이션 적용 중',
+            badgeTone: 'sector-badge-value'
         }),
         general_manufacturing: Object.freeze({
             key: 'general_manufacturing',
@@ -53,7 +57,8 @@
             requiredReturn: 8,
             premiumRate: 10,
             badgeText: '제조 프리미엄 +10%',
-            guideText: '설비 경쟁력과 점진 성장 프리미엄 반영 중'
+            guideText: '산업 표준 멀티플 및 유무형 자산 가치 반영 중',
+            badgeTone: 'sector-badge-industrial'
         })
     });
 
@@ -113,10 +118,11 @@
         const growthPct = parseNumberText(source.epsGrowth) ?? 0;
         const requiredReturnPct = parseNumberText(source.requiredReturn) ?? 0;
         const premiumRatePct = parseNumberText(source.premiumRate) ?? 0;
+        const lossMaking = baseEPS < 0;
 
         const perFairValueRaw = baseEPS > 0 && basePER > 0 ? baseEPS * basePER : 0;
         const perFairValue = perFairValueRaw ? Math.round(perFairValueRaw) : 0;
-        const finalTargetPriceRaw = perFairValue * (1 + (premiumRatePct / 100));
+        const finalTargetPriceRaw = lossMaking ? 0 : perFairValue * (1 + (premiumRatePct / 100));
         const finalTargetPrice = finalTargetPriceRaw ? Math.round(finalTargetPriceRaw) : 0;
         const pegRatio = growthPct > 0 && basePER > 0 ? basePER / growthPct : null;
         const pegTone = pegRatio === null ? '' : pegRatio < 1 ? 'good' : 'bad';
@@ -137,6 +143,7 @@
             perFairValue,
             finalTargetPrice,
             premiumRatePct,
+            lossMaking,
             pegRatio,
             pegTone,
             srimFairValue,
