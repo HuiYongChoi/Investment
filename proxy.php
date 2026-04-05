@@ -20,7 +20,7 @@ const KRX_BASE = 'https://data-dbg.krx.co.kr/svc/apis/sto';
 const KIWOOM_BASE = 'https://api.kiwoom.com';
 const KIWOOM_TOKEN_URL = 'https://api.kiwoom.com/oauth2/token';
 const NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock';
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_MODEL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
 const KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token';
 const KAKAO_USER_URL = 'https://kapi.kakao.com/v2/user/me';
 
@@ -120,6 +120,19 @@ function krx_key(): string
 function gemini_key(): string
 {
     return get_secret('GEMINI_API_KEY', 'gemini_api_key', aws_next_value('Gemini API KEY'));
+}
+
+function gemini_model_candidates(array $requested = []): array
+{
+    $defaults = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    $merged = [];
+    foreach (array_merge($requested, $defaults) as $model) {
+        $normalized = trim((string) $model);
+        if ($normalized !== '' && !in_array($normalized, $merged, true)) {
+            $merged[] = $normalized;
+        }
+    }
+    return $merged;
 }
 
 function kakao_rest_key(): string
@@ -952,12 +965,40 @@ try {
         $key = gemini_key();
         if ($key === '') json_response(503, ['error' => 'Gemini API key is not configured']);
 
-        $url = GEMINI_URL . '?key=' . rawurlencode($key);
-        $body = file_get_contents('php://input') ?: '{}';
-        $upstream = request_upstream($url, ['Content-Type: application/json'], $body, 'POST');
-        http_response_code($upstream['status']);
-        echo $upstream['body'];
-        exit;
+        $payload = safe_json_decode(file_get_contents('php://input') ?: '{}');
+        $requestedModels = isset($payload['models']) && is_array($payload['models']) ? $payload['models'] : [];
+        unset($payload['models']);
+        $body = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+
+        $lastUpstream = null;
+        foreach (gemini_model_candidates($requestedModels) as $model) {
+            $url = GEMINI_MODEL_BASE . rawurlencode($model) . ':generateContent?key=' . rawurlencode($key);
+            $upstream = request_upstream($url, ['Content-Type: application/json'], $body, 'POST');
+            $decoded = safe_json_decode($upstream['body']);
+
+            if ($upstream['status'] >= 200 && $upstream['status'] < 300 && !empty($decoded['candidates'][0]['content']['parts'][0]['text'])) {
+                $decoded['modelUsed'] = $model;
+                json_response($upstream['status'], $decoded);
+            }
+
+            $lastUpstream = [
+                'status' => $upstream['status'],
+                'body' => $decoded ?: ['error' => ['message' => $upstream['body']]],
+                'model' => $model,
+            ];
+
+            if ($upstream['status'] < 500 && !in_array($upstream['status'], [404, 429], true)) {
+                break;
+            }
+        }
+
+        if ($lastUpstream !== null) {
+            $responsePayload = is_array($lastUpstream['body']) ? $lastUpstream['body'] : ['error' => ['message' => 'Gemini upstream error']];
+            $responsePayload['modelTried'] = $lastUpstream['model'];
+            json_response($lastUpstream['status'], $responsePayload);
+        }
+
+        json_response(502, ['error' => 'Gemini upstream request failed']);
     }
 
     if ($action === 'quote') {

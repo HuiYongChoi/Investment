@@ -23,7 +23,8 @@ KRX_BASE = "https://data-dbg.krx.co.kr/svc/apis/sto"
 KIWOOM_BASE = "https://api.kiwoom.com"
 KIWOOM_TOKEN_URL = "https://api.kiwoom.com/oauth2/token"
 NAVER_STOCK_BASE = "https://m.stock.naver.com/api/stock"
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+GEMINI_MODEL_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
 KAKAO_TOKEN_URL = "https://kauth.kakao.com/oauth/token"
 KAKAO_USER_URL = "https://kapi.kakao.com/v2/user/me"
 KST = dt.timezone(dt.timedelta(hours=9))
@@ -144,6 +145,15 @@ def safe_json(raw: str):
         return json.loads(raw)
     except json.JSONDecodeError:
         return {"raw": raw}
+
+
+def gemini_model_candidates(requested=None):
+    models = []
+    for model in list(requested or []) + list(GEMINI_MODELS):
+        normalized = str(model or "").strip()
+        if normalized and normalized not in models:
+            models.append(normalized)
+    return models
 
 
 def extract_gold_usd_ounce(payload) -> Optional[float]:
@@ -739,17 +749,38 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length) or b"{}")
-            status, raw = request_json(
-                GEMINI_URL,
-                method="POST",
-                params={"key": GEMINI_KEY},
-                json_body=payload,
-            )
-            self.send_response(status)
+            requested_models = payload.pop("models", []) if isinstance(payload, dict) else []
+            last_status = 502
+            last_body = json.dumps({"error": {"message": "Gemini upstream request failed"}}, ensure_ascii=False)
+
+            for model in gemini_model_candidates(requested_models):
+                status, raw, _ = request_details(
+                    f"{GEMINI_MODEL_BASE}/{urllib.parse.quote(model)}:generateContent",
+                    method="POST",
+                    params={"key": GEMINI_KEY},
+                    json_body=payload,
+                )
+                decoded = safe_json(raw)
+                if status < 400 and decoded.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text"):
+                    decoded["modelUsed"] = model
+                    self.send_json(status, decoded)
+                    return
+
+                last_status = status
+                if isinstance(decoded, dict):
+                    decoded["modelTried"] = model
+                    last_body = json.dumps(decoded, ensure_ascii=False)
+                else:
+                    last_body = raw
+
+                if status < 500 and status not in (404, 429):
+                    break
+
+            self.send_response(last_status)
             self.send_header("Access-Control-Allow-Origin", self.headers.get("Origin", "*"))
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
-            self.wfile.write(raw.encode("utf-8"))
+            self.wfile.write(last_body.encode("utf-8"))
         except Exception as error:
             self.send_json(500, {"error": str(error)})
 

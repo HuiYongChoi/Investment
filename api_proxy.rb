@@ -18,7 +18,8 @@ KRX_BASE = 'https://data-dbg.krx.co.kr/svc/apis/sto'
 KIWOOM_BASE = 'https://api.kiwoom.com'
 KIWOOM_TOKEN_URL = 'https://api.kiwoom.com/oauth2/token'
 NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock'
-GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
+GEMINI_MODEL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
+GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'].freeze
 KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token'
 KAKAO_USER_URL = 'https://kapi.kakao.com/v2/user/me'
 COMPANY_DIRECTORY_CACHE = File.join(Dir.tmpdir, 'investment-navigator-company-directory.json')
@@ -116,6 +117,10 @@ def parse_json(body)
   JSON.parse(body)
 rescue JSON::ParserError
   { 'raw' => body }
+end
+
+def gemini_model_candidates(requested)
+  (Array(requested) + GEMINI_MODELS).map { |model| model.to_s.strip }.reject(&:empty?).uniq
 end
 
 def extract_gold_usd_ounce(payload)
@@ -745,15 +750,44 @@ server.mount_proc '/gemini' do |req, res|
 
   begin
     body = parse_json(req.body.to_s)
-    upstream = perform_request(
-      method: :post,
-      url: GEMINI_BASE,
-      params: { key: GEMINI_KEY },
-      json_body: body
-    )
-    res.status = upstream[:status]
-    res['Content-Type'] = 'application/json; charset=utf-8'
-    res.body = upstream[:body]
+    requested_models = body.is_a?(Hash) ? body.delete('models') : nil
+    last_upstream = nil
+    success_payload = nil
+    success_status = nil
+
+    gemini_model_candidates(requested_models).each do |model|
+      upstream = perform_request(
+        method: :post,
+        url: "#{GEMINI_MODEL_BASE}/#{URI.encode_www_form_component(model)}:generateContent",
+        params: { key: GEMINI_KEY },
+        json_body: body
+      )
+      decoded = parse_json(upstream[:body])
+      if upstream[:status] < 400 && decoded.dig('candidates', 0, 'content', 'parts', 0, 'text').to_s != ''
+        decoded['modelUsed'] = model
+        success_status = upstream[:status]
+        success_payload = decoded
+        break
+      end
+
+      last_upstream = {
+        status: upstream[:status],
+        body: decoded.is_a?(Hash) ? decoded.merge('modelTried' => model) : { 'raw' => upstream[:body], 'modelTried' => model }
+      }
+      break if upstream[:status] < 500 && ![404, 429].include?(upstream[:status])
+    end
+
+    if success_payload
+      json_response(res, success_status, success_payload)
+      next
+    end
+
+    if last_upstream
+      json_response(res, last_upstream[:status], last_upstream[:body])
+      next
+    end
+
+    json_response(res, 502, error: 'Gemini upstream request failed')
   rescue StandardError => error
     json_response(res, 500, error: error.message)
   end

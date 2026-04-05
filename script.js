@@ -6,6 +6,7 @@ const KAKAO_STORAGE_TOKEN = 'invest_nav_kakao_token';
 const KAKAO_STORAGE_ERROR = 'invest_nav_kakao_error';
 const KAKAO_STORAGE_RETURN_URL = 'invest_nav_kakao_return_url';
 const KAKAO_STORAGE_PROFILE = 'invest_nav_kakao_profile';
+const BRIEFING_MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 const KAKAO_REDIRECT_URI = InvestmentLogic.resolveKakaoRedirectUri(location.href);
 const CHART_HISTORY_YEARS = 5;
 const CHART_DEFAULT_WINDOWS = {
@@ -3591,6 +3592,14 @@ async function generateBriefing() {
         })
         .filter(Boolean);
     const anomalyText = anomalies.length ? anomalies.join(', ') : '-';
+    const briefingSignature = [
+        state.company?.stockCode || company,
+        Math.round(state.lastAnalysis.totalPct || 0),
+        Math.round(state.metrics.targetPrice || 0),
+        Math.round(state.metrics.upside || 0),
+        technicalCards.map((card) => `${card.label}:${card.signal}`).join('|'),
+        anomalyText
+    ].join('__');
 
     const prompt = `
 당신은 월스트리트 탑티어 헤지펀드의 수석 퀀트 애널리스트입니다. 
@@ -3627,6 +3636,7 @@ async function generateBriefing() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                models: BRIEFING_MODEL_CANDIDATES,
                 contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: {
                     temperature: 0.4,
@@ -3638,13 +3648,84 @@ async function generateBriefing() {
         if (!text) {
             throw new Error('Gemini 응답에 브리핑 본문이 없습니다.');
         }
-        renderBriefing(text, 'Gemini Live', 'Gemini 응답으로 브리핑을 생성했습니다.');
+        writeBriefingCache(company, briefingSignature, {
+            text,
+            model: response?.model || response?.modelUsed || response?._meta?.model || '',
+            savedAt: new Date().toISOString()
+        });
+        const modelUsed = response?.model || response?.modelUsed || response?.modelTried || '';
+        renderBriefing(
+            text,
+            'Gemini Live',
+            modelUsed ? `Gemini 모델 ${modelUsed} 응답으로 브리핑을 생성했습니다.` : 'Gemini 응답으로 브리핑을 생성했습니다.'
+        );
         setSourceBadge('source-gemini', 'Gemini 응답 완료', 'success');
     } catch (error) {
         console.warn('Gemini briefing fallback', error);
-        renderBriefing(buildLocalBriefing(), 'Fallback Briefing', 'Gemini 할당량 또는 인증 이슈로 로컬 브리핑으로 전환했습니다.', true);
+        const cachedBriefing = readBriefingCache(company, briefingSignature);
+        if (cachedBriefing?.text) {
+            renderBriefing(
+                cachedBriefing.text,
+                'Cached Gemini',
+                `Gemini 실시간 호출이 제한되어 저장된 응답(${formatCachedBriefingTime(cachedBriefing.savedAt)})을 표시합니다.`
+            );
+            setSourceBadge('source-gemini', 'Gemini 저장 응답 사용', 'warn');
+            return;
+        }
+
+        renderBriefing(
+            buildLocalBriefing(),
+            'Local Quant Briefing',
+            describeGeminiFailure(error),
+            true
+        );
         setSourceBadge('source-gemini', 'Gemini 대체 브리핑', 'warn');
     }
+}
+
+function buildBriefingCacheKey(signature, companyName = state.company?.name || 'unknown') {
+    return InvestmentLogic.buildBriefingCacheKey(companyName, signature);
+}
+
+function readBriefingCache(companyName, signature) {
+    try {
+        const raw = localStorage.getItem(buildBriefingCacheKey(signature, companyName));
+        return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function writeBriefingCache(companyName, signature, payload) {
+    try {
+        localStorage.setItem(
+            buildBriefingCacheKey(signature, companyName),
+            JSON.stringify(payload)
+        );
+    } catch (error) {
+        console.warn('briefing cache write failed', error);
+    }
+}
+
+function formatCachedBriefingTime(value) {
+    if (!value) return '최근';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '최근';
+    return `${date.getMonth() + 1}.${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function describeGeminiFailure(error) {
+    const message = String(error?.message || '').trim();
+    if (/leaked|reported as leaked/i.test(message)) {
+        return 'Gemini API 키가 유출로 차단되어 기관형 로컬 브리핑으로 전환했습니다.';
+    }
+    if (/quota|RESOURCE_EXHAUSTED|Too Many Requests|429/i.test(message)) {
+        return 'Gemini 할당량이 일시적으로 소진되어 기관형 로컬 브리핑으로 전환했습니다.';
+    }
+    if (/API key|permission|403|401/i.test(message)) {
+        return 'Gemini 인증 설정 이슈로 기관형 로컬 브리핑으로 전환했습니다.';
+    }
+    return 'Gemini 실시간 응답을 받지 못해 기관형 로컬 브리핑으로 전환했습니다.';
 }
 
 function renderBriefing(content, badge, meta, isLocal = false) {
@@ -3658,59 +3739,64 @@ function renderBriefing(content, badge, meta, isLocal = false) {
 }
 
 function buildLocalBriefing() {
-    const summary = state.summaries[0]?.summary;
-    const strengthLines = [
-        `수익성 점수 ${state.ratings.profitability.score}/5, 영업이익률 ${summary.operatingMargin.toFixed(1)}%`,
-        `건전성 점수 ${state.ratings.stability.score}/5, 부채비율 ${summary.debtRatio.toFixed(1)}%`,
-        `효율성 점수 ${state.ratings.efficiency.score}/5, ROA ${summary.roa.toFixed(1)}%`
-    ];
-    const riskLines = [
-        `상승여력 ${state.metrics.upside.toFixed(1)}%는 입력한 목표 PER 가정에 민감합니다.`,
-        `차트 소스는 현재 ${formatChartSourceName()}입니다.`,
-        `최근 분기 데이터가 부족한 경우 분기 성장률 평가는 보수적으로 해석해야 합니다.`
-    ];
-    const finalOpinion = state.lastAnalysis.totalPct >= 80 ? '매수 후보' : state.lastAnalysis.totalPct >= 60 ? '관망 우위' : '주의 구간';
-
-    return `
-        <div class="briefing-section">
-            <h3>한 줄 요약</h3>
-            <div class="briefing-body">${state.company.name}은 현재 가치지표와 재무 점수상 ${finalOpinion}에 가까우며, 기술적 지표는 ${document.getElementById('tech-summary').innerText.trim()} 상태입니다.</div>
-        </div>
-        <div class="briefing-section">
-            <h3>강점</h3>
-            <ul class="briefing-list">${strengthLines.map((item) => `<li>${item}</li>`).join('')}</ul>
-        </div>
-        <div class="briefing-section">
-            <h3>리스크</h3>
-            <ul class="briefing-list">${riskLines.map((item) => `<li>${item}</li>`).join('')}</ul>
-        </div>
-        <div class="briefing-section">
-            <h3>최종 의견</h3>
-            <div class="briefing-body">${finalOpinion}입니다. 재무 점수, 적정주가, 기술적 집계 결과를 함께 확인하면서 DART 원문과 최신 공시까지 교차 검증하는 접근이 적합합니다.</div>
-        </div>
-    `;
+    const summary = state.summaries[0]?.summary || {};
+    const anomalies = [
+        ...(Array.isArray(state.lastAnalysis?.anomalies) ? state.lastAnalysis.anomalies : []),
+        ...(Array.isArray(summary?.anomalies) ? summary.anomalies : [])
+    ].filter(Boolean);
+    const sections = InvestmentLogic.buildFallbackBriefingSections({
+        company: state.company?.name || '',
+        macro: {
+            usdKrw: document.getElementById('fx-usdkrw')?.innerText || '-',
+            vix: document.getElementById('vix-value')?.innerText || '-',
+            wti: document.getElementById('wti-value')?.innerText || '-'
+        },
+        ratings: {
+            totalPct: state.lastAnalysis.totalPct || 0,
+            profitability: state.ratings?.profitability?.score || 0,
+            stability: state.ratings?.stability?.score || 0,
+            efficiency: state.ratings?.efficiency?.score || 0
+        },
+        summary: {
+            operatingMargin: summary.operatingMargin,
+            debtRatio: summary.debtRatio,
+            roe: summary.roe
+        },
+        metrics: {
+            targetPrice: state.metrics?.targetPrice,
+            upside: state.metrics?.upside
+        },
+        technicalSignals: (state.technicals?.cards || []).map((card) => `${card.label}(${card.signal})`),
+        anomalies,
+        chartSource: formatChartSourceName()
+    });
+    return renderBriefingSections(sections);
 }
 
 function formatBriefingText(text) {
-    const escaped = escapeHtml(text);
-    const sections = escaped.split(/\n{2,}/).map((chunk) => chunk.trim()).filter(Boolean);
-    return sections.map((section) => {
-        const lines = section.split('\n').map((line) => line.trim()).filter(Boolean);
-        const title = lines[0];
-        const body = lines.slice(1);
-        const heading = /^\d+\./.test(title) || title.endsWith(':');
-        if (!heading) {
-            return `<div class="briefing-section"><div class="briefing-body">${lines.join('<br>')}</div></div>`;
-        }
+    const sections = InvestmentLogic.normalizeBriefingSections(text);
+    if (!sections.length) {
+        return renderBriefingSections([{
+            title: '',
+            body: String(text || '').split(/\r?\n/).filter(Boolean),
+            listLike: false
+        }]);
+    }
+    return renderBriefingSections(sections);
+}
 
-        const cleanTitle = title.replace(/^\d+\.\s*/, '').replace(/:$/, '');
-        const listLike = body.every((line) => /^[-•]/.test(line));
+function renderBriefingSections(sections) {
+    return (sections || []).map((section) => {
+        const title = escapeHtml(section?.title || '');
+        const body = Array.isArray(section?.body) ? section.body : [];
+        const listLike = Boolean(section?.listLike);
+        const bodyHtml = listLike
+            ? `<ul class="briefing-list">${body.map((line) => `<li>${escapeHtml(String(line).replace(/^[-*•]\s*/, ''))}</li>`).join('')}</ul>`
+            : `<div class="briefing-body">${body.map((line) => escapeHtml(String(line))).join('<br>')}</div>`;
         return `
             <div class="briefing-section">
-                <h3>${cleanTitle}</h3>
-                ${listLike
-                ? `<ul class="briefing-list">${body.map((line) => `<li>${line.replace(/^[-•]\s*/, '')}</li>`).join('')}</ul>`
-                : `<div class="briefing-body">${body.join('<br>')}</div>`}
+                ${title ? `<h3>${title}</h3>` : ''}
+                ${bodyHtml}
             </div>
         `;
     }).join('');
