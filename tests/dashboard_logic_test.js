@@ -59,6 +59,19 @@ assert(InvestmentLogic.moveSuggestionSelectionIndex(0, 3, 1) === 1, 'Arrow-down 
 assert(InvestmentLogic.moveSuggestionSelectionIndex(2, 3, 1) === 0, 'Arrow-down should wrap back to the first suggestion at the end of the list');
 assert(InvestmentLogic.moveSuggestionSelectionIndex(0, 3, -1) === 2, 'Arrow-up should wrap to the last suggestion from the first row');
 
+const groupedReports = InvestmentLogic.groupReportsBySection([
+    { title: '사업보고서 (2025.12)', type: '사업보고서', date: '20260331', url: '#' },
+    { title: '[기재정정]사업보고서 (2025.12)', type: '사업보고서', date: '20260311', url: '#' },
+    { title: '분기보고서 (2025.09)', type: '분기보고서', date: '20251114', url: '#' },
+    { title: '반기보고서 (2025.06)', type: '반기보고서', date: '20250813', url: '#' },
+    { title: '분기보고서 (2024.03)', type: '분기보고서', date: '20240515', url: '#' }
+]);
+assert(groupedReports.annualReports.length === 2, 'Annual report section should keep 사업보고서 entries separate from quarterly reports');
+assert(groupedReports.quarterlyYears.length === 2, 'Quarterly section should group 분기/반기 reports by fiscal year');
+assert(groupedReports.quarterlyYears[0].year === '2025', 'Quarterly report groups should sort newest fiscal year first');
+assert(groupedReports.quarterlyYears[0].reports.length === 2, 'Quarterly report year groups should include 반기보고서 with the same fiscal year');
+assert(groupedReports.quarterlyYears[1].year === '2024', 'Quarterly report groups should keep older fiscal years as separate toggles');
+
 const quote = InvestmentLogic.normalizePublicQuote({
     closePrice: '186,200',
     compareToPreviousClosePrice: '7,800',
@@ -352,5 +365,16 @@ assert(phpProxySource.includes('$nameHint = trim((string) ($_GET[\'name_hint\'] 
 assert(scriptSource.includes("event.key === 'ArrowDown'"), 'Search input should support arrow-down autocomplete navigation');
 assert(scriptSource.includes('syncCompanyInputValue(company);'), 'Search should synchronize the input text with the resolved autocomplete match');
 assert(!scriptSource.includes('companyInput.value = selected.displayLabel;'), 'Arrow-key navigation should not overwrite the typed input before the selection is committed');
+assert(scriptSource.includes('InvestmentLogic.groupReportsBySection(reports)'), 'Report rendering should use grouped annual and quarterly sections');
+assert(scriptSource.includes('class="report-year-toggle"'), 'Quarterly report groups should render toggle buttons per fiscal year');
+assert(scriptSource.includes('class="report-section-toggle"'), 'Report sections should render toggle buttons so annual and quarterly blocks can start collapsed');
+assert(scriptSource.includes('class="report-section-body hidden"'), 'Report sections should start collapsed until the user expands them');
+assert(scriptSource.includes('page_no: page'), 'DART report fetching should request additional pages when the first page does not include quarterly reports');
+assert(scriptSource.includes('while (page <= totalPages && relevantReports.length < 12)'), 'DART report fetching should keep scanning pages until enough recent reports are collected');
+
+const styleSource = readText(`${cwd}/style.css`);
+assert(styleSource.includes('.report-year-toggle'), 'Styles should include the yearly quarterly-report toggle treatment');
+assert(styleSource.includes('.report-section'), 'Styles should include grouped report section layout');
+assert(styleSource.includes('.report-section-toggle'), 'Styles should include the report section toggle treatment');
 
 console.log('dashboard_logic_test: ok');

@@ -219,6 +219,50 @@
         return (normalizedBase + offset + size) % size;
     }
 
+    function reportFiscalYear(report) {
+        const titleMatch = String(report?.title || '').match(/\((\d{4})\.\d{2}\)/);
+        if (titleMatch) return titleMatch[1];
+
+        const dateToken = normalizeDateToken(report?.date);
+        return dateToken ? dateToken.slice(0, 4) : '';
+    }
+
+    function groupReportsBySection(reports) {
+        const annualReports = [];
+        const quarterlyByYear = new Map();
+
+        (reports || []).forEach((report) => {
+            const type = String(report?.type || '').trim();
+            if (type === '사업보고서') {
+                annualReports.push(report);
+                return;
+            }
+
+            const year = reportFiscalYear(report) || '기타';
+            if (!quarterlyByYear.has(year)) {
+                quarterlyByYear.set(year, []);
+            }
+            quarterlyByYear.get(year).push(report);
+        });
+
+        annualReports.sort((left, right) => String(right?.date || '').localeCompare(String(left?.date || '')));
+
+        const quarterlyYears = Array.from(quarterlyByYear.entries())
+            .map(([year, yearReports]) => ({
+                year,
+                reports: yearReports.sort((left, right) => String(right?.date || '').localeCompare(String(left?.date || '')))
+            }))
+            .sort((left, right) => (
+                Number(right.year) - Number(left.year)
+                || String(right.year).localeCompare(String(left.year))
+            ));
+
+        return {
+            annualReports,
+            quarterlyYears
+        };
+    }
+
     function normalizePublicQuote(payload) {
         const afterMarket = payload && payload.overMarketPriceInfo ? payload.overMarketPriceInfo : null;
         const sessionClose = parseNumberText(payload?.closePrice);
@@ -677,6 +721,7 @@
         clearKakaoSessionState,
         describePriceDelta,
         generateAnchoredSyntheticChart,
+        groupReportsBySection,
         getQuarterlyReportConfigs,
         matchCompanies,
         mergeCompanyDirectories,

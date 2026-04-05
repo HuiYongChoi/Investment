@@ -157,6 +157,7 @@ function bindEvents() {
         event.preventDefault();
     });
     suggestionBox.addEventListener('click', onSuggestionClick);
+    document.getElementById('report-list').addEventListener('click', onReportListClick);
     document.getElementById('calc-btn').addEventListener('click', calcMetrics);
     document.getElementById('tech-refresh-btn').addEventListener('click', () => {
         if (!state.chartVisible.length) return;
@@ -861,22 +862,42 @@ async function fetchDartReportList(corpCode) {
     const currentYear = getCurrentYearKst();
     const bgn = `${currentYear - 2}0101`;
     const end = `${currentYear}1231`;
-    const data = await fetchJson(buildProxyUrl('dart', '/list.json', {
-        corp_code: corpCode,
-        bgn_de: bgn,
-        end_de: end,
-        page_count: 100
-    }));
-    if (data.status !== '000' || !Array.isArray(data.list)) return [];
+    let page = 1;
+    let totalPages = 1;
+    const relevantReports = [];
+    const seenReceiptNumbers = new Set();
 
-    return data.list
-        .filter((item) => /사업보고서|반기보고서|분기보고서/.test(item.report_nm))
-        .map((item) => ({
-            title: item.report_nm,
-            date: item.rcept_dt,
-            type: item.report_nm.includes('사업') ? '사업보고서' : item.report_nm.includes('반기') ? '반기보고서' : '분기보고서',
-            url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${item.rcept_no}`
-        }))
+    while (page <= totalPages && relevantReports.length < 12) {
+        const data = await fetchJson(buildProxyUrl('dart', '/list.json', {
+            corp_code: corpCode,
+            bgn_de: bgn,
+            end_de: end,
+            page_count: 100,
+            page_no: page
+        }));
+        if (data.status !== '000' || !Array.isArray(data.list)) {
+            break;
+        }
+
+        totalPages = Math.max(page, Number(data.total_page) || 1);
+        data.list
+            .filter((item) => /사업보고서|반기보고서|분기보고서/.test(item.report_nm))
+            .forEach((item) => {
+                const receiptNumber = String(item.rcept_no || '').trim();
+                if (!receiptNumber || seenReceiptNumbers.has(receiptNumber)) return;
+                seenReceiptNumbers.add(receiptNumber);
+                relevantReports.push({
+                    title: item.report_nm,
+                    date: item.rcept_dt,
+                    type: item.report_nm.includes('사업') ? '사업보고서' : item.report_nm.includes('반기') ? '반기보고서' : '분기보고서',
+                    url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${receiptNumber}`
+                });
+            });
+
+        page += 1;
+    }
+
+    return relevantReports
         .sort((a, b) => b.date.localeCompare(a.date))
         .slice(0, 12);
 }
@@ -1025,7 +1046,68 @@ function renderReports(reports) {
         return;
     }
 
-    container.innerHTML = reports.map((report) => `
+    const groupedReports = InvestmentLogic.groupReportsBySection(reports);
+    const annualSection = renderReportSection(
+        '사업보고서',
+        '최근 3년 사업보고서를 최신 공시 순으로 정리했습니다.',
+        groupedReports.annualReports.length
+            ? renderReportItems(groupedReports.annualReports)
+            : '<div class="report-item">최근 3년 사업보고서를 찾지 못했습니다.</div>'
+    );
+    const quarterlySection = renderReportSection(
+        '분기보고서',
+        '반기보고서를 포함해 연도별로 열고 닫을 수 있습니다.',
+        groupedReports.quarterlyYears.length
+            ? groupedReports.quarterlyYears.map((group, index) => renderQuarterlyReportYearGroup(group, index === 0)).join('')
+            : '<div class="report-item">최근 3년 분기·반기보고서를 찾지 못했습니다.</div>'
+    );
+
+    container.innerHTML = `${annualSection}${quarterlySection}`;
+}
+
+function renderReportSection(title, description, bodyHtml) {
+    return `
+        <section class="report-section">
+            <button
+                type="button"
+                class="report-section-toggle"
+                aria-expanded="false"
+            >
+                <span>
+                    <div class="report-section-title">${escapeHtml(title)}</div>
+                    <div class="report-section-copy">${escapeHtml(description)}</div>
+                </span>
+                <span class="report-year-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="report-section-body hidden">${bodyHtml}</div>
+        </section>
+    `;
+}
+
+function renderQuarterlyReportYearGroup(group, expanded) {
+    return `
+        <section class="report-year-group">
+            <button
+                type="button"
+                class="report-year-toggle"
+                data-report-year="${escapeHtml(group.year)}"
+                aria-expanded="${expanded ? 'true' : 'false'}"
+            >
+                <span class="report-year-copy">
+                    <span class="report-year-title">${escapeHtml(group.year)}년</span>
+                    <span class="report-year-count">${group.reports.length}건</span>
+                </span>
+                <span class="report-year-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="report-year-panel hidden">
+                ${renderReportItems(group.reports)}
+            </div>
+        </section>
+    `;
+}
+
+function renderReportItems(reports) {
+    return reports.map((report) => `
         <a class="report-item" href="${report.url}" target="_blank" rel="noreferrer">
             <div class="report-head">
                 <div>
@@ -1036,6 +1118,28 @@ function renderReports(reports) {
             </div>
         </a>
     `).join('');
+}
+
+function onReportListClick(event) {
+    const sectionToggle = event.target.closest('.report-section-toggle');
+    if (sectionToggle) {
+        const sectionPanel = sectionToggle.nextElementSibling;
+        if (!sectionPanel) return;
+        const sectionExpanded = sectionToggle.getAttribute('aria-expanded') === 'true';
+        sectionToggle.setAttribute('aria-expanded', sectionExpanded ? 'false' : 'true');
+        sectionPanel.classList.toggle('hidden', sectionExpanded);
+        return;
+    }
+
+    const toggle = event.target.closest('.report-year-toggle');
+    if (!toggle) return;
+
+    const panel = toggle.nextElementSibling;
+    if (!panel) return;
+
+    const expanded = toggle.getAttribute('aria-expanded') === 'true';
+    toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    panel.classList.toggle('hidden', expanded);
 }
 
 function renderFinancialTable(containerId, periods) {

@@ -761,6 +761,114 @@ header#header {
 
 .report-list {
     display: grid;
+    gap: 18px;
+}
+
+.report-section {
+    display: grid;
+    gap: 12px;
+    padding: 18px;
+    border-radius: 26px;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.report-section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.report-section-toggle {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+}
+
+.report-section-title {
+    font-size: 1rem;
+    font-weight: 800;
+}
+
+.report-section-copy {
+    margin-top: 6px;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.report-section-body {
+    display: grid;
+    gap: 12px;
+}
+
+.report-year-group {
+    display: grid;
+    gap: 12px;
+}
+
+.report-year-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 18px;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.035);
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+}
+
+.report-year-toggle:hover {
+    border-color: rgba(143, 211, 255, 0.28);
+    background: rgba(79, 140, 255, 0.08);
+}
+
+.report-year-copy {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.report-year-title {
+    font-size: 0.94rem;
+    font-weight: 800;
+}
+
+.report-year-count {
+    font-size: 0.76rem;
+    color: var(--accent-cyan);
+    font-weight: 800;
+}
+
+.report-year-chevron {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+}
+
+.report-year-toggle[aria-expanded="true"] .report-year-chevron {
+    transform: rotate(180deg);
+}
+
+.report-section-toggle[aria-expanded="true"] .report-year-chevron {
+    transform: rotate(180deg);
+}
+
+.report-year-panel {
+    display: grid;
     gap: 12px;
 }
 
