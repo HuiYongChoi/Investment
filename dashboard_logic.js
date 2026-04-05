@@ -3,12 +3,45 @@
         return String(value || '').toLowerCase().replace(/\s+/g, '');
     }
 
+    const KAKAO_STORAGE_KEYS = Object.freeze({
+        token: 'invest_nav_kakao_token',
+        error: 'invest_nav_kakao_error',
+        returnUrl: 'invest_nav_kakao_return_url'
+    });
+
     function parseNumberText(value) {
         if (value === null || value === undefined) return null;
         const normalized = String(value).replace(/,/g, '').trim();
         if (!normalized) return null;
         const numeric = Number(normalized);
         return Number.isFinite(numeric) ? numeric : null;
+    }
+
+    function parseSignedNumberText(value) {
+        return parseNumberText(value);
+    }
+
+    function parsePriceText(value) {
+        const numeric = parseSignedNumberText(value);
+        return numeric === null ? null : Math.abs(numeric);
+    }
+
+    function buildYahooSymbol(stockCode, market) {
+        const raw = String(stockCode || '').trim().toUpperCase();
+        if (!raw) return '';
+        if (raw.includes('.')) return raw;
+
+        const digits = raw.replace(/\D/g, '');
+        if (digits.length === 6 && digits === raw) {
+            return `${digits}.${String(market || '').toUpperCase() === 'KOSDAQ' ? 'KQ' : 'KS'}`;
+        }
+
+        return raw;
+    }
+
+    function normalizeDateToken(value) {
+        const digits = String(value || '').replace(/\D/g, '');
+        return digits.slice(0, 8);
     }
 
     function percentage(numerator, denominator) {
@@ -95,6 +128,132 @@
         };
     }
 
+    function normalizeKiwoomQuote(payload, fetchedAt) {
+        return {
+            name: String(payload?.stk_nm || '').trim(),
+            close: parsePriceText(payload?.cur_prc) ?? 0,
+            change: parseSignedNumberText(payload?.pred_pre) ?? 0,
+            changePct: parseSignedNumberText(payload?.flu_rt) ?? 0,
+            open: parsePriceText(payload?.open_pric) ?? 0,
+            high: parsePriceText(payload?.high_pric) ?? 0,
+            low: parsePriceText(payload?.low_pric) ?? 0,
+            volume: parsePriceText(payload?.trde_qty) ?? 0,
+            asOf: fetchedAt || payload?.fetched_at || '',
+            source: 'kiwoom_rest'
+        };
+    }
+
+    function normalizeYfinanceQuote(payload, fetchedAt) {
+        const close = parseNumberText(
+            payload?.currentPrice ?? payload?.regularMarketPrice ?? payload?.lastPrice ?? payload?.close
+        ) ?? 0;
+        const previousClose = parseNumberText(
+            payload?.previousClose ?? payload?.regularMarketPreviousClose ?? payload?.chartPreviousClose
+        );
+        const explicitChange = parseSignedNumberText(payload?.change ?? payload?.regularMarketChange);
+        const explicitChangePct = parseSignedNumberText(payload?.changePct ?? payload?.regularMarketChangePercent);
+        const change = explicitChange ?? (previousClose !== null ? close - previousClose : 0);
+        const changePct = explicitChangePct ?? (previousClose ? percentage(change, previousClose) : 0);
+
+        return {
+            name: String(payload?.shortName ?? payload?.longName ?? payload?.name ?? '').trim(),
+            symbol: String(payload?.symbol ?? '').trim(),
+            close,
+            previousClose: previousClose ?? 0,
+            change,
+            changePct,
+            open: parseNumberText(payload?.open ?? payload?.regularMarketOpen ?? payload?.dayOpen) ?? 0,
+            high: parseNumberText(payload?.dayHigh ?? payload?.high ?? payload?.regularMarketDayHigh) ?? 0,
+            low: parseNumberText(payload?.dayLow ?? payload?.low ?? payload?.regularMarketDayLow) ?? 0,
+            volume: parseNumberText(payload?.volume ?? payload?.regularMarketVolume ?? payload?.lastVolume) ?? 0,
+            asOf: String(payload?.regularMarketTime ?? payload?.asOf ?? fetchedAt ?? ''),
+            source: 'yfinance_python'
+        };
+    }
+
+    function normalizeKiwoomChartRows(rows, options) {
+        const config = options || {};
+        const dateKey = config.dateKey || 'dt';
+        const timeKey = config.timeKey || '';
+        const startDate = config.startDate || '';
+
+        return (rows || [])
+            .map((row) => {
+                const rawDate = String(row?.[dateKey] || row?.date || '').replace(/\D/g, '');
+                const rawTime = timeKey ? String(row?.[timeKey] || '').replace(/\D/g, '') : '';
+                const date = (rawDate || rawTime).slice(0, 8);
+                if (!date) return null;
+
+                return {
+                    date,
+                    time: rawTime,
+                    open: parsePriceText(row?.open_pric) ?? 0,
+                    high: parsePriceText(row?.high_pric) ?? 0,
+                    low: parsePriceText(row?.low_pric) ?? 0,
+                    close: parsePriceText(row?.cur_prc ?? row?.close_pric) ?? 0,
+                    volume: parsePriceText(row?.trde_qty) ?? 0,
+                    change: parseSignedNumberText(row?.pred_pre ?? row?.pre) ?? 0,
+                    changePct: parseSignedNumberText(row?.trde_tern_rt ?? row?.flu_rt) ?? 0,
+                    listedShares: 0
+                };
+            })
+            .filter((point) => point && (!startDate || point.date >= startDate))
+            .sort((left, right) => {
+                const leftKey = `${left.date}${left.time || ''}`;
+                const rightKey = `${right.date}${right.time || ''}`;
+                return leftKey.localeCompare(rightKey);
+            });
+    }
+
+    function normalizeYfinanceChartRows(rows, options) {
+        const config = options || {};
+        const startDate = config.startDate || '';
+
+        const parsed = (rows || [])
+            .map((row) => ({
+                date: normalizeDateToken(row?.date ?? row?.Date ?? row?.dt),
+                time: String(row?.time ?? row?.Time ?? ''),
+                open: parseNumberText(row?.open ?? row?.Open) ?? 0,
+                high: parseNumberText(row?.high ?? row?.High) ?? 0,
+                low: parseNumberText(row?.low ?? row?.Low) ?? 0,
+                close: parseNumberText(row?.close ?? row?.Close) ?? 0,
+                volume: parseNumberText(row?.volume ?? row?.Volume) ?? 0,
+                previousClose: parseNumberText(
+                    row?.previousClose ?? row?.previous_close ?? row?.chartPreviousClose
+                ),
+                change: parseSignedNumberText(row?.change ?? row?.Change),
+                changePct: parseSignedNumberText(row?.changePct ?? row?.change_pct ?? row?.ChangePercent),
+                listedShares: parseNumberText(row?.listedShares ?? row?.listed_shares) ?? 0
+            }))
+            .filter((point) => point.date)
+            .sort((left, right) => {
+                const leftKey = `${left.date}${left.time || ''}`;
+                const rightKey = `${right.date}${right.time || ''}`;
+                return leftKey.localeCompare(rightKey);
+            });
+
+        return parsed
+            .map((point, index) => {
+                const previousClose = point.previousClose ?? parsed[index - 1]?.close ?? null;
+                const change = point.change ?? (previousClose !== null ? point.close - previousClose : point.close - point.open);
+                const base = previousClose ?? point.open;
+                const changePct = point.changePct ?? (base ? percentage(change, base) : 0);
+                return {
+                    date: point.date,
+                    time: point.time,
+                    open: point.open,
+                    high: point.high,
+                    low: point.low,
+                    close: point.close,
+                    volume: point.volume,
+                    change,
+                    changePct,
+                    listedShares: point.listedShares
+                };
+            })
+            .filter((point) => !startDate || point.date >= startDate);
+    }
+
     function generateAnchoredSyntheticChart(options) {
         const stockCode = options.stockCode;
         const startDate = options.startDate;
@@ -178,13 +337,85 @@
         return periods.slice().sort((left, right) => right.sortKey - left.sortKey);
     }
 
+    function parseAbsoluteUrl(value) {
+        const match = String(value || '').trim().match(/^(https?):\/\/([^\/?#]+)(\/[^?#]*)?(\?[^#]*)?(#.*)?$/i);
+        if (!match) return null;
+
+        return {
+            origin: `${match[1].toLowerCase()}://${match[2]}`,
+            path: match[3] || '/',
+            query: match[4] || '',
+            hash: match[5] || ''
+        };
+    }
+
+    function resolveAbsoluteUrl(candidate, currentUrl) {
+        const base = parseAbsoluteUrl(currentUrl) || parseAbsoluteUrl('https://example.com/index.html');
+        const value = String(candidate || '').trim();
+        if (!value) return '';
+
+        const absolute = parseAbsoluteUrl(value);
+        if (absolute) {
+            return `${absolute.origin}${absolute.path}${absolute.query}${absolute.hash}`;
+        }
+
+        if (value.startsWith('/')) {
+            return `${base.origin}${value}`;
+        }
+
+        const directory = base.path.endsWith('/')
+            ? base.path
+            : base.path.slice(0, base.path.lastIndexOf('/') + 1);
+        return `${base.origin}${directory}${value}`;
+    }
+
+    function resolveKakaoRedirectUri(currentUrl) {
+        return resolveAbsoluteUrl('auth/kakao/callback', currentUrl || 'https://example.com/index.html');
+    }
+
+    function resolveKakaoCallbackUri(currentUrl) {
+        const parsed = parseAbsoluteUrl(currentUrl) || parseAbsoluteUrl('https://example.com/auth/kakao/callback');
+        return `${parsed.origin}${parsed.path}`;
+    }
+
+    function resolveKakaoReturnUrl(candidate, currentUrl) {
+        const base = parseAbsoluteUrl(currentUrl) || parseAbsoluteUrl('https://example.com/kakao_callback.php');
+        const fallback = `${base.origin}/index.html`;
+        if (!candidate) return fallback;
+
+        const resolved = resolveAbsoluteUrl(candidate, fallback);
+        const parsed = parseAbsoluteUrl(resolved);
+        return parsed && parsed.origin === base.origin ? resolved : fallback;
+    }
+
+    function clearKakaoSessionState(storage, auth) {
+        if (storage && typeof storage.removeItem === 'function') {
+            storage.removeItem(KAKAO_STORAGE_KEYS.token);
+            storage.removeItem(KAKAO_STORAGE_KEYS.error);
+            storage.removeItem(KAKAO_STORAGE_KEYS.returnUrl);
+        }
+
+        if (auth && typeof auth.setAccessToken === 'function') {
+            auth.setAccessToken(null);
+        }
+    }
+
     root.InvestmentLogic = {
         buildBusinessDateTokens,
         buildCompanyDirectory,
+        buildYahooSymbol,
+        clearKakaoSessionState,
         generateAnchoredSyntheticChart,
         getQuarterlyReportConfigs,
         matchCompanies,
+        normalizeKiwoomChartRows,
+        normalizeKiwoomQuote,
         normalizePublicQuote,
+        normalizeYfinanceChartRows,
+        normalizeYfinanceQuote,
+        resolveKakaoCallbackUri,
+        resolveKakaoRedirectUri,
+        resolveKakaoReturnUrl,
         sortPeriods
     };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

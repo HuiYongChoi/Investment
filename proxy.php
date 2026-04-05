@@ -17,6 +17,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 const DART_BASE = 'https://opendart.fss.or.kr/api';
 const KRX_BASE = 'https://data-dbg.krx.co.kr/svc/apis/sto';
+const KIWOOM_BASE = 'https://api.kiwoom.com';
+const KIWOOM_TOKEN_URL = 'https://api.kiwoom.com/oauth2/token';
 const NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock';
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 const KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token';
@@ -125,6 +127,25 @@ function kakao_rest_key(): string
     return get_secret('KAKAO_REST_API_KEY', 'kakao_rest_api_key', aws_inline_value('Rest API:'));
 }
 
+function kiwoom_app_key(): string
+{
+    return get_secret('KIWOOM_APP_KEY', 'kiwoom_app_key');
+}
+
+function kiwoom_secret_key(): string
+{
+    return get_secret('KIWOOM_SECRET_KEY', 'kiwoom_secret_key');
+}
+
+function kiwoom_token_cache_path(): string
+{
+    $config = secret_config();
+    if (!empty($config['kiwoom_token_cache'])) {
+        return trim((string) $config['kiwoom_token_cache']);
+    }
+    return rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'investment-navigator-kiwoom-token.json';
+}
+
 function resolve_redirect_url(string $currentUrl, string $location): string
 {
     if (preg_match('#^https?://#i', $location)) return $location;
@@ -140,6 +161,56 @@ function resolve_redirect_url(string $currentUrl, string $location): string
     $path = $parts['path'] ?? '/';
     $baseDir = rtrim(str_replace('\\', '/', dirname($path)), '/');
     return "{$scheme}://{$host}{$port}{$baseDir}/{$location}";
+}
+
+function now_kst(): DateTimeImmutable
+{
+    return new DateTimeImmutable('now', new DateTimeZone('Asia/Seoul'));
+}
+
+function parse_kiwoom_expiry_timestamp(string $raw): int
+{
+    $value = trim($raw);
+    if ($value === '') return now_kst()->modify('+23 hours')->getTimestamp();
+
+    $formats = ['YmdHis', 'Y-m-d H:i:s', DateTimeInterface::ATOM];
+    foreach ($formats as $format) {
+        $parsed = DateTimeImmutable::createFromFormat($format, $value, new DateTimeZone('Asia/Seoul'));
+        if ($parsed instanceof DateTimeImmutable) return $parsed->getTimestamp();
+    }
+
+    try {
+        return (new DateTimeImmutable($value, new DateTimeZone('Asia/Seoul')))->getTimestamp();
+    } catch (Throwable $ignored) {
+        return now_kst()->modify('+23 hours')->getTimestamp();
+    }
+}
+
+function read_cached_kiwoom_token(): array
+{
+    $path = kiwoom_token_cache_path();
+    if (!is_readable($path)) return [];
+
+    $payload = safe_json_decode((string) file_get_contents($path));
+    $token = trim((string) ($payload['token'] ?? ''));
+    $expiresAt = (int) ($payload['expires_ts'] ?? 0);
+    if ($token === '' || $expiresAt <= (time() + 300)) return [];
+    return $payload;
+}
+
+function write_cached_kiwoom_token(array $payload): void
+{
+    $path = kiwoom_token_cache_path();
+    @file_put_contents($path, json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    @chmod($path, 0600);
+}
+
+function invalidate_cached_kiwoom_token(): void
+{
+    $path = kiwoom_token_cache_path();
+    if (is_file($path)) {
+        @unlink($path);
+    }
 }
 
 function request_upstream(string $url, array $headers = [], ?string $body = null, string $method = 'GET', int $redirects = 0): array
@@ -186,6 +257,83 @@ function request_upstream(string $url, array $headers = [], ?string $body = null
     return ['status' => $status, 'body' => $raw];
 }
 
+function ensure_kiwoom_token(bool $forceRefresh = false): string
+{
+    $appKey = kiwoom_app_key();
+    $secretKey = kiwoom_secret_key();
+    if ($appKey === '' || $secretKey === '') {
+        throw new RuntimeException('Kiwoom App Key/Secret가 설정되지 않았습니다.');
+    }
+
+    if (!$forceRefresh) {
+        $cached = read_cached_kiwoom_token();
+        if (!empty($cached['token'])) {
+            $tokenType = trim((string) ($cached['token_type'] ?? 'Bearer'));
+            return "{$tokenType} " . trim((string) $cached['token']);
+        }
+    }
+
+    $upstream = request_upstream(
+        KIWOOM_TOKEN_URL,
+        ['Content-Type: application/json;charset=UTF-8'],
+        json_encode([
+            'grant_type' => 'client_credentials',
+            'appkey' => $appKey,
+            'secretkey' => $secretKey,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        'POST'
+    );
+    $payload = safe_json_decode($upstream['body']);
+    $token = trim((string) ($payload['token'] ?? ''));
+
+    if ($upstream['status'] >= 400 || $token === '') {
+        $message = (string) ($payload['return_msg'] ?? $payload['msg'] ?? $payload['error'] ?? 'Kiwoom access token issuance failed');
+        throw new RuntimeException($message);
+    }
+
+    $tokenType = trim((string) ($payload['token_type'] ?? 'Bearer'));
+    write_cached_kiwoom_token([
+        'token' => $token,
+        'token_type' => $tokenType,
+        'expires_dt' => (string) ($payload['expires_dt'] ?? ''),
+        'expires_ts' => parse_kiwoom_expiry_timestamp((string) ($payload['expires_dt'] ?? '')),
+    ]);
+
+    return "{$tokenType} {$token}";
+}
+
+function request_kiwoom_api(string $path, string $apiId, array $body, array $options = []): array
+{
+    $headers = [
+        'Content-Type: application/json;charset=UTF-8',
+        'Authorization: ' . ensure_kiwoom_token((bool) ($options['force_refresh'] ?? false)),
+        'api-id: ' . $apiId,
+    ];
+
+    $contYn = trim((string) ($options['cont_yn'] ?? ''));
+    $nextKey = trim((string) ($options['next_key'] ?? ''));
+    if ($contYn !== '') $headers[] = 'cont-yn: ' . $contYn;
+    if ($nextKey !== '') $headers[] = 'next-key: ' . $nextKey;
+
+    $upstream = request_upstream(
+        KIWOOM_BASE . $path,
+        $headers,
+        json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        'POST'
+    );
+
+    if (in_array($upstream['status'], [401, 403], true) && empty($options['force_refresh'])) {
+        invalidate_cached_kiwoom_token();
+        return request_kiwoom_api($path, $apiId, $body, [
+            'cont_yn' => $contYn,
+            'next_key' => $nextKey,
+            'force_refresh' => true,
+        ]);
+    }
+
+    return $upstream;
+}
+
 function query_without(array $source, array $omit): array
 {
     $result = [];
@@ -207,6 +355,85 @@ function safe_json_decode(string $raw): array
 {
     $decoded = json_decode($raw, true);
     return is_array($decoded) ? $decoded : ['raw' => $raw];
+}
+
+function yfinance_bridge_path(): string
+{
+    return __DIR__ . '/yfinance_bridge.py';
+}
+
+function yfinance_python_candidates(): array
+{
+    $configured = get_secret('YFINANCE_PYTHON_BIN', 'yfinance_python_bin');
+    return array_values(array_unique(array_filter([
+        trim($configured),
+        'python3',
+        'python',
+    ], static fn ($item) => $item !== '')));
+}
+
+function run_yfinance_bridge(array $args): array
+{
+    foreach (yfinance_python_candidates() as $pythonBin) {
+        $parts = [escapeshellarg($pythonBin), escapeshellarg(yfinance_bridge_path())];
+        foreach ($args as $arg) {
+            $parts[] = escapeshellarg((string) $arg);
+        }
+
+        $command = implode(' ', $parts);
+        $descriptors = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        $process = @proc_open($command, $descriptors, $pipes, __DIR__);
+        if (!is_resource($process)) {
+            continue;
+        }
+
+        fclose($pipes[0]);
+        $stdout = stream_get_contents($pipes[1]) ?: '';
+        $stderr = stream_get_contents($pipes[2]) ?: '';
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        return [
+            'status' => proc_close($process),
+            'stdout' => $stdout,
+            'stderr' => $stderr,
+        ];
+    }
+
+    return [
+        'status' => 127,
+        'stdout' => '',
+        'stderr' => 'Python runtime was not found for yfinance bridge',
+    ];
+}
+
+function request_yfinance_bridge(string $command, array $params): array
+{
+    $args = [$command];
+    foreach ($params as $key => $value) {
+        $text = trim((string) $value);
+        if ($text === '') continue;
+        $args[] = '--' . str_replace('_', '-', (string) $key);
+        $args[] = $text;
+    }
+
+    $result = run_yfinance_bridge($args);
+    $payload = trim($result['stdout']) !== '' ? safe_json_decode($result['stdout']) : [];
+    if (!is_array($payload)) {
+        $payload = [];
+    }
+
+    if (!array_key_exists('live', $payload)) $payload['live'] = false;
+    if (empty($payload['source'])) $payload['source'] = 'yfinance_python';
+    if ((int) $result['status'] !== 0 && empty($payload['error'])) {
+        $payload['error'] = trim((string) $result['stderr']) ?: 'yfinance bridge failed';
+    }
+
+    return $payload;
 }
 
 function business_dates(string $startToken, string $endToken): array
@@ -247,6 +474,68 @@ function normalize_krx_row(array $item): array
     ];
 }
 
+function kiwoom_chart_config(string $interval): array
+{
+    $normalized = strtolower(trim($interval));
+    if ($normalized === 'weekly') {
+        return [
+            'interval' => 'weekly',
+            'api_id' => 'ka10082',
+            'series_key' => 'stk_stk_pole_chart_qry',
+            'date_key' => 'dt',
+            'time_key' => '',
+        ];
+    }
+    if ($normalized === 'minute') {
+        return [
+            'interval' => 'minute',
+            'api_id' => 'ka10080',
+            'series_key' => 'stk_min_pole_chart_qry',
+            'date_key' => '',
+            'time_key' => 'cntr_tm',
+        ];
+    }
+
+    return [
+        'interval' => 'daily',
+        'api_id' => 'ka10081',
+        'series_key' => 'stk_dt_pole_chart_qry',
+        'date_key' => 'dt',
+        'time_key' => '',
+    ];
+}
+
+function kiwoom_chart_body(string $stockCode, array $config, string $endDate, string $adjusted, string $tickScope): array
+{
+    $body = [
+        'stk_cd' => $stockCode,
+        'upd_stkpc_tp' => $adjusted === '0' ? '0' : '1',
+    ];
+
+    if ($config['interval'] === 'minute') {
+        $body['tic_scope'] = $tickScope !== '' ? $tickScope : '1';
+        if ($endDate !== '') $body['base_dt'] = $endDate;
+        return $body;
+    }
+
+    $body['base_dt'] = $endDate;
+    return $body;
+}
+
+function kiwoom_row_date_token(array $row, array $config): string
+{
+    $dateKey = $config['date_key'];
+    $timeKey = $config['time_key'];
+
+    if ($dateKey !== '' && !empty($row[$dateKey])) {
+        return preg_replace('/\D/', '', (string) $row[$dateKey]);
+    }
+    if ($timeKey !== '' && !empty($row[$timeKey])) {
+        return preg_replace('/\D/', '', (string) $row[$timeKey]);
+    }
+    return '';
+}
+
 $action = $_GET['action'] ?? '';
 $endpoint = $_GET['endpoint'] ?? '';
 
@@ -262,6 +551,146 @@ try {
         http_response_code($upstream['status']);
         echo $upstream['body'];
         exit;
+    }
+
+    if ($action === 'kiwoom_quote') {
+        if (kiwoom_app_key() === '' || kiwoom_secret_key() === '') {
+            json_response(200, ['live' => false, 'error' => 'Kiwoom App Key/Secret is not configured']);
+        }
+
+        $stockCode = trim((string) ($_GET['stock_code'] ?? ''));
+        if ($stockCode === '') json_response(400, ['error' => 'stock_code is required']);
+
+        $upstream = request_kiwoom_api('/api/dostk/stkinfo', 'ka10001', ['stk_cd' => $stockCode]);
+        $payload = safe_json_decode($upstream['body']);
+        $payload['live'] = $upstream['status'] < 400;
+        $payload['source'] = 'kiwoom_rest';
+        $payload['fetched_at'] = now_kst()->format(DateTimeInterface::ATOM);
+        json_response($upstream['status'], $payload);
+    }
+
+    if ($action === 'kiwoom_chart') {
+        if (kiwoom_app_key() === '' || kiwoom_secret_key() === '') {
+            json_response(200, [
+                'live' => false,
+                'source' => 'kiwoom_rest',
+                'error' => 'Kiwoom App Key/Secret is not configured',
+                'interval' => strtolower(trim((string) ($_GET['interval'] ?? 'daily'))),
+                'series_key' => '',
+                'date_key' => '',
+                'time_key' => '',
+                'rows' => [],
+            ]);
+        }
+
+        $stockCode = trim((string) ($_GET['stock_code'] ?? ''));
+        $interval = strtolower(trim((string) ($_GET['interval'] ?? 'daily')));
+        $startDate = preg_replace('/\D/', '', (string) ($_GET['start_date'] ?? date('Y') . '0101'));
+        $endDate = preg_replace('/\D/', '', (string) ($_GET['end_date'] ?? date('Ymd')));
+        $adjusted = trim((string) ($_GET['adjusted'] ?? '1'));
+        $tickScope = trim((string) ($_GET['tick_scope'] ?? '1'));
+
+        if ($stockCode === '') {
+            json_response(400, ['error' => 'stock_code is required', 'rows' => []]);
+        }
+
+        $config = kiwoom_chart_config($interval);
+        $rows = [];
+        $page = 0;
+        $error = null;
+        $contYn = '';
+        $nextKey = '';
+
+        do {
+            $page += 1;
+            $upstream = request_kiwoom_api(
+                '/api/dostk/chart',
+                $config['api_id'],
+                kiwoom_chart_body($stockCode, $config, $endDate, $adjusted, $tickScope),
+                [
+                    'cont_yn' => $contYn,
+                    'next_key' => $nextKey,
+                ]
+            );
+            $payload = safe_json_decode($upstream['body']);
+
+            if ($upstream['status'] >= 400) {
+                $error = (string) ($payload['return_msg'] ?? $payload['msg'] ?? $payload['error'] ?? 'Kiwoom chart request failed');
+                break;
+            }
+
+            $chunk = $payload[$config['series_key']] ?? [];
+            if (!is_array($chunk) || !$chunk) {
+                break;
+            }
+
+            $rows = array_merge($rows, $chunk);
+            $contYn = strtoupper(trim((string) ($upstream['headers']['cont-yn'] ?? '')));
+            $nextKey = trim((string) ($upstream['headers']['next-key'] ?? ''));
+
+            $earliest = null;
+            foreach ($chunk as $row) {
+                if (!is_array($row)) continue;
+                $token = kiwoom_row_date_token($row, $config);
+                if ($token === '') continue;
+                $earliest = $earliest === null ? $token : min($earliest, $token);
+            }
+
+            if ($contYn !== 'Y' || $nextKey === '') {
+                break;
+            }
+
+            if ($startDate !== '' && $earliest !== null && substr($earliest, 0, 8) < $startDate) {
+                break;
+            }
+        } while ($page < 20);
+
+        json_response(200, [
+            'live' => $error === null && !empty($rows),
+            'source' => 'kiwoom_rest',
+            'error' => $error,
+            'interval' => $config['interval'],
+            'fetched_at' => now_kst()->format(DateTimeInterface::ATOM),
+            'series_key' => $config['series_key'],
+            'date_key' => $config['date_key'],
+            'time_key' => $config['time_key'],
+            'rows' => $rows,
+        ]);
+    }
+
+    if ($action === 'yfinance_quote') {
+        $stockCode = trim((string) ($_GET['stock_code'] ?? ''));
+        $market = trim((string) ($_GET['market'] ?? 'KOSPI'));
+        if ($stockCode === '') {
+            json_response(400, ['error' => 'stock_code is required', 'live' => false, 'source' => 'yfinance_python']);
+        }
+
+        $payload = request_yfinance_bridge('quote', [
+            'stock_code' => $stockCode,
+            'market' => $market !== '' ? $market : 'KOSPI',
+        ]);
+        json_response(200, $payload);
+    }
+
+    if ($action === 'yfinance_chart') {
+        $stockCode = trim((string) ($_GET['stock_code'] ?? ''));
+        $market = trim((string) ($_GET['market'] ?? 'KOSPI'));
+        $interval = strtolower(trim((string) ($_GET['interval'] ?? 'daily')));
+        $startDate = preg_replace('/\D/', '', (string) ($_GET['start_date'] ?? date('Y') . '0101'));
+        $endDate = preg_replace('/\D/', '', (string) ($_GET['end_date'] ?? date('Ymd')));
+
+        if ($stockCode === '') {
+            json_response(400, ['error' => 'stock_code is required', 'live' => false, 'source' => 'yfinance_python', 'rows' => []]);
+        }
+
+        $payload = request_yfinance_bridge('chart', [
+            'stock_code' => $stockCode,
+            'market' => $market !== '' ? $market : 'KOSPI',
+            'interval' => $interval !== '' ? $interval : 'daily',
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+        ]);
+        json_response(200, $payload);
     }
 
     if ($action === 'krx') {
@@ -415,6 +844,8 @@ try {
         'service' => 'Investment Navigator PHP proxy',
         'status' => 'ok',
         'dart' => dart_key() !== '',
+        'kiwoom' => kiwoom_app_key() !== '' && kiwoom_secret_key() !== '',
+        'yfinance' => is_file(yfinance_bridge_path()),
         'krx' => krx_key() !== '',
         'gemini' => gemini_key() !== '',
         'kakao' => kakao_rest_key() !== '',

@@ -2,7 +2,10 @@ const isLocal = location.hostname === 'localhost' || location.hostname === '127.
 const LOCAL_PROXY = 'http://localhost:8081';
 const PROD_PROXY = '/proxy.php';
 const KAKAO_JS_KEY = '88cd449d612399a0219090bbcfc20b24';
-const KAKAO_REDIRECT_URI = 'https://hyfin.duckdns.org/kakao_callback.php';
+const KAKAO_STORAGE_TOKEN = 'invest_nav_kakao_token';
+const KAKAO_STORAGE_ERROR = 'invest_nav_kakao_error';
+const KAKAO_STORAGE_RETURN_URL = 'invest_nav_kakao_return_url';
+const KAKAO_REDIRECT_URI = InvestmentLogic.resolveKakaoRedirectUri(location.href);
 const XP_MAX = 100;
 
 const COMPANY_MAP = {
@@ -265,17 +268,18 @@ function beginKakaoLogin() {
         alert('카카오 SDK를 불러오지 못했습니다.');
         return;
     }
-    sessionStorage.setItem('invest_nav_kakao_return_url', location.href);
+    sessionStorage.setItem(KAKAO_STORAGE_RETURN_URL, location.href);
     Kakao.Auth.authorize({
         redirectUri: KAKAO_REDIRECT_URI
     });
 }
 
 async function restoreKakaoSession() {
-    const accessToken = sessionStorage.getItem('invest_nav_kakao_token');
+    const accessToken = sessionStorage.getItem(KAKAO_STORAGE_TOKEN) || (window.Kakao ? Kakao.Auth.getAccessToken() : '');
     if (!window.Kakao || !accessToken) return;
     try {
         Kakao.Auth.setAccessToken(accessToken);
+        sessionStorage.setItem(KAKAO_STORAGE_TOKEN, accessToken);
         const profile = await Kakao.API.request({ url: '/v2/user/me' });
         applyKakaoProfile(profile);
     } catch (error) {
@@ -295,9 +299,12 @@ async function logoutKakao() {
 }
 
 function clearKakaoSession() {
-    sessionStorage.removeItem('invest_nav_kakao_token');
+    InvestmentLogic.clearKakaoSessionState(sessionStorage, window.Kakao ? Kakao.Auth : null);
     document.getElementById('btn-kakao-login').classList.remove('hidden');
     document.getElementById('kakao-user-profile').classList.add('hidden');
+    document.getElementById('kakao-nickname').textContent = '로그인됨';
+    document.getElementById('kakao-login-state').textContent = '카카오 연동 활성화';
+    document.getElementById('kakao-profile-img').removeAttribute('src');
 }
 
 function applyKakaoProfile(profile) {
@@ -311,10 +318,10 @@ function applyKakaoProfile(profile) {
 }
 
 function consumeKakaoMessage() {
-    const error = sessionStorage.getItem('invest_nav_kakao_error');
+    const error = sessionStorage.getItem(KAKAO_STORAGE_ERROR);
     if (!error) return;
     setStatus(`카카오 로그인 안내: ${error}`, 'warn');
-    sessionStorage.removeItem('invest_nav_kakao_error');
+    sessionStorage.removeItem(KAKAO_STORAGE_ERROR);
 }
 
 async function sendBriefingToKakao() {
@@ -361,13 +368,13 @@ async function startSearch() {
     hideCompanySuggestions();
     state.company = company;
     state.chartRange = '1M';
-    setStatus(`${company.name} 분석을 시작합니다. DART, 키움 시세, 공시 리포트를 동기화하는 중입니다.`);
+    setStatus(`${company.name} 분석을 시작합니다. DART, Yahoo Finance 시세, 공시 리포트를 동기화하는 중입니다.`);
     setSourceBadge('source-dart', 'DART 동기화 중');
-    setSourceBadge('source-krx', '키움 시세 동기화 중');
+    setSourceBadge('source-market', 'Yahoo Finance 동기화 중');
     setSourceBadge('source-gemini', 'Gemini 대기 중');
 
     document.getElementById('company-name').textContent = company.name;
-    document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 키움 REST 일봉/주봉 차트를 분석합니다.`;
+    document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 Yahoo Finance (yfinance Python) 일봉/주봉 차트를 분석합니다.`;
     document.getElementById('dart-link').href = `https://dart.fss.or.kr/dsaf001/main.do?corpCode=${company.corpCode}`;
     document.getElementById('dashboard').classList.remove('hidden');
     document.getElementById('stock-realtime').classList.add('hidden');
@@ -376,14 +383,13 @@ async function startSearch() {
     try {
         const startDate = `${getCurrentYearKst()}0101`;
         const endDate = getCurrentDateTokenKst();
-        const [annualsResult, quarterliesResult, reportsResult, dailyChartResult, weeklyChartResult, quoteResult, publicQuoteResult] = await Promise.allSettled([
+        const [annualsResult, quarterliesResult, reportsResult, dailyChartResult, weeklyChartResult, quoteResult] = await Promise.allSettled([
             fetchMultiYearDart(company.corpCode),
             fetchQuarterlyHistory(company.corpCode),
             fetchDartReportList(company.corpCode),
-            fetchKiwoomChart(company.stockCode, 'daily', startDate, endDate),
-            fetchKiwoomChart(company.stockCode, 'weekly', startDate, endDate),
-            fetchKiwoomQuote(company.stockCode),
-            fetchPublicQuote(company.stockCode)
+            fetchYfinanceChart(company.stockCode, company.market, 'daily', startDate, endDate),
+            fetchYfinanceChart(company.stockCode, company.market, 'weekly', startDate, endDate),
+            fetchYfinanceQuote(company.stockCode, company.market)
         ]);
 
         if (annualsResult.status !== 'fulfilled' || !annualsResult.value.length) {
@@ -393,31 +399,26 @@ async function startSearch() {
         state.annuals = annualsResult.value;
         state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
         state.reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
-        const kiwoomQuotePayload = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
-        const publicQuote = publicQuoteResult.status === 'fulfilled' ? publicQuoteResult.value : null;
-        state.quote = kiwoomQuotePayload?.live
-            ? InvestmentLogic.normalizeKiwoomQuote(kiwoomQuotePayload, kiwoomQuotePayload.fetched_at || '')
-            : publicQuote;
-        state.quoteSource = kiwoomQuotePayload?.live ? 'kiwoom_rest' : publicQuote ? 'naver_public_quote' : 'unavailable';
+        const yfinanceQuotePayload = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
+        state.quote = yfinanceQuotePayload?.live
+            ? InvestmentLogic.normalizeYfinanceQuote(yfinanceQuotePayload, yfinanceQuotePayload.fetched_at || '')
+            : null;
+        state.quoteSource = yfinanceQuotePayload?.live ? 'yfinance_python' : 'unavailable';
 
         const dailyChartPayload = dailyChartResult.status === 'fulfilled'
             ? dailyChartResult.value
-            : { live: false, rows: [], error: '키움 일봉 차트 요청 실패', date_key: 'dt', time_key: '' };
+            : { live: false, rows: [], error: 'Yahoo Finance 일봉 차트 요청 실패' };
         const weeklyChartPayload = weeklyChartResult.status === 'fulfilled'
             ? weeklyChartResult.value
-            : { live: false, rows: [], error: '키움 주봉 차트 요청 실패', date_key: 'dt', time_key: '' };
+            : { live: false, rows: [], error: 'Yahoo Finance 주봉 차트 요청 실패' };
 
         const dailyPoints = dailyChartPayload.live
-            ? InvestmentLogic.normalizeKiwoomChartRows(dailyChartPayload.rows, {
-                dateKey: dailyChartPayload.date_key || 'dt',
-                timeKey: dailyChartPayload.time_key || '',
+            ? InvestmentLogic.normalizeYfinanceChartRows(dailyChartPayload.rows, {
                 startDate
             })
             : [];
         const weeklyPoints = weeklyChartPayload.live
-            ? InvestmentLogic.normalizeKiwoomChartRows(weeklyChartPayload.rows, {
-                dateKey: weeklyChartPayload.date_key || 'dt',
-                timeKey: weeklyChartPayload.time_key || '',
+            ? InvestmentLogic.normalizeYfinanceChartRows(weeklyChartPayload.rows, {
                 startDate
             })
             : [];
@@ -426,19 +427,19 @@ async function startSearch() {
         if (dailyPoints.length) {
             state.chartDaily = dailyPoints;
             state.chartWeekly = weeklyPoints.length ? weeklyPoints : aggregateCandles(dailyPoints, 'week');
-            state.chartSource = 'kiwoom_rest';
+            state.chartSource = 'yfinance_python';
             writeChartCache(company.stockCode, state.chartDaily, state.chartWeekly);
-            setSourceBadge('source-krx', '키움 REST 시세 연동됨', 'success');
+            setSourceBadge('source-market', 'Yahoo Finance 시세 연동됨', 'success');
         } else if (cachedChart) {
             state.chartDaily = cachedChart.daily;
             state.chartWeekly = cachedChart.weekly.length ? cachedChart.weekly : aggregateCandles(cachedChart.daily, 'week');
             state.chartSource = 'cache';
-            setSourceBadge('source-krx', '키움 실패 · 저장된 마지막 차트 사용', 'warn');
+            setSourceBadge('source-market', 'Yahoo Finance 실패 · 저장된 마지막 차트 사용', 'warn');
         } else {
             state.chartDaily = [];
             state.chartWeekly = [];
             state.chartSource = 'unavailable';
-            setSourceBadge('source-krx', dailyChartPayload.error || weeklyChartPayload.error || '키움 차트를 불러오지 못했습니다.', 'error');
+            setSourceBadge('source-market', dailyChartPayload.error || weeklyChartPayload.error || 'Yahoo Finance 차트를 불러오지 못했습니다.', 'error');
         }
 
         state.summaries = state.annuals.map((item) => ({
@@ -451,7 +452,10 @@ async function startSearch() {
         renderFinancialTable('fin-quarterly-table', state.quarterlies);
 
         const latestChartPoint = state.chartDaily[state.chartDaily.length - 1] || null;
-        const valuationSnapshot = latestChartPoint || state.quote || null;
+        if (!state.quote && latestChartPoint) {
+            state.quoteSource = state.chartSource === 'cache' ? 'cache' : 'yfinance_chart';
+        }
+        const valuationSnapshot = state.quote || latestChartPoint || null;
         autoFillMetrics(state.summaries[0]?.summary || {}, valuationSnapshot);
         calcMetrics();
         renderStockStrip(state.quote, latestChartPoint);
@@ -460,11 +464,7 @@ async function startSearch() {
         renderCharts();
 
         setSourceBadge('source-dart', 'DART 공시 연동됨', 'success');
-        document.getElementById('chart-status').textContent = state.chartSource === 'kiwoom_rest'
-            ? '키움 REST 일봉/주봉 차트'
-            : state.chartSource === 'cache'
-                ? '키움 응답 지연으로 저장된 마지막 차트를 표시 중입니다.'
-                : '키움 차트가 연결되지 않아 가격 차트를 표시하지 못하고 있습니다.';
+        document.getElementById('chart-status').textContent = formatChartSourceStatus();
         addXP(18);
 
         await generateBriefing();
@@ -549,7 +549,7 @@ function buildProxyPostUrl(service, endpoint = '', productionAction = service) {
 }
 
 function chartCacheKey(stockCode) {
-    return `invest_nav_chart_cache_v40_${getCurrentYearKst()}_${stockCode}`;
+    return `invest_nav_chart_cache_v41_${getCurrentYearKst()}_${stockCode}`;
 }
 
 function readChartCache(stockCode) {
@@ -670,27 +670,54 @@ async function fetchDartReportList(corpCode) {
         .slice(0, 12);
 }
 
-async function fetchPublicQuote(stockCode) {
-    const payload = await fetchJson(buildProxyUrl('market', '/quote', {
-        stock_code: stockCode
-    }, 'quote'));
-    return InvestmentLogic.normalizePublicQuote(payload);
+function formatChartSourceStatus() {
+    if (state.chartSource === 'yfinance_python') {
+        return 'Yahoo Finance (yfinance Python) 일봉/주봉 차트';
+    }
+    if (state.chartSource === 'cache') {
+        return 'Yahoo Finance 응답 지연으로 저장된 마지막 차트를 표시 중입니다.';
+    }
+    return 'Yahoo Finance 차트가 연결되지 않아 가격 차트를 표시하지 못하고 있습니다.';
 }
 
-async function fetchKiwoomQuote(stockCode) {
-    return fetchJson(buildProxyUrl('kiwoom', '/quote', {
-        stock_code: stockCode
-    }, 'kiwoom_quote'));
+function formatChartSourceName() {
+    if (state.chartSource === 'yfinance_python') {
+        return 'Yahoo Finance (yfinance Python)';
+    }
+    if (state.chartSource === 'cache') {
+        return '저장된 마지막 Yahoo Finance 차트';
+    }
+    return '차트 미연결';
 }
 
-async function fetchKiwoomChart(stockCode, interval, startDate, endDate) {
-    return fetchJson(buildProxyUrl('kiwoom', '/chart', {
+function formatQuoteSourceText() {
+    if (state.quoteSource === 'yfinance_python') {
+        return 'Yahoo Finance (yfinance Python) 현재가 기준';
+    }
+    if (state.quoteSource === 'yfinance_chart') {
+        return '최근 Yahoo Finance 차트 기준';
+    }
+    if (state.quoteSource === 'cache') {
+        return '저장된 마지막 Yahoo Finance 차트 기준';
+    }
+    return '최근 차트 기준';
+}
+
+async function fetchYfinanceQuote(stockCode, market) {
+    return fetchJson(buildProxyUrl('yfinance', '/quote', {
         stock_code: stockCode,
+        market
+    }, 'yfinance_quote'));
+}
+
+async function fetchYfinanceChart(stockCode, market, interval, startDate, endDate) {
+    return fetchJson(buildProxyUrl('yfinance', '/chart', {
+        stock_code: stockCode,
+        market,
         interval,
         start_date: startDate,
-        end_date: endDate,
-        adjusted: '1'
-    }, 'kiwoom_chart'));
+        end_date: endDate
+    }, 'yfinance_chart'));
 }
 
 function buildFinancialRows(periods) {
@@ -843,7 +870,6 @@ function renderFinancialTable(containerId, periods) {
 function renderStockStrip(quote, chartPoint) {
     const snapshot = quote || chartPoint;
     if (!snapshot) return;
-    const hasLiveQuote = state.quoteSource === 'kiwoom_rest';
     const price = snapshot.close;
     const open = snapshot.open ?? chartPoint?.open ?? 0;
     const high = snapshot.high ?? chartPoint?.high ?? 0;
@@ -854,7 +880,7 @@ function renderStockStrip(quote, chartPoint) {
     const changePct = snapshot.changePct ?? percentage(change, basePrice);
     const className = change > 0 ? 'up' : change < 0 ? 'down' : '';
     const sign = change > 0 ? '+' : '';
-    const sourceText = hasLiveQuote ? '키움 REST 현재가 기준' : state.quoteSource === 'naver_public_quote' ? '공개 시세 보조 기준' : '최근 차트 기준';
+    const sourceText = formatQuoteSourceText();
     const priceSub = `${sign}${change.toLocaleString()}원 (${changePct.toFixed(2)}%)${snapshot.asOf ? ` · ${formatQuoteTime(snapshot.asOf)}` : ''}`;
     document.getElementById('stock-realtime').classList.remove('hidden');
     document.getElementById('stock-realtime').innerHTML = `
@@ -1134,7 +1160,7 @@ function computeTechnicals(data) {
 function renderTechnicalCards() {
     const container = document.getElementById('technical-grid');
     if (!state.technicals) {
-        container.innerHTML = '<div class="report-item">키움 차트 데이터가 충분할 때 기술적 분석 카드가 표시됩니다.</div>';
+        container.innerHTML = '<div class="report-item">Yahoo Finance 차트 데이터가 충분할 때 기술적 분석 카드가 표시됩니다.</div>';
         return;
     }
 
@@ -1517,7 +1543,7 @@ ${company}에 대한 한국어 투자 브리핑을 작성하세요.
 - 건전성 점수: ${state.ratings.stability.score}/5
 - 효율성 점수: ${state.ratings.efficiency.score}/5
 - 기술적 판단: ${technicalCards.map((card) => `${card.label} ${card.signal}`).join(', ')}
-- 차트 소스: ${state.chartSource === 'kiwoom_rest' ? 'Kiwoom REST API' : state.chartSource === 'cache' ? '저장된 마지막 키움 차트' : '차트 미연결'}
+- 차트 소스: ${formatChartSourceName()}
 
 [출력 형식]
 1. 한 줄 요약
@@ -1571,7 +1597,7 @@ function buildLocalBriefing() {
     ];
     const riskLines = [
         `상승여력 ${state.metrics.upside.toFixed(1)}%는 입력한 목표 PER 가정에 민감합니다.`,
-        `차트 소스는 현재 ${state.chartSource === 'kiwoom_rest' ? '키움 REST 실데이터' : state.chartSource === 'cache' ? '저장된 마지막 키움 차트' : '미연결'}입니다.`,
+        `차트 소스는 현재 ${formatChartSourceName()}입니다.`,
         `최근 분기 데이터가 부족한 경우 분기 성장률 평가는 보수적으로 해석해야 합니다.`
     ];
     const finalOpinion = state.lastAnalysis.totalPct >= 80 ? '매수 후보' : state.lastAnalysis.totalPct >= 60 ? '관망 우위' : '주의 구간';

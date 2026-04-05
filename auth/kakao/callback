@@ -35,7 +35,7 @@
         <h1>카카오 로그인 처리 중</h1>
         <p id="message">인가 코드를 확인하고 있습니다.</p>
     </div>
-    <script src="dashboard_logic.js"></script>
+    <script src="/dashboard_logic.js"></script>
     <script>
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
         const proxyBase = isLocal ? 'http://localhost:8081/kakao/token' : '/proxy.php?action=kakao';
