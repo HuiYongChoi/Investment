@@ -98,6 +98,8 @@ const state = {
     chartDrag: null,
     techDrag: null,
     chartSource: 'idle',
+    technicalsFull: null,
+    technicalsFullSignature: '',
     searchQuery: '',
     searchMatches: [],
     searchMatchIndex: -1,
@@ -107,7 +109,8 @@ const state = {
     summaries: [],
     briefingMode: 'idle',
     lastAnalysis: { fin: {}, scores: {}, totalPct: 0, metrics: {} },
-    selectedIndicators: new Set(['RSI', 'MACD', 'STOCH', 'BOLL', 'MA'])
+    selectedIndicators: new Set(['RSI', 'MACD', 'STOCH', 'BOLL', 'MA']),
+    analysisToken: 0
 };
 
 let xpData = JSON.parse(localStorage.getItem('invest_nav_xp') || '{"xp":0,"lv":1}');
@@ -490,12 +493,29 @@ async function startSearch() {
 
     syncCompanyInputValue(company);
     hideCompanySuggestions();
+    const analysisToken = state.analysisToken + 1;
+    state.analysisToken = analysisToken;
     state.company = company;
+    state.annuals = [];
+    state.quarterlies = [];
+    state.reports = [];
+    state.quote = null;
+    state.quoteSource = 'idle';
+    state.chartDaily = [];
+    state.chartWeekly = [];
     state.chartRange = 'DAY';
     state.chartWindow = null;
     state.chartDrag = null;
+    state.techDrag = null;
     state.chartFullSeries = [];
     state.chartVisible = [];
+    state.chartSource = 'idle';
+    state.technicals = null;
+    state.technicalsFull = null;
+    state.technicalsFullSignature = '';
+    state.ratings = null;
+    state.metrics = null;
+    state.summaries = [];
     priceHoverIndex = null;
     setStatus(`${company.name} 분석을 시작합니다. DART, Yahoo Finance 시세와 다중 기간 차트를 동기화하는 중입니다.`);
     setSourceBadge('source-dart', 'DART 동기화 중');
@@ -508,53 +528,32 @@ async function startSearch() {
     document.getElementById('dashboard').classList.remove('hidden');
     document.getElementById('stock-realtime').classList.add('hidden');
     document.getElementById('stock-realtime').innerHTML = '';
+    renderReports([]);
+    renderFinancialTable('fin-annual-table', []);
+    renderFinancialTable('fin-quarterly-table', []);
+    renderTechnicalCards();
+    renderTechSummary();
+    renderCharts();
+    document.getElementById('chart-status').textContent = 'Yahoo Finance 차트 동기화 중';
 
     try {
         const startDate = `${getCurrentYearKst() - CHART_HISTORY_YEARS}0101`;
         const endDate = getCurrentDateTokenKst();
         const companyNameHint = buildCompanyNameHint(company);
-        const [annualsResult, quarterliesResult, reportsResult, dailyChartResult, weeklyChartResult, quoteResult] = await Promise.allSettled([
+        const dailyChartPromise = fetchYfinanceChart(company.stockCode, company.market, 'daily', startDate, endDate, companyNameHint)
+            .catch((error) => ({ live: false, rows: [], error: error.message || 'Yahoo Finance 일봉 차트 요청 실패' }));
+        const quotePromise = fetchYfinanceQuote(company.stockCode, company.market, companyNameHint)
+            .catch((error) => ({ live: false, error: error.message || 'Yahoo Finance 현재가 요청 실패' }));
+        const financialDataPromise = Promise.allSettled([
             fetchMultiYearDart(company.corpCode),
             fetchQuarterlyHistory(company.corpCode),
-            fetchDartReportList(company.corpCode),
-            fetchYfinanceChart(company.stockCode, company.market, 'daily', startDate, endDate, companyNameHint),
-            fetchYfinanceChart(company.stockCode, company.market, 'weekly', startDate, endDate, companyNameHint),
-            fetchYfinanceQuote(company.stockCode, company.market, companyNameHint)
+            fetchDartReportList(company.corpCode)
         ]);
-
-        if (annualsResult.status !== 'fulfilled' || !annualsResult.value.length) {
-            throw new Error('DART 재무제표를 불러오지 못했습니다.');
-        }
-
-        state.annuals = annualsResult.value;
-        state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
-        state.reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
-        const yfinanceQuotePayload = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
-        const resolvedMarket = yfinanceQuotePayload?.market
-            || (dailyChartResult.status === 'fulfilled' ? dailyChartResult.value?.market : '')
-            || (weeklyChartResult.status === 'fulfilled' ? weeklyChartResult.value?.market : '');
-        if (resolvedMarket && resolvedMarket !== 'AUTO') {
-            state.company.market = resolvedMarket;
-        }
-        state.quote = yfinanceQuotePayload?.live
-            ? InvestmentLogic.normalizeYfinanceQuote(yfinanceQuotePayload, yfinanceQuotePayload.fetched_at || '')
-            : null;
-        state.quoteSource = yfinanceQuotePayload?.live ? 'yfinance_python' : 'unavailable';
-
-        const dailyChartPayload = dailyChartResult.status === 'fulfilled'
-            ? dailyChartResult.value
-            : { live: false, rows: [], error: 'Yahoo Finance 일봉 차트 요청 실패' };
-        const weeklyChartPayload = weeklyChartResult.status === 'fulfilled'
-            ? weeklyChartResult.value
-            : { live: false, rows: [], error: 'Yahoo Finance 주봉 차트 요청 실패' };
+        const dailyChartPayload = await dailyChartPromise;
+        if (analysisToken !== state.analysisToken) return;
 
         const dailyPoints = dailyChartPayload.live
             ? InvestmentLogic.normalizeYfinanceChartRows(dailyChartPayload.rows, {
-                startDate
-            })
-            : [];
-        const weeklyPoints = weeklyChartPayload.live
-            ? InvestmentLogic.normalizeYfinanceChartRows(weeklyChartPayload.rows, {
                 startDate
             })
             : [];
@@ -562,10 +561,10 @@ async function startSearch() {
 
         if (dailyPoints.length) {
             state.chartDaily = dailyPoints;
-            state.chartWeekly = weeklyPoints.length ? weeklyPoints : aggregateCandles(dailyPoints, 'week');
+            state.chartWeekly = aggregateCandles(dailyPoints, 'week');
             state.chartSource = 'yfinance_python';
             writeChartCache(company.stockCode, state.chartDaily, state.chartWeekly);
-            setSourceBadge('source-market', 'Yahoo Finance 시세 연동됨', 'success');
+            setSourceBadge('source-market', 'Yahoo Finance 차트 연동됨', 'success');
         } else if (cachedChart) {
             state.chartDaily = cachedChart.daily;
             state.chartWeekly = cachedChart.weekly.length ? cachedChart.weekly : aggregateCandles(cachedChart.daily, 'week');
@@ -575,35 +574,75 @@ async function startSearch() {
             state.chartDaily = [];
             state.chartWeekly = [];
             state.chartSource = 'unavailable';
-            setSourceBadge('source-market', dailyChartPayload.error || weeklyChartPayload.error || 'Yahoo Finance 차트를 불러오지 못했습니다.', 'error');
+            setSourceBadge('source-market', dailyChartPayload.error || 'Yahoo Finance 차트를 불러오지 못했습니다.', 'error');
         }
-
-        state.summaries = state.annuals.map((item) => ({
-            ...item,
-            summary: summarizeStatement(item.list)
-        }));
-
-        renderReports(state.reports);
-        renderFinancialTable('fin-annual-table', state.annuals);
-        renderFinancialTable('fin-quarterly-table', state.quarterlies);
 
         const latestChartPoint = state.chartDaily[state.chartDaily.length - 1] || null;
-        if (!state.quote && latestChartPoint) {
+        if (latestChartPoint) {
             state.quoteSource = state.chartSource === 'cache' ? 'cache' : 'yfinance_chart';
         }
-        const valuationSnapshot = state.quote || latestChartPoint || null;
-        autoFillMetrics(state.summaries[0]?.summary || {}, valuationSnapshot);
-        calcMetrics();
-        renderStockStrip(state.quote, latestChartPoint);
-        buildRatings();
-        refreshTechnicals();
+        renderStockStrip(null, latestChartPoint);
+        refreshTechnicals(false);
         renderCharts();
-
-        setSourceBadge('source-dart', 'DART 공시 연동됨', 'success');
         document.getElementById('chart-status').textContent = formatChartSourceStatus();
-        addXP(18);
+        setStatus(`${company.name} 차트를 먼저 표시했습니다. DART 재무와 브리핑을 이어서 정리하는 중입니다.`);
 
-        await generateBriefing();
+        const [annualsResult, quarterliesResult, reportsResult] = await financialDataPromise;
+        if (analysisToken !== state.analysisToken) return;
+
+        state.reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
+        renderReports(state.reports);
+
+        if (annualsResult.status === 'fulfilled' && annualsResult.value.length) {
+            state.annuals = annualsResult.value;
+            state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
+            state.summaries = state.annuals.map((item) => ({
+                ...item,
+                summary: summarizeStatement(item.list)
+            }));
+            renderFinancialTable('fin-annual-table', state.annuals);
+            renderFinancialTable('fin-quarterly-table', state.quarterlies);
+            const valuationSnapshot = state.quote || latestChartPoint || null;
+            autoFillMetrics(state.summaries[0]?.summary || {}, valuationSnapshot);
+            calcMetrics();
+            buildRatings();
+            setSourceBadge('source-dart', 'DART 공시 연동됨', 'success');
+        } else {
+            state.annuals = [];
+            state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
+            state.summaries = [];
+            renderFinancialTable('fin-annual-table', []);
+            renderFinancialTable('fin-quarterly-table', state.quarterlies);
+            setSourceBadge('source-dart', 'DART 재무제표를 불러오지 못했습니다.', 'error');
+        }
+
+        const quotePayload = await quotePromise;
+        if (analysisToken !== state.analysisToken) return;
+        const resolvedMarket = quotePayload?.market || dailyChartPayload?.market || '';
+        if (resolvedMarket && resolvedMarket !== 'AUTO') {
+            state.company.market = resolvedMarket;
+        }
+        state.quote = quotePayload?.live
+            ? InvestmentLogic.normalizeYfinanceQuote(quotePayload, quotePayload.fetched_at || '')
+            : null;
+        if (state.quote) {
+            state.quoteSource = 'yfinance_python';
+            setSourceBadge('source-market', 'Yahoo Finance 시세 연동됨', 'success');
+        }
+        renderStockStrip(state.quote, latestChartPoint);
+        if (state.summaries.length) {
+            autoFillMetrics(state.summaries[0]?.summary || {}, state.quote || latestChartPoint || null);
+            calcMetrics();
+            buildRatings();
+        }
+
+        addXP(18);
+        if (state.summaries.length) {
+            await generateBriefing();
+            if (analysisToken !== state.analysisToken) return;
+        } else {
+            setSourceBadge('source-gemini', 'Gemini 대기', 'warn');
+        }
 
         setStatus(`${company.name} 분석이 완료되었습니다.`, 'success');
         document.getElementById('dashboard').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1456,11 +1495,16 @@ function buildRatings() {
     `;
 }
 
-function refreshTechnicals() {
+function refreshTechnicals(shouldRenderCharts = true) {
     state.technicals = computeTechnicals(state.chartDaily);
+    state.technicalsFull = null;
+    state.technicalsFullSignature = '';
     renderTechnicalCards();
     renderTechSummary();
-    renderCharts();
+    if (shouldRenderCharts) {
+        renderCharts();
+        return;
+    }
     renderTechLegend();
 }
 
@@ -1529,6 +1573,17 @@ function computeTechnicals(data) {
     ];
 
     return { ma5, ma20, rsi, macd, stoch, boll, cards };
+}
+
+function ensureFullSeriesTechnicals(series) {
+    const signature = InvestmentLogic.buildChartSeriesSignature(series);
+    if (signature === state.technicalsFullSignature) {
+        return state.technicalsFull;
+    }
+
+    state.technicalsFull = computeTechnicals(series);
+    state.technicalsFullSignature = signature;
+    return state.technicalsFull;
 }
 
 const INDICATOR_TOOLTIPS = {
@@ -1690,7 +1745,7 @@ function onIndicatorToggle(event) {
 function renderCharts(options = {}) {
     syncChartRangeButtons();
     updateChartViewport(options.viewport || 'preserve');
-    const fullRangeTechnicals = computeTechnicals(state.chartFullSeries);
+    const fullRangeTechnicals = ensureFullSeriesTechnicals(state.chartFullSeries);
     const visibleTechnicals = InvestmentLogic.sliceTechnicalSeriesWindow(fullRangeTechnicals, state.chartWindow);
     renderPriceChart(state.chartVisible);
     renderTechPriceChart(state.chartVisible, visibleTechnicals);

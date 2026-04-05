@@ -2,16 +2,82 @@
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import math
+import os
+import tempfile
 from typing import Any, Dict, Iterable, Optional
 
 
 KST = dt.timezone(dt.timedelta(hours=9))
+CACHE_DIR = os.path.join(tempfile.gettempdir(), "investment-navigator-yfinance-cache")
 
 
 def now_kst() -> dt.datetime:
     return dt.datetime.now(KST)
+
+
+def ensure_cache_dir() -> str:
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    return CACHE_DIR
+
+
+def cache_file_path(command: str, params: Dict[str, Any]) -> str:
+    payload = json.dumps({
+        "command": str(command or "").strip().lower(),
+        "params": params,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()
+    return os.path.join(ensure_cache_dir(), f"{command}-{digest}.json")
+
+
+def read_cached_payload(command: str, params: Dict[str, Any], ttl_seconds: int) -> Optional[Dict[str, Any]]:
+    if ttl_seconds <= 0:
+        return None
+
+    path = cache_file_path(command, params)
+    try:
+        stat = os.stat(path)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+
+    age = now_kst().timestamp() - stat.st_mtime
+    if age > ttl_seconds:
+        return None
+
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    return payload if isinstance(payload, dict) else None
+
+
+def write_cached_payload(command: str, params: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    if not isinstance(payload, dict) or not payload.get("live"):
+        return
+
+    path = cache_file_path(command, params)
+    tmp_path = f"{path}.tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+        os.replace(tmp_path, path)
+    except OSError:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def chart_cache_ttl(end: dt.date, today: dt.date) -> int:
+    if end >= (today - dt.timedelta(days=1)):
+        return 5 * 60
+    return 12 * 60 * 60
 
 
 def build_yahoo_symbol(stock_code: str, market: str) -> str:
@@ -212,6 +278,11 @@ def fetch_quote_payload(stock_code: str, market: str = "KOSPI", name_hint: str =
     symbols = list(yahoo_symbol_candidates(stock_code, market))
     normalized_market = str(market or "").strip().upper() or "KOSPI"
     name_hints = parse_name_hints(name_hint)
+    cache_params = {
+        "stock_code": str(stock_code or "").strip(),
+        "market": normalized_market,
+        "name_hint": str(name_hint or "").strip(),
+    }
     if not symbols:
         return {
             "live": False,
@@ -220,6 +291,10 @@ def fetch_quote_payload(stock_code: str, market: str = "KOSPI", name_hint: str =
             "symbol": "",
             "market": normalized_market,
         }
+
+    cached = read_cached_payload("quote", cache_params, 90)
+    if cached is not None:
+        return cached
 
     yf, import_error = import_yfinance()
     if yf is None:
@@ -328,6 +403,7 @@ def fetch_quote_payload(stock_code: str, market: str = "KOSPI", name_hint: str =
             continue
 
     if best_payload is not None:
+        write_cached_payload("quote", cache_params, best_payload)
         return best_payload
 
     return {
@@ -389,6 +465,18 @@ def fetch_chart_payload(
     start = parse_date_token(start_date, dt.date(today.year, 1, 1))
     end = parse_date_token(end_date, today)
     yf_interval = "1wk" if normalized_interval == "weekly" else "1d"
+    cache_params = {
+        "stock_code": str(stock_code or "").strip(),
+        "market": normalized_market,
+        "interval": normalized_interval,
+        "start_date": start.strftime("%Y%m%d"),
+        "end_date": end.strftime("%Y%m%d"),
+        "name_hint": str(name_hint or "").strip(),
+    }
+
+    cached = read_cached_payload("chart", cache_params, chart_cache_ttl(end, today))
+    if cached is not None:
+        return cached
 
     if len(symbols) > 1:
         preferred_quote = fetch_quote_payload(stock_code, normalized_market, name_hint)
@@ -441,7 +529,7 @@ def fetch_chart_payload(
                 last_error = "Yahoo Finance returned no chart rows"
                 continue
 
-            return {
+            payload = {
                 "live": True,
                 "source": "yfinance_python",
                 "error": None,
@@ -451,6 +539,8 @@ def fetch_chart_payload(
                 "rows": rows,
                 "fetched_at": now_kst().isoformat(),
             }
+            write_cached_payload("chart", cache_params, payload)
+            return payload
         except Exception as error:
             last_error = str(error)
             continue

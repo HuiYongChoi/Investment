@@ -330,6 +330,13 @@ assert(slicedTechnicals.macd.signal.join(',') === '202,203,204', 'Nested MACD se
 assert(slicedTechnicals.stoch.k.join(',') === '52,53,54', 'Nested stochastic series should slice with the shared viewport');
 assert(slicedTechnicals.boll[0].middle === 2 && slicedTechnicals.boll[2].middle === 8, 'Bollinger window slicing should preserve visible indicator points');
 
+const daySignature = InvestmentLogic.buildChartSeriesSignature([
+    { date: '20260401', close: 100, volume: 1000 },
+    { date: '20260402', close: 110, volume: 1200 }
+]);
+assert(daySignature === '2|20260401|20260402|110|1200', 'Chart series signatures should summarize the current full-series identity for technical caching');
+assert(InvestmentLogic.buildChartSeriesSignature([]) === '0|||0|0', 'Empty chart series should still produce a stable signature');
+
 const tooltipRight = InvestmentLogic.resolveChartTooltipLayout({
     anchorX: 60,
     anchorY: 20,
@@ -388,13 +395,19 @@ assert(rubyProxySource.includes('name_hint = (req.query[\'name_hint\'] || \'\').
 
 const yfinanceBridgeSource = readText(`${cwd}/yfinance_bridge.py`);
 assert(yfinanceBridgeSource.includes('--name-hint'), 'yfinance bridge should accept company name hints for AUTO market resolution');
+assert(yfinanceBridgeSource.includes('read_cached_payload('), 'yfinance bridge should read short-lived cached payloads before calling Yahoo Finance');
+assert(yfinanceBridgeSource.includes('write_cached_payload('), 'yfinance bridge should persist successful Yahoo Finance responses for reuse');
 
 assert(scriptSource.includes('name_hint'), 'Frontend yfinance requests should forward company name hints');
 assert(phpProxySource.includes('$nameHint = trim((string) ($_GET[\'name_hint\'] ?? \'\'));'), 'PHP proxy should read company name hints for yfinance bridge requests');
 assert(scriptSource.includes("event.key === 'ArrowDown'"), 'Search input should support arrow-down autocomplete navigation');
 assert(scriptSource.includes('syncCompanyInputValue(company);'), 'Search should synchronize the input text with the resolved autocomplete match');
 assert(!scriptSource.includes('companyInput.value = selected.displayLabel;'), 'Arrow-key navigation should not overwrite the typed input before the selection is committed');
-assert(scriptSource.includes('const fullRangeTechnicals = computeTechnicals(state.chartFullSeries);'), 'Charts should compute technical series from the full selected range before slicing the viewport');
+assert(scriptSource.includes('const dailyChartPromise = fetchYfinanceChart('), 'Initial market loading should start the daily chart request immediately');
+assert(scriptSource.includes('const quotePromise = fetchYfinanceQuote('), 'The live quote request should run in parallel instead of blocking chart fetch startup');
+assert(!scriptSource.includes("fetchYfinanceChart(company.stockCode, company.market, 'weekly'"), 'The frontend should not request a redundant weekly chart when weekly candles are derived locally');
+assert(scriptSource.includes('const fullRangeTechnicals = ensureFullSeriesTechnicals(state.chartFullSeries);'), 'Chart rendering should reuse cached full-series technical calculations');
+assert(!scriptSource.includes('const fullRangeTechnicals = computeTechnicals(state.chartFullSeries);'), 'Chart rendering should not recompute technicals from scratch on every viewport update');
 assert(scriptSource.includes('InvestmentLogic.sliceTechnicalSeriesWindow(fullRangeTechnicals, state.chartWindow)'), 'Technical overlays should slice from the shared viewport state');
 assert(scriptSource.includes('setupZoomPan(canvas, padding.left, padding.right);'), 'Indicator chart should attach the shared zoom/pan behavior');
 assert(scriptSource.includes('InvestmentLogic.groupReportsBySection(reports)'), 'Report rendering should use grouped annual and quarterly sections');

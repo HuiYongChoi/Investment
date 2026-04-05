@@ -570,6 +570,21 @@
         };
     }
 
+    function buildChartSeriesSignature(series) {
+        const list = Array.isArray(series) ? series : [];
+        if (!list.length) return '0|||0|0';
+
+        const first = list[0] || {};
+        const last = list[list.length - 1] || {};
+        return [
+            list.length,
+            String(first.date || ''),
+            String(last.date || ''),
+            Number(last.close || 0),
+            Number(last.volume || 0)
+        ].join('|');
+    }
+
     function resolveChartTooltipLayout(options) {
         const config = options || {};
         const bounds = config.bounds || {};
@@ -767,6 +782,7 @@
         panChartWindow,
         sliceChartSeriesWindow,
         sliceTechnicalSeriesWindow,
+        buildChartSeriesSignature,
         resolveChartTooltipLayout,
         resolveChartSeries,
         resolveKakaoCallbackUri,
