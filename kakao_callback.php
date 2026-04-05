@@ -57,7 +57,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         code,
-                        redirectUri: `${location.origin}/auth/kakao/callback`
+                        redirectUri: `${location.origin}/kakao_callback.php`
                     })
                 });
                 const data = await response.json();

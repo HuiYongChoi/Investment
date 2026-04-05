@@ -2,7 +2,7 @@ const isLocal = location.hostname === 'localhost' || location.hostname === '127.
 const LOCAL_PROXY = 'http://localhost:8081';
 const PROD_PROXY = '/proxy.php';
 const KAKAO_JS_KEY = '88cd449d612399a0219090bbcfc20b24';
-const KAKAO_REDIRECT_URI = 'https://hyfin.duckdns.org/auth/kakao/callback';
+const KAKAO_REDIRECT_URI = 'https://hyfin.duckdns.org/kakao_callback.php';
 const XP_MAX = 100;
 
 const COMPANY_MAP = {
