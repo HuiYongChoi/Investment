@@ -597,6 +597,40 @@ function request_yfinance_bridge(string $command, array $params): array
     return $payload;
 }
 
+function market_summary_cache_path(): string
+{
+    return sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'invest_nav_market_summary.json';
+}
+
+function read_market_summary_cache(int $ttlSeconds = 90): ?array
+{
+    $path = market_summary_cache_path();
+    if (!is_file($path)) {
+        return null;
+    }
+
+    $mtime = @filemtime($path);
+    if (!$mtime || (time() - $mtime) > $ttlSeconds) {
+        return null;
+    }
+
+    $raw = @file_get_contents($path);
+    if ($raw === false || trim($raw) === '') {
+        return null;
+    }
+
+    $payload = safe_json_decode($raw);
+    return is_array($payload) ? $payload : null;
+}
+
+function write_market_summary_cache(array $summary): void
+{
+    @file_put_contents(
+        market_summary_cache_path(),
+        json_encode($summary, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+    );
+}
+
 function extract_gold_usd_ounce(array $payload): float
 {
     if (isset($payload[0]) && is_array($payload)) {
@@ -1075,6 +1109,11 @@ try {
     }
 
     if ($action === 'market') {
+        $cachedSummary = read_market_summary_cache(90);
+        if (is_array($cachedSummary)) {
+            json_response(200, $cachedSummary);
+        }
+
         $summary = [
             'usdKrw'          => null,
             'jpyKrw'          => null,
@@ -1202,6 +1241,7 @@ try {
             }
         } catch (Throwable $ignored) {}
 
+        write_market_summary_cache($summary);
         json_response(200, $summary);
     }
 

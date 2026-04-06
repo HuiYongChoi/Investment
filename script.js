@@ -9,9 +9,12 @@ const KAKAO_STORAGE_PROFILE = 'invest_nav_kakao_profile';
 const BRIEFING_MODEL_CANDIDATES = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 const KAKAO_REDIRECT_URI = InvestmentLogic.resolveKakaoRedirectUri(location.href);
 const CHART_HISTORY_YEARS = 5;
+const MARKET_SUMMARY_CACHE_KEY = 'invest_nav_market_summary_v3';
+const MARKET_SUMMARY_REFRESH_MS = 180000;
+const MARKET_SUMMARY_RETRY_MS = 20000;
 const FETCH_TIMEOUT_MS = Object.freeze({
     default: 12000,
-    market: 7000,
+    market: 15000,
     chart: 12000,
     quote: 10000,
     dart: 12000,
@@ -122,6 +125,7 @@ const state = {
 };
 let priceHoverIndex = null;
 let briefingRefreshTimer = null;
+let marketSummaryReloadTimer = null;
 
 lucide.createIcons();
 bindEvents();
@@ -703,79 +707,211 @@ function formatCommodityUsd(value) {
     })}`;
 }
 
-async function loadMarketSummary() {
+function readMarketSummaryCache() {
+    try {
+        const raw = localStorage.getItem(MARKET_SUMMARY_CACHE_KEY);
+        if (!raw) return null;
+        const payload = JSON.parse(raw);
+        return payload && typeof payload === 'object' ? payload : null;
+    } catch (error) {
+        return null;
+    }
+}
+
+function writeMarketSummaryCache(payload) {
+    try {
+        localStorage.setItem(MARKET_SUMMARY_CACHE_KEY, JSON.stringify({
+            ...(payload || {}),
+            savedAt: new Date().toISOString()
+        }));
+    } catch (error) {
+        console.warn('market summary cache write failed', error);
+    }
+}
+
+function scheduleMarketSummaryReload(delay = MARKET_SUMMARY_REFRESH_MS) {
+    if (marketSummaryReloadTimer) {
+        clearTimeout(marketSummaryReloadTimer);
+        marketSummaryReloadTimer = null;
+    }
+    marketSummaryReloadTimer = setTimeout(() => {
+        marketSummaryReloadTimer = null;
+        void loadMarketSummary({ silent: true });
+    }, Math.max(1000, Number(delay) || MARKET_SUMMARY_REFRESH_MS));
+}
+
+function setNodeText(id, text) {
+    const node = document.getElementById(id);
+    if (node) {
+        node.textContent = text;
+    }
+}
+
+function applyMarketSummary(data = {}, options = {}) {
+    const { failure = false } = options;
+    if (failure) {
+        ['fx-usdkrw-note', 'fx-jpykrw-note', 'gold-note', 'vix-note', 'wti-note', 'brent-note', 'kospi-note', 'kosdaq-note']
+            .forEach((id) => setNodeText(id, '재시도 중'));
+        return;
+    }
+
+    if (data.usdKrw) {
+        setNodeText('fx-usdkrw', `${Number(data.usdKrw).toFixed(2)}원`);
+        setNodeText('mobile-fx-usdkrw', `${Number(data.usdKrw).toFixed(2)}원`);
+        setNodeText('fx-usdkrw-note', '1달러 기준');
+        setMarketChg('fx-usdkrw-chg', data.usdKrwChangePct ?? null);
+        setMarketChg('mobile-fx-usdkrw-chg', data.usdKrwChangePct ?? null);
+    }
+    if (data.jpyKrw) {
+        const jpyText = `${(Number(data.jpyKrw) * 100).toFixed(2)}원`;
+        setNodeText('fx-jpykrw', jpyText);
+        setNodeText('mobile-fx-jpykrw', jpyText);
+        setNodeText('fx-jpykrw-note', '100엔 기준');
+        setMarketChg('fx-jpykrw-chg', data.jpyKrwChangePct ?? null);
+        setMarketChg('mobile-fx-jpykrw-chg', data.jpyKrwChangePct ?? null);
+    }
+    if (data.goldKrwPerGram) {
+        const goldText = `${Math.round(Number(data.goldKrwPerGram)).toLocaleString()}원`;
+        setNodeText('gold-krw', goldText);
+        setNodeText('mobile-gold-krw', goldText);
+        setNodeText('gold-note', '금 1g 추정');
+        setMarketChg('gold-chg', data.goldChangePct ?? null);
+        setMarketChg('mobile-gold-chg', data.goldChangePct ?? null);
+    }
+    if (data.vix) {
+        const vixText = Number(data.vix).toFixed(2);
+        setNodeText('vix-value', vixText);
+        setNodeText('mobile-vix-value', vixText);
+        setMarketChg('vix-chg', data.vixChangePct ?? null);
+        setMarketChg('mobile-vix-chg', data.vixChangePct ?? null);
+        const vixLevel = data.vix < 15 ? '극도 낙관' : data.vix < 20 ? '안정' : data.vix < 30 ? '경계' : data.vix < 40 ? '공포' : '극도 공포';
+        setNodeText('vix-note', vixLevel);
+    }
+    if (data.wti) {
+        const wtiText = formatCommodityUsd(data.wti);
+        setNodeText('wti-value', wtiText);
+        setNodeText('mobile-wti-value', wtiText);
+        setNodeText('wti-note', '미국 원유 벤치마크');
+        setMarketChg('wti-chg', data.wtiChangePct ?? null, { inverse: true });
+        setMarketChg('mobile-wti-chg', data.wtiChangePct ?? null, { inverse: true });
+    }
+    if (data.brent) {
+        const brentText = formatCommodityUsd(data.brent);
+        setNodeText('brent-value', brentText);
+        setNodeText('mobile-brent-value', brentText);
+        setNodeText('brent-note', '글로벌 실물 원유 기준');
+        setMarketChg('brent-chg', data.brentChangePct ?? null, { inverse: true });
+        setMarketChg('mobile-brent-chg', data.brentChangePct ?? null, { inverse: true });
+    }
+    if (data.kospi) {
+        const kospiText = formatMarketIndexValue(data.kospi);
+        setNodeText('kospi-value', kospiText);
+        setNodeText('mobile-kospi-value', kospiText);
+        setNodeText('kospi-note', '코스피 종합지수');
+        setMarketChg('kospi-chg', data.kospiChangePct ?? null);
+        setMarketChg('mobile-kospi-chg', data.kospiChangePct ?? null);
+    }
+    if (data.kosdaq) {
+        const kosdaqText = formatMarketIndexValue(data.kosdaq);
+        setNodeText('kosdaq-value', kosdaqText);
+        setNodeText('mobile-kosdaq-value', kosdaqText);
+        setNodeText('kosdaq-note', '코스닥 종합지수');
+        setMarketChg('kosdaq-chg', data.kosdaqChangePct ?? null);
+        setMarketChg('mobile-kosdaq-chg', data.kosdaqChangePct ?? null);
+    }
+}
+
+function extractQuoteMetric(payload, changeKeySuffix = 'ChangePct') {
+    const current = Number(payload?.currentPrice ?? 0);
+    const previous = Number(payload?.previousClose ?? 0);
+    if (!Number.isFinite(current) || current <= 0) {
+        return null;
+    }
+    return {
+        value: current,
+        changePct: Number.isFinite(previous) && previous > 0
+            ? ((current - previous) / previous) * 100
+            : null,
+        changeKeySuffix
+    };
+}
+
+async function loadCriticalMarketSnapshot() {
+    const requests = await Promise.allSettled([
+        fetchYfinanceQuote('USDKRW=X', 'FX'),
+        fetchYfinanceQuote('JPYKRW=X', 'FX'),
+        fetchYfinanceQuote('^VIX', 'INDEX'),
+        fetchYfinanceQuote('^KS11', 'INDEX'),
+        fetchYfinanceQuote('^KQ11', 'INDEX')
+    ]);
+
+    const [usdResult, jpyResult, vixResult, kospiResult, kosdaqResult] = requests;
+    const snapshot = {};
+
+    const usd = usdResult.status === 'fulfilled' ? extractQuoteMetric(usdResult.value) : null;
+    if (usd) {
+        snapshot.usdKrw = usd.value;
+        snapshot.usdKrwChangePct = usd.changePct;
+    }
+
+    const jpy = jpyResult.status === 'fulfilled' ? extractQuoteMetric(jpyResult.value) : null;
+    if (jpy) {
+        snapshot.jpyKrw = jpy.value;
+        snapshot.jpyKrwChangePct = jpy.changePct;
+    }
+
+    const vix = vixResult.status === 'fulfilled' ? extractQuoteMetric(vixResult.value) : null;
+    if (vix) {
+        snapshot.vix = vix.value;
+        snapshot.vixChangePct = vix.changePct;
+    }
+
+    const kospi = kospiResult.status === 'fulfilled' ? extractQuoteMetric(kospiResult.value) : null;
+    if (kospi) {
+        snapshot.kospi = kospi.value;
+        snapshot.kospiChangePct = kospi.changePct;
+    }
+
+    const kosdaq = kosdaqResult.status === 'fulfilled' ? extractQuoteMetric(kosdaqResult.value) : null;
+    if (kosdaq) {
+        snapshot.kosdaq = kosdaq.value;
+        snapshot.kosdaqChangePct = kosdaq.changePct;
+    }
+
+    return snapshot;
+}
+
+async function loadMarketSummary(options = {}) {
+    const { silent = false } = options;
+    const cachedSummary = readMarketSummaryCache();
+    if (cachedSummary) {
+        applyMarketSummary(cachedSummary);
+    }
+    const criticalSnapshotPromise = loadCriticalMarketSnapshot();
+    void criticalSnapshotPromise.then((snapshot) => {
+        if (snapshot && Object.keys(snapshot).length) {
+            applyMarketSummary(snapshot);
+            writeMarketSummaryCache({
+                ...(readMarketSummaryCache() || {}),
+                ...snapshot
+            });
+        }
+    }).catch((error) => {
+        console.warn('critical market snapshot failed', error);
+    });
     try {
         const data = await fetchJson(buildProxyUrl('market', '/summary'), {
             timeoutMs: FETCH_TIMEOUT_MS.market
         });
-        if (data.usdKrw) {
-            document.getElementById('fx-usdkrw').textContent = `${data.usdKrw.toFixed(2)}원`;
-            document.getElementById('mobile-fx-usdkrw').textContent = `${data.usdKrw.toFixed(2)}원`;
-            document.getElementById('fx-usdkrw-note').textContent = '1달러 기준';
-            setMarketChg('fx-usdkrw-chg', data.usdKrwChangePct ?? null);
-            setMarketChg('mobile-fx-usdkrw-chg', data.usdKrwChangePct ?? null);
-        }
-        if (data.jpyKrw) {
-            document.getElementById('fx-jpykrw').textContent = `${(data.jpyKrw * 100).toFixed(2)}원`;
-            document.getElementById('mobile-fx-jpykrw').textContent = `${(data.jpyKrw * 100).toFixed(2)}원`;
-            document.getElementById('fx-jpykrw-note').textContent = '100엔 기준';
-            setMarketChg('fx-jpykrw-chg', data.jpyKrwChangePct ?? null);
-            setMarketChg('mobile-fx-jpykrw-chg', data.jpyKrwChangePct ?? null);
-        }
-        if (data.goldKrwPerGram) {
-            document.getElementById('gold-krw').textContent = `${Math.round(data.goldKrwPerGram).toLocaleString()}원`;
-            document.getElementById('mobile-gold-krw').textContent = `${Math.round(data.goldKrwPerGram).toLocaleString()}원`;
-            document.getElementById('gold-note').textContent = '금 1g 추정';
-            setMarketChg('gold-chg', data.goldChangePct ?? null);
-            setMarketChg('mobile-gold-chg', data.goldChangePct ?? null);
-        } else {
-            document.getElementById('gold-note').textContent = '외부 시세 연결 대기';
-        }
-        if (data.vix) {
-            document.getElementById('vix-value').textContent = data.vix.toFixed(2);
-            document.getElementById('mobile-vix-value').textContent = data.vix.toFixed(2);
-            setMarketChg('vix-chg', data.vixChangePct ?? null);
-            setMarketChg('mobile-vix-chg', data.vixChangePct ?? null);
-            const vixLevel = data.vix < 15 ? '극도 낙관' : data.vix < 20 ? '안정' : data.vix < 30 ? '경계' : data.vix < 40 ? '공포' : '극도 공포';
-            document.getElementById('vix-note').textContent = vixLevel;
-        }
-        if (data.wti) {
-            document.getElementById('wti-value').textContent = formatCommodityUsd(data.wti);
-            document.getElementById('mobile-wti-value').textContent = formatCommodityUsd(data.wti);
-            document.getElementById('wti-note').textContent = '미국 원유 벤치마크';
-            setMarketChg('wti-chg', data.wtiChangePct ?? null, { inverse: true });
-            setMarketChg('mobile-wti-chg', data.wtiChangePct ?? null, { inverse: true });
-        }
-        if (data.brent) {
-            document.getElementById('brent-value').textContent = formatCommodityUsd(data.brent);
-            document.getElementById('mobile-brent-value').textContent = formatCommodityUsd(data.brent);
-            document.getElementById('brent-note').textContent = '글로벌 실물 원유 기준';
-            setMarketChg('brent-chg', data.brentChangePct ?? null, { inverse: true });
-            setMarketChg('mobile-brent-chg', data.brentChangePct ?? null, { inverse: true });
-        }
-        if (data.kospi) {
-            document.getElementById('kospi-value').textContent = formatMarketIndexValue(data.kospi);
-            document.getElementById('mobile-kospi-value').textContent = formatMarketIndexValue(data.kospi);
-            document.getElementById('kospi-note').textContent = '코스피 종합지수';
-            setMarketChg('kospi-chg', data.kospiChangePct ?? null);
-            setMarketChg('mobile-kospi-chg', data.kospiChangePct ?? null);
-        }
-        if (data.kosdaq) {
-            document.getElementById('kosdaq-value').textContent = formatMarketIndexValue(data.kosdaq);
-            document.getElementById('mobile-kosdaq-value').textContent = formatMarketIndexValue(data.kosdaq);
-            document.getElementById('kosdaq-note').textContent = '코스닥 종합지수';
-            setMarketChg('kosdaq-chg', data.kosdaqChangePct ?? null);
-            setMarketChg('mobile-kosdaq-chg', data.kosdaqChangePct ?? null);
-        }
+        applyMarketSummary(data);
+        writeMarketSummaryCache(data);
+        scheduleMarketSummaryReload(MARKET_SUMMARY_REFRESH_MS);
     } catch (error) {
-        document.getElementById('fx-usdkrw-note').textContent = '연동 실패';
-        document.getElementById('fx-jpykrw-note').textContent = '연동 실패';
-        document.getElementById('gold-note').textContent = '연동 실패';
-        document.getElementById('vix-note').textContent = '연동 실패';
-        document.getElementById('wti-note').textContent = '연동 실패';
-        document.getElementById('brent-note').textContent = '연동 실패';
-        document.getElementById('kospi-note').textContent = '연동 실패';
-        document.getElementById('kosdaq-note').textContent = '연동 실패';
+        console.warn('market summary load failed', error);
+        if (!silent && !cachedSummary) {
+            applyMarketSummary({}, { failure: true });
+        }
+        scheduleMarketSummaryReload(MARKET_SUMMARY_RETRY_MS);
     }
 }
 
