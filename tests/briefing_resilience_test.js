@@ -89,6 +89,14 @@ function run() {
     const scriptSource = readFile('/Users/huiyong/Desktop/Vibe Investment/script.js');
     assert(scriptSource.includes('readBriefingCache('), 'script.js should read cached Gemini briefings before falling back.');
     assert(scriptSource.includes('writeBriefingCache('), 'script.js should persist successful Gemini briefings.');
+    assert(scriptSource.includes('maxOutputTokens: 2048'), 'Gemini generation config should raise maxOutputTokens to 2048 for long briefings.');
+    assert(!scriptSource.includes('stopSequences'), 'Gemini requests should not include stopSequences that truncate the briefing early.');
+    assert(scriptSource.includes('collectGeminiResponseText(response)'), 'Gemini briefing should join text from all returned content parts instead of only the first line.');
+    assert(scriptSource.includes(".replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>')"), 'Briefing formatter should convert markdown bold syntax to strong tags.');
+    assert(scriptSource.includes(".replace(/\\n/g, '<br>')"), 'Briefing formatter should preserve every newline as an HTML line break.');
+    assert(scriptSource.includes("console.error('Gemini briefing fallback'"), 'Gemini fallback path should log rendering/API failures with console.error.');
+    assert(scriptSource.includes("console.error('formatBriefingText failed'"), 'Briefing formatter should log markdown/rendering failures before falling back.');
+    assert(scriptSource.includes("console.error('Briefing render failed'"), 'Briefing renderer should log UI rendering failures before showing a fallback briefing.');
 
     console.log('briefing_resilience_test: ok');
 }

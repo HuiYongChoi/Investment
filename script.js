@@ -3737,11 +3737,11 @@ async function generateBriefing() {
                 contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: {
                     temperature: 0.4,
-                    maxOutputTokens: 1200
+                    maxOutputTokens: 2048
                 }
             })
         });
-        const text = response?.candidates?.[0]?.content?.parts?.[0]?.text;
+        const text = collectGeminiResponseText(response);
         if (!text) {
             throw new Error('Gemini 응답에 브리핑 본문이 없습니다.');
         }
@@ -3759,7 +3759,7 @@ async function generateBriefing() {
         );
         setSourceBadge('source-gemini', 'Gemini 응답 완료', 'success');
     } catch (error) {
-        console.warn('Gemini briefing fallback', error);
+        console.error('Gemini briefing fallback', error);
         const cachedBriefing = readBriefingCache(company, briefingSignature);
         if (cachedBriefing?.text) {
             state.briefingMode = 'cached';
@@ -3781,6 +3781,20 @@ async function generateBriefing() {
         );
         setSourceBadge('source-gemini', 'Gemini 대체 브리핑', 'warn');
     }
+}
+
+function collectGeminiResponseText(response) {
+    const candidates = Array.isArray(response?.candidates) ? response.candidates : [];
+    for (const candidate of candidates) {
+        const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+        const text = parts
+            .map((part) => (part && typeof part.text === 'string' ? part.text : ''))
+            .filter(Boolean)
+            .join('\n')
+            .trim();
+        if (text) return text;
+    }
+    return '';
 }
 
 function buildBriefingCacheKey(signature, companyName = state.company?.name || 'unknown') {
@@ -3831,11 +3845,32 @@ function describeGeminiFailure(error) {
 function renderBriefing(content, badge, meta, isLocal = false) {
     document.getElementById('briefing-meta').textContent = meta;
     const badgeTone = isLocal ? 'rgba(245,158,11,0.14)' : 'rgba(79,140,255,0.14)';
-    const bodyHtml = isLocal ? content : formatBriefingText(content);
-    document.getElementById('briefing-content').innerHTML = `
-        <div class="briefing-badge" style="background:${badgeTone}">${badge}</div>
-        ${bodyHtml}
-    `;
+    try {
+        const bodyHtml = isLocal ? content : formatBriefingText(content);
+        document.getElementById('briefing-content').innerHTML = `
+            <div class="briefing-badge" style="background:${badgeTone}">${badge}</div>
+            ${bodyHtml}
+        `;
+    } catch (error) {
+        console.error('Briefing render failed', error);
+        if (!isLocal) {
+            state.briefingMode = 'local';
+            renderBriefing(
+                buildLocalBriefing(),
+                'Local Quant Briefing',
+                'Gemini 브리핑 렌더링 중 오류가 발생해 기관형 로컬 브리핑으로 전환했습니다.',
+                true
+            );
+            setSourceBadge('source-gemini', 'Gemini 대체 브리핑', 'warn');
+            return;
+        }
+
+        const safeContent = normalizeBriefingMarkdown(String(content || '브리핑을 표시할 수 없습니다.'));
+        document.getElementById('briefing-content').innerHTML = `
+            <div class="briefing-badge" style="background:${badgeTone}">${badge}</div>
+            <div class="briefing-section"><div class="briefing-body">${safeContent}</div></div>
+        `;
+    }
 }
 
 function buildLocalBriefing() {
@@ -3874,15 +3909,23 @@ function buildLocalBriefing() {
 }
 
 function formatBriefingText(text) {
-    const sections = InvestmentLogic.normalizeBriefingSections(text);
-    if (!sections.length) {
-        return renderBriefingSections([{
-            title: '',
-            body: String(text || '').split(/\r?\n/).filter(Boolean),
-            listLike: false
-        }]);
+    try {
+        const normalizedText = String(text || '');
+        const sections = InvestmentLogic.normalizeBriefingSections(normalizedText);
+        if (!sections.length) {
+            return `<div class="briefing-section"><div class="briefing-body">${normalizeBriefingMarkdown(normalizedText)}</div></div>`;
+        }
+        return renderBriefingSections(sections);
+    } catch (error) {
+        console.error('formatBriefingText failed', error);
+        return `<div class="briefing-section"><div class="briefing-body">${normalizeBriefingMarkdown(String(text || ''))}</div></div>`;
     }
-    return renderBriefingSections(sections);
+}
+
+function normalizeBriefingMarkdown(text) {
+    return escapeHtml(String(text || ''))
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
 }
 
 function renderBriefingSections(sections) {
@@ -3891,8 +3934,8 @@ function renderBriefingSections(sections) {
         const body = Array.isArray(section?.body) ? section.body : [];
         const listLike = Boolean(section?.listLike);
         const bodyHtml = listLike
-            ? `<ul class="briefing-list">${body.map((line) => `<li>${escapeHtml(String(line).replace(/^[-*•]\s*/, ''))}</li>`).join('')}</ul>`
-            : `<div class="briefing-body">${body.map((line) => escapeHtml(String(line))).join('<br>')}</div>`;
+            ? `<ul class="briefing-list">${body.map((line) => `<li>${normalizeBriefingMarkdown(String(line).replace(/^[-*•]\s*/, ''))}</li>`).join('')}</ul>`
+            : `<div class="briefing-body">${body.map((line) => normalizeBriefingMarkdown(String(line))).join('<br>')}</div>`;
         return `
             <div class="briefing-section">
                 ${title ? `<h3>${title}</h3>` : ''}
