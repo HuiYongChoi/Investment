@@ -2901,10 +2901,23 @@ function renderPriceChart(data) {
     canvas.onwheel = (event) => {
         if (!state.chartFullSeries.length || !state.chartWindow) return;
         event.preventDefault();
-        const factor = event.deltaY < 0 ? 0.82 : 1.22;
-        state.chartDrag = null;
-        state.chartPinch = null;
-        zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, event.clientX, padding.left, padding.right));
+        // 수평(deltaX) > 수직(deltaY) → 트랙패드 좌우 스크롤: 타임라인 패닝
+        if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+            const drawWidth = getCanvasClientDrawWidth(canvas, padding.left, padding.right);
+            const visiblePoints = Math.max(1, state.chartWindow.end - state.chartWindow.start);
+            const deltaPoints = Math.round((event.deltaX / drawWidth) * visiblePoints);
+            if (deltaPoints === 0) return;
+            state.chartWindow = InvestmentLogic.panChartWindow(
+                state.chartWindow, deltaPoints, state.chartFullSeries.length
+            );
+            renderCharts({ viewport: 'preserve' });
+        } else {
+            // 트랙패드 상하 스크롤 / 마우스 휠 → 확대·축소 (감도 50% 완화)
+            const factor = event.deltaY < 0 ? 0.91 : 1.11;
+            state.chartDrag = null;
+            state.chartPinch = null;
+            zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, event.clientX, padding.left, padding.right));
+        }
     };
 
     canvas.onpointerdown = (event) => {
@@ -3040,11 +3053,25 @@ function setupZoomPan(canvas, padLeft, padRight, onHoverMove, onHoverEnd) {
     canvas.onwheel = (e) => {
         if (!state.chartFullSeries.length || !state.chartWindow) return;
         e.preventDefault();
-        const factor = e.deltaY < 0 ? 0.82 : 1.22;
-        state.techDrag = null;
-        state.techPinch = null;
-        zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, e.clientX, padLeft, padRight));
-        if (onHoverEnd) onHoverEnd();
+        // 수평(deltaX) > 수직(deltaY) → 트랙패드 좌우 스크롤: 타임라인 패닝
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+            const drawWidth = getCanvasClientDrawWidth(canvas, padLeft, padRight);
+            const visiblePoints = Math.max(1, state.chartWindow.end - state.chartWindow.start);
+            const deltaPoints = Math.round((e.deltaX / drawWidth) * visiblePoints);
+            if (deltaPoints === 0) return;
+            state.chartWindow = InvestmentLogic.panChartWindow(
+                state.chartWindow, deltaPoints, state.chartFullSeries.length
+            );
+            if (onHoverEnd) onHoverEnd();
+            renderCharts({ viewport: 'preserve' });
+        } else {
+            // 트랙패드 상하 스크롤 / 마우스 휠 → 확대·축소 (감도 50% 완화)
+            const factor = e.deltaY < 0 ? 0.91 : 1.11;
+            state.techDrag = null;
+            state.techPinch = null;
+            zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, e.clientX, padLeft, padRight));
+            if (onHoverEnd) onHoverEnd();
+        }
     };
 
     canvas.onpointerdown = (e) => {
@@ -3147,8 +3174,10 @@ function setupZoomPan(canvas, padLeft, padRight, onHoverMove, onHoverEnd) {
         endHover();
         canvas.style.cursor = onHoverMove ? 'crosshair' : 'grab';
     };
-    // Suppress default touch scroll inside the chart
+    // 터치 스크롤·더블탭 확대 차단 + 드래그 중 텍스트 선택 방지
     canvas.style.touchAction = 'none';
+    canvas.style.userSelect = 'none';
+    canvas.style.webkitUserSelect = 'none';
 }
 
 function renderTechPriceChart(data, visibleTechnicals) {

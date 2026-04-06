@@ -1219,9 +1219,12 @@ header#header {
     height: auto;
 }
 
-.chart-shell canvas {
-    touch-action: none;
+.chart-shell canvas,
+.tech-price-shell canvas,
+.tech-osc-shell canvas {
+    touch-action: none;          /* 더블탭 확대 · 스크롤 전파 차단 */
     user-select: none;
+    -webkit-user-select: none;
 }
 
 .chart-legend {
