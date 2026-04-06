@@ -178,6 +178,7 @@ function bindEvents() {
     });
     document.getElementById('indicator-toggle').addEventListener('click', onIndicatorToggle);
     document.getElementById('card-financials')?.addEventListener('click', onFinancialSectionToggle);
+    document.getElementById('card-technical')?.addEventListener('click', onTechSectionToggle);
     if (sectorPresetSelect) {
         sectorPresetSelect.addEventListener('change', onValuationSectorPresetChange);
     }
@@ -230,7 +231,7 @@ function setFinancialSectionExpanded(sectionKey, expanded) {
 }
 
 function resetFinancialSectionToggles() {
-    ['annual', 'metrics', 'quarterly'].forEach((sectionKey) => {
+    ['annual', 'metrics', 'quarterly', 'quarterly-metrics'].forEach((sectionKey) => {
         setFinancialSectionExpanded(sectionKey, false);
     });
 }
@@ -241,6 +242,24 @@ function onFinancialSectionToggle(event) {
     const sectionKey = toggle.dataset.finToggle;
     const nextExpanded = toggle.getAttribute('aria-expanded') !== 'true';
     setFinancialSectionExpanded(sectionKey, nextExpanded);
+}
+
+function setTechSectionExpanded(key, expanded) {
+    const toggle = document.querySelector(`[data-tech-toggle="${key}"]`);
+    const body = document.querySelector(`[data-tech-body="${key}"]`);
+    if (!toggle || !body) return;
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    body.classList.toggle('hidden', !expanded);
+}
+
+function onTechSectionToggle(event) {
+    const toggle = event.target.closest('[data-tech-toggle]');
+    if (!toggle) return;
+    // chip-hint 클릭은 무시
+    if (event.target.closest('.chip-hint') || event.target.closest('.indicator-chip')) return;
+    const key = toggle.dataset.techToggle;
+    const nextExpanded = toggle.getAttribute('aria-expanded') !== 'true';
+    setTechSectionExpanded(key, nextExpanded);
 }
 
 function renderCompanySuggestions(rawQuery = '') {
@@ -940,6 +959,7 @@ async function startSearch() {
     renderFinancialTable('fin-annual-table', []);
     renderHistoricalMetricsTable('fin-metrics-table', []);
     renderFinancialTable('fin-quarterly-table', []);
+    renderQuarterlyMetricsTable('fin-quarterly-metrics-table', []);
     renderTechnicalCards();
     renderTechSummary();
     renderCharts();
@@ -1011,6 +1031,7 @@ async function startSearch() {
             state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
             syncFinancialHistoryViews();
             renderFinancialTable('fin-quarterly-table', state.quarterlies);
+            renderQuarterlyMetricsTable('fin-quarterly-metrics-table', state.quarterlies);
             const valuationSnapshot = state.quote || latestChartPoint || null;
             autoFillMetrics(state.summaries[0]?.summary || {}, valuationSnapshot, state.summaries[1]?.summary || null);
             calcMetrics();
@@ -1025,6 +1046,7 @@ async function startSearch() {
             renderFinancialTable('fin-annual-table', []);
             renderHistoricalMetricsTable('fin-metrics-table', []);
             renderFinancialTable('fin-quarterly-table', state.quarterlies);
+            renderQuarterlyMetricsTable('fin-quarterly-metrics-table', state.quarterlies);
             setSourceBadge('source-dart', 'DART 재무제표를 불러오지 못했습니다.', 'error');
         }
 
@@ -1693,6 +1715,48 @@ function renderHistoricalMetricsTable(containerId, rows) {
                     ${headerCells}
                 </tr>
             </thead>
+            <tbody>${body}</tbody>
+        </table>
+    `;
+}
+
+function renderQuarterlyMetricsTable(containerId, periods) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const validPeriods = periods.filter((p) => !p.isAnnual);
+    if (!validPeriods.length) {
+        container.innerHTML = '<div class="report-item">분기별 투자지수 데이터를 찾지 못했습니다.</div>';
+        return;
+    }
+
+    const summaries = buildFinancialRows(validPeriods);
+    const rows = [
+        { label: '영업이익률', key: 'operatingMargin', type: 'pct' },
+        { label: '순이익률',   key: 'netMargin',       type: 'pct' },
+        { label: 'ROE',        key: 'roe',             type: 'pct' },
+        { label: 'ROA',        key: 'roa',             type: 'pct' },
+        { label: '부채비율',   key: 'debtRatio',       type: 'pct' },
+        { label: '유동비율',   key: 'currentRatio',    type: 'pct' }
+    ];
+
+    const headerCells = summaries.map((p) => `<th>${p.label}</th>`).join('');
+    const body = rows.map((row) => {
+        const cells = summaries.map((p, i) => {
+            const current = p.summary[row.key];
+            const prev = summaries[i + 1]?.summary[row.key];
+            const growth = computeGrowth(current, prev);
+            const chgClass = growth > 0 ? 'good' : growth < 0 ? 'bad' : '';
+            const chgText = growth === null
+                ? ''
+                : `<span class="fin-chg ${chgClass}">${growth > 0 ? '+' : ''}${growth.toFixed(1)}%</span>`;
+            return `<td><span class="fin-val">${formatMetricValue(current, row.type)}</span>${chgText}</td>`;
+        }).join('');
+        return `<tr><td>${row.label}</td>${cells}</tr>`;
+    }).join('');
+
+    container.innerHTML = `
+        <table class="fin-table">
+            <thead><tr><th>항목</th>${headerCells}</tr></thead>
             <tbody>${body}</tbody>
         </table>
     `;

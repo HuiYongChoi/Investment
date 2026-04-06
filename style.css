@@ -1519,6 +1519,31 @@ header#header {
     margin-bottom: 0;
 }
 
+/* 기술적 분석 섹션 토글 */
+.tech-detail-toggle {
+    margin-top: 14px;
+}
+
+.tech-detail-body {
+    padding-top: 14px;
+}
+
+/* 토글 열릴 때 페이드+슬라이드 인 */
+.fin-section-body:not(.hidden),
+.tech-detail-body:not(.hidden) {
+    animation: sectionReveal 0.22s ease;
+}
+
+@keyframes sectionReveal {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 기술적 분석 요약 상단 여백 */
+.tech-summary:not(:empty) {
+    margin-bottom: 4px;
+}
+
 .fin-history-overlay {
     position: absolute;
     inset: 0;
