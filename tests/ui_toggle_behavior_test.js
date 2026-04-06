@@ -34,7 +34,7 @@ assert(scriptSource.includes('resetFinancialSectionToggles();'), 'Frontend shoul
 assert(scriptSource.includes("document.getElementById('card-financials')?.addEventListener('click', onFinancialSectionToggle);"), 'Financial section should delegate toggle clicks from the financial card.');
 assert(scriptSource.includes('function onFinancialSectionToggle(event) {'), 'Financial section toggle handler should exist.');
 assert(scriptSource.includes('function setFinancialSectionExpanded(sectionKey, expanded) {'), 'Financial section expansion helper should exist.');
-assert(scriptSource.includes("['annual', 'metrics', 'quarterly'].forEach"), 'Financial toggle reset should collapse annual, metrics, and quarterly sections together.');
+assert(scriptSource.includes("['annual', 'metrics', 'quarterly', 'quarterly-metrics'].forEach"), 'Financial toggle reset should collapse annual, metrics, quarterly, and quarterly-metrics sections together.');
 assert(scriptSource.includes('state.selectedIndicators = new Set();'), 'New analyses should reset technical indicators back to the OFF state.');
 
 assert(styleSource.includes('.fin-section-toggle'), 'Styles should include the financial section toggle treatment.');

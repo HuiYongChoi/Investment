@@ -1675,6 +1675,12 @@ function renderFinancialTable(containerId, periods) {
     `;
 }
 
+function renderChangeBadge(growth) {
+    if (growth === null || growth === undefined || Number.isNaN(growth)) return '';
+    const chgClass = growth > 0 ? 'good' : growth < 0 ? 'bad' : '';
+    return `<span class="fin-chg ${chgClass}">${growth > 0 ? '+' : ''}${growth.toFixed(1)}%</span>`;
+}
+
 function renderHistoricalMetricsTable(containerId, rows) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -1702,7 +1708,7 @@ function renderHistoricalMetricsTable(containerId, rows) {
                 const metaText = metric.key === 'yearEndClose' && row.yearEndClose !== null && row.yearEndClose !== undefined
                     ? '<span class="fin-meta">해당 연도 마지막 종가</span>'
                     : '';
-                return `<td><span class="fin-val">${formatMetricValue(row[metric.key], metric.type)}</span>${metaText}</td>`;
+                return `<td><span class="fin-val">${formatMetricValue(row[metric.key], metric.type)}</span>${renderChangeBadge(row?.changes?.[metric.key])}${metaText}</td>`;
             }).join('')}
         </tr>
     `).join('');
@@ -1723,9 +1729,9 @@ function renderHistoricalMetricsTable(containerId, rows) {
 function renderQuarterlyMetricsTable(containerId, periods) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    const validPeriods = periods.filter((p) => !p.isAnnual);
+    const validPeriods = InvestmentLogic.selectQuarterlyMetricPeriods(periods);
     if (!validPeriods.length) {
-        container.innerHTML = '<div class="report-item">분기별 투자지수 데이터를 찾지 못했습니다.</div>';
+        container.innerHTML = '<div class="report-item">분기 투자지표 데이터를 찾지 못했습니다.</div>';
         return;
     }
 
@@ -1745,11 +1751,7 @@ function renderQuarterlyMetricsTable(containerId, periods) {
             const current = p.summary[row.key];
             const prev = summaries[i + 1]?.summary[row.key];
             const growth = computeGrowth(current, prev);
-            const chgClass = growth > 0 ? 'good' : growth < 0 ? 'bad' : '';
-            const chgText = growth === null
-                ? ''
-                : `<span class="fin-chg ${chgClass}">${growth > 0 ? '+' : ''}${growth.toFixed(1)}%</span>`;
-            return `<td><span class="fin-val">${formatMetricValue(current, row.type)}</span>${chgText}</td>`;
+            return `<td><span class="fin-val">${formatMetricValue(current, row.type)}</span>${renderChangeBadge(growth)}</td>`;
         }).join('');
         return `<tr><td>${row.label}</td>${cells}</tr>`;
     }).join('');
@@ -2276,7 +2278,7 @@ function buildRatings() {
     const previous = state.summaries[1]?.summary;
     if (!current) return;
 
-    const comparableQuarterlies = state.quarterlies.filter((item) => !item.isAnnual);
+    const comparableQuarterlies = InvestmentLogic.selectQuarterlyMetricPeriods(state.quarterlies);
     const latestQuarter = comparableQuarterlies[0]
         ? (comparableQuarterlies[0].summary || summarizeStatement(comparableQuarterlies[0].list))
         : null;

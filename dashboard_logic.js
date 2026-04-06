@@ -1240,6 +1240,26 @@
         return periods.slice().sort((left, right) => right.sortKey - left.sortKey);
     }
 
+    function computePeriodChange(current, previous) {
+        if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return null;
+        return ((current / previous) - 1) * 100;
+    }
+
+    function selectQuarterlyMetricPeriods(periods) {
+        const sorted = sortPeriods((Array.isArray(periods) ? periods : []).filter(Boolean));
+        const preferred = sorted.filter((period) => period.isAnnual !== true && /^Q[1-4]$/.test(String(period?.period || '').trim()));
+        if (preferred.length) {
+            return preferred;
+        }
+
+        const qLabelFallback = sorted.filter((period) => /^Q[1-4]$/.test(String(period?.period || '').trim()));
+        if (qLabelFallback.length) {
+            return qLabelFallback;
+        }
+
+        return sorted.filter((period) => period.isAnnual !== true);
+    }
+
     function extractAnnualShareCount(rows) {
         const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
         if (!list.length) return 0;
@@ -1314,7 +1334,7 @@
         const closeMap = yearEndCloseMap || {};
         const defaultShareCount = parseNumberText(fallbackShareCount) ?? 0;
 
-        return (Array.isArray(periods) ? periods : [])
+        const rows = (Array.isArray(periods) ? periods : [])
             .filter(Boolean)
             .map((period) => {
                 const summary = period?.summary || {};
@@ -1339,6 +1359,20 @@
                 };
             })
             .sort((left, right) => (right.year || 0) - (left.year || 0));
+
+        return rows.map((row, index) => {
+            const previous = rows[index + 1] || null;
+            const changeKeys = ['yearEndClose', 'shareCount', 'eps', 'bps', 'per', 'pbr', 'roe', 'roic'];
+            const changes = changeKeys.reduce((accumulator, key) => {
+                accumulator[key] = computePeriodChange(row[key], previous?.[key]);
+                return accumulator;
+            }, {});
+
+            return {
+                ...row,
+                changes
+            };
+        });
     }
 
     function buildBriefingCacheKey(companyName, signature) {
@@ -1614,6 +1648,7 @@
         resolveKakaoCallbackUri,
         resolveKakaoRedirectUri,
         resolveKakaoReturnUrl,
+        selectQuarterlyMetricPeriods,
         sortPeriods,
         summarizeStatement,
         pickTrailingCompanyMatch,
