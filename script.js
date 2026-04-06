@@ -9,6 +9,16 @@ const KAKAO_STORAGE_PROFILE = 'invest_nav_kakao_profile';
 const BRIEFING_MODEL_CANDIDATES = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 const KAKAO_REDIRECT_URI = InvestmentLogic.resolveKakaoRedirectUri(location.href);
 const CHART_HISTORY_YEARS = 5;
+const FETCH_TIMEOUT_MS = Object.freeze({
+    default: 12000,
+    market: 7000,
+    chart: 12000,
+    quote: 10000,
+    dart: 12000,
+    reports: 10000,
+    gemini: 18000,
+    companyDirectory: 8000
+});
 const CHART_DEFAULT_WINDOWS = {
     DAY: 120,
     WEEK: 104,
@@ -103,6 +113,7 @@ const state = {
     financialPriceHistory: [],
     summaries: [],
     briefingMode: 'idle',
+    briefingRequestToken: 0,
     mobileTab: 'home',
     mobileContentTab: 'chart',
     lastAnalysis: { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] },
@@ -694,7 +705,9 @@ function formatCommodityUsd(value) {
 
 async function loadMarketSummary() {
     try {
-        const data = await fetchJson(buildProxyUrl('market', '/summary'));
+        const data = await fetchJson(buildProxyUrl('market', '/summary'), {
+            timeoutMs: FETCH_TIMEOUT_MS.market
+        });
         if (data.usdKrw) {
             document.getElementById('fx-usdkrw').textContent = `${data.usdKrw.toFixed(2)}원`;
             document.getElementById('mobile-fx-usdkrw').textContent = `${data.usdKrw.toFixed(2)}원`;
@@ -933,6 +946,8 @@ async function startSearch() {
     state.financialHistoryRange = 3;
     state.financialPriceHistory = [];
     state.summaries = [];
+    state.briefingMode = 'idle';
+    state.briefingRequestToken = 0;
     state.lastAnalysis = { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] };
     state.selectedIndicators = new Set();
     priceHoverIndex = null;
@@ -965,94 +980,212 @@ async function startSearch() {
     renderCharts();
     document.getElementById('chart-status').textContent = 'Yahoo Finance 차트 동기화 중';
 
-    try {
-        const startDate = `${getCurrentYearKst() - CHART_HISTORY_YEARS}0101`;
-        const endDate = getCurrentDateTokenKst();
-        const companyNameHint = buildCompanyNameHint(company);
-        const dailyChartPromise = fetchYfinanceChart(company.stockCode, company.market, 'daily', startDate, endDate, companyNameHint)
-            .catch((error) => ({ live: false, rows: [], error: error.message || 'Yahoo Finance 일봉 차트 요청 실패' }));
-        const quotePromise = fetchYfinanceQuote(company.stockCode, company.market, companyNameHint)
-            .catch((error) => ({ live: false, error: error.message || 'Yahoo Finance 현재가 요청 실패' }));
-        const financialDataPromise = Promise.allSettled([
-            fetchMultiYearDart(company.corpCode),
-            fetchQuarterlyHistory(company.corpCode),
-            fetchDartReportList(company.corpCode)
-        ]);
+    const startDate = `${getCurrentYearKst() - CHART_HISTORY_YEARS}0101`;
+    const endDate = getCurrentDateTokenKst();
+    const companyNameHint = buildCompanyNameHint(company);
+    const cachedPreviewShown = applyCachedChartPreview(company.stockCode);
+    const dailyChartPromise = fetchYfinanceChart(company.stockCode, company.market, 'daily', startDate, endDate, companyNameHint)
+        .catch((error) => ({ live: false, rows: [], error: error.message || 'Yahoo Finance 일봉 차트 요청 실패' }));
+    const quotePromise = fetchYfinanceQuote(company.stockCode, company.market, companyNameHint)
+        .catch((error) => ({ live: false, error: error.message || 'Yahoo Finance 현재가 요청 실패' }));
+    const annualsPromise = fetchMultiYearDart(company.corpCode);
+    const quarterliesPromise = fetchQuarterlyHistory(company.corpCode);
+    const reportsPromise = fetchDartReportList(company.corpCode).catch((error) => {
+        console.warn('dart report list failed', error);
+        return [];
+    });
+
+    setStatus(
+        cachedPreviewShown
+            ? `${company.name} 저장된 차트를 먼저 표시했습니다. 실시간 시세와 DART 재무, Gemini 브리핑을 이어서 동기화하는 중입니다.`
+            : `${company.name} 분석을 시작합니다. 차트와 재무, 브리핑을 병렬로 동기화하는 중입니다.`
+    );
+
+    void continueAnalysisSync({
+        analysisToken,
+        company,
+        startDate,
+        dailyChartPromise,
+        quotePromise,
+        annualsPromise,
+        quarterliesPromise,
+        reportsPromise
+    });
+}
+
+function isActiveAnalysis(analysisToken) {
+    return analysisToken === state.analysisToken;
+}
+
+function applyCachedChartPreview(stockCode) {
+    const cachedChart = readChartCache(stockCode);
+    if (!cachedChart) {
+        return false;
+    }
+
+    state.chartDaily = cachedChart.daily;
+    state.chartWeekly = cachedChart.weekly.length ? cachedChart.weekly : aggregateCandles(cachedChart.daily, 'week');
+    state.financialPriceHistory = cachedChart.daily.slice();
+    state.chartSource = 'cache';
+    state.quoteSource = 'cache';
+    renderStockStrip(null, state.chartDaily[state.chartDaily.length - 1] || null);
+    refreshTechnicals(false);
+    renderCharts();
+    document.getElementById('chart-status').textContent = formatChartSourceStatus();
+    setSourceBadge('source-market', '저장된 차트를 먼저 표시함', 'warn');
+    return true;
+}
+
+function refreshDerivedAnalysis() {
+    const latestChartPoint = state.chartDaily[state.chartDaily.length - 1] || null;
+    if (latestChartPoint && !state.quote && (state.chartSource === 'yfinance_python' || state.chartSource === 'cache')) {
+        state.quoteSource = state.chartSource === 'cache' ? 'cache' : 'yfinance_chart';
+    }
+    renderStockStrip(state.quote, latestChartPoint);
+
+    if (!state.summaries.length) {
+        return latestChartPoint;
+    }
+
+    if (state.annualsAll.length) {
+        syncFinancialHistoryViews();
+    }
+    autoFillMetrics(state.summaries[0]?.summary || {}, state.quote || latestChartPoint || null, state.summaries[1]?.summary || null);
+    calcMetrics();
+    buildRatings();
+    return latestChartPoint;
+}
+
+function maybeStartInitialBriefing(analysisToken) {
+    if (!isActiveAnalysis(analysisToken)) return;
+    if (!state.company || !state.summaries.length || !state.ratings || !state.metrics) return;
+    if (!state.quote && !state.chartDaily.length) return;
+    if (state.briefingRequestToken === analysisToken || state.briefingMode !== 'idle') return;
+
+    state.briefingRequestToken = analysisToken;
+    setSourceBadge('source-gemini', 'Gemini 브리핑 생성 중', 'warn');
+    void (async () => {
+        try {
+            await generateBriefing();
+            if (!isActiveAnalysis(analysisToken)) return;
+            setStatus(`${state.company?.name || '기업'} 핵심 데이터 동기화가 완료되었습니다.`, 'success');
+            if (isMobileHybridViewport()) {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } else {
+                document.getElementById('dashboard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        } finally {
+            if (state.briefingRequestToken === analysisToken) {
+                state.briefingRequestToken = 0;
+            }
+        }
+    })();
+}
+
+function applyChartPayload(dailyChartPayload, company, startDate) {
+    const dailyPoints = dailyChartPayload?.live
+        ? InvestmentLogic.normalizeYfinanceChartRows(dailyChartPayload.rows, { startDate })
+        : [];
+    const cachedChart = readChartCache(company.stockCode);
+
+    if (dailyPoints.length) {
+        state.chartDaily = dailyPoints;
+        state.chartWeekly = aggregateCandles(dailyPoints, 'week');
+        state.financialPriceHistory = dailyPoints.slice();
+        state.chartSource = 'yfinance_python';
+        writeChartCache(company.stockCode, state.chartDaily, state.chartWeekly);
+        setSourceBadge('source-market', 'Yahoo Finance 차트 연동됨', 'success');
+    } else if (!state.chartDaily.length && cachedChart) {
+        state.chartDaily = cachedChart.daily;
+        state.chartWeekly = cachedChart.weekly.length ? cachedChart.weekly : aggregateCandles(cachedChart.daily, 'week');
+        state.financialPriceHistory = cachedChart.daily.slice();
+        state.chartSource = 'cache';
+        setSourceBadge('source-market', 'Yahoo Finance 실패 · 저장된 마지막 차트 사용', 'warn');
+    } else if (!state.chartDaily.length) {
+        state.chartDaily = [];
+        state.chartWeekly = [];
+        state.financialPriceHistory = [];
+        state.chartSource = 'unavailable';
+        setSourceBadge('source-market', dailyChartPayload?.error || 'Yahoo Finance 차트를 불러오지 못했습니다.', 'error');
+    }
+
+    refreshTechnicals(false);
+    renderCharts();
+    document.getElementById('chart-status').textContent = formatChartSourceStatus();
+}
+
+async function continueAnalysisSync({
+    analysisToken,
+    company,
+    startDate,
+    dailyChartPromise,
+    quotePromise,
+    annualsPromise,
+    quarterliesPromise,
+    reportsPromise
+}) {
+    const chartTask = (async () => {
         const dailyChartPayload = await dailyChartPromise;
-        if (analysisToken !== state.analysisToken) return;
-
-        const dailyPoints = dailyChartPayload.live
-            ? InvestmentLogic.normalizeYfinanceChartRows(dailyChartPayload.rows, {
-                startDate
-            })
-            : [];
-        const cachedChart = readChartCache(company.stockCode);
-
-        if (dailyPoints.length) {
-            state.chartDaily = dailyPoints;
-            state.chartWeekly = aggregateCandles(dailyPoints, 'week');
-            state.financialPriceHistory = dailyPoints.slice();
-            state.chartSource = 'yfinance_python';
-            writeChartCache(company.stockCode, state.chartDaily, state.chartWeekly);
-            setSourceBadge('source-market', 'Yahoo Finance 차트 연동됨', 'success');
-        } else if (cachedChart) {
-            state.chartDaily = cachedChart.daily;
-            state.chartWeekly = cachedChart.weekly.length ? cachedChart.weekly : aggregateCandles(cachedChart.daily, 'week');
-            state.financialPriceHistory = cachedChart.daily.slice();
-            state.chartSource = 'cache';
-            setSourceBadge('source-market', 'Yahoo Finance 실패 · 저장된 마지막 차트 사용', 'warn');
-        } else {
-            state.chartDaily = [];
-            state.chartWeekly = [];
-            state.financialPriceHistory = [];
-            state.chartSource = 'unavailable';
-            setSourceBadge('source-market', dailyChartPayload.error || 'Yahoo Finance 차트를 불러오지 못했습니다.', 'error');
+        if (!isActiveAnalysis(analysisToken)) return;
+        const resolvedMarket = dailyChartPayload?.market || '';
+        if (resolvedMarket && resolvedMarket !== 'AUTO') {
+            state.company.market = resolvedMarket;
         }
+        applyChartPayload(dailyChartPayload, company, startDate);
+        refreshDerivedAnalysis();
+        maybeStartInitialBriefing(analysisToken);
+        setStatus(`${company.name} 차트를 먼저 표시했습니다. 재무와 시세를 이어서 정리하는 중입니다.`);
+    })().catch((error) => {
+        console.error('chart sync failed', error);
+        if (!isActiveAnalysis(analysisToken)) return;
+        setSourceBadge('source-market', error.message || 'Yahoo Finance 차트 동기화 실패', 'error');
+    });
 
-        const latestChartPoint = state.chartDaily[state.chartDaily.length - 1] || null;
-        if (latestChartPoint) {
-            state.quoteSource = state.chartSource === 'cache' ? 'cache' : 'yfinance_chart';
-        }
-        renderStockStrip(null, latestChartPoint);
-        refreshTechnicals(false);
-        renderCharts();
-        document.getElementById('chart-status').textContent = formatChartSourceStatus();
-        setStatus(`${company.name} 차트를 먼저 표시했습니다. DART 재무와 브리핑을 이어서 정리하는 중입니다.`);
+    const financialTask = (async () => {
+        const [annualsResult, quarterliesResult] = await Promise.allSettled([annualsPromise, quarterliesPromise]);
+        if (!isActiveAnalysis(analysisToken)) return;
 
-        const [annualsResult, quarterliesResult, reportsResult] = await financialDataPromise;
-        if (analysisToken !== state.analysisToken) return;
-
-        state.reports = reportsResult.status === 'fulfilled' ? reportsResult.value : [];
-        renderReports(state.reports);
+        state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
+        renderFinancialTable('fin-quarterly-table', state.quarterlies);
+        renderQuarterlyMetricsTable('fin-quarterly-metrics-table', state.quarterlies);
 
         if (annualsResult.status === 'fulfilled' && annualsResult.value.length) {
             state.annualsAll = annualsResult.value;
             state.annuals = annualsResult.value.slice(0, state.financialHistoryRange);
-            state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
             syncFinancialHistoryViews();
-            renderFinancialTable('fin-quarterly-table', state.quarterlies);
-            renderQuarterlyMetricsTable('fin-quarterly-metrics-table', state.quarterlies);
-            const valuationSnapshot = state.quote || latestChartPoint || null;
-            autoFillMetrics(state.summaries[0]?.summary || {}, valuationSnapshot, state.summaries[1]?.summary || null);
-            calcMetrics();
-            buildRatings();
+            refreshDerivedAnalysis();
             setSourceBadge('source-dart', 'DART 공시 연동됨', 'success');
+            maybeStartInitialBriefing(analysisToken);
         } else {
             state.annuals = [];
             state.annualsAll = [];
-            state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
             state.summaries = [];
             applySummaryAnomalies();
             renderFinancialTable('fin-annual-table', []);
             renderHistoricalMetricsTable('fin-metrics-table', []);
-            renderFinancialTable('fin-quarterly-table', state.quarterlies);
-            renderQuarterlyMetricsTable('fin-quarterly-metrics-table', state.quarterlies);
             setSourceBadge('source-dart', 'DART 재무제표를 불러오지 못했습니다.', 'error');
         }
+    })().catch((error) => {
+        console.error('financial sync failed', error);
+        if (!isActiveAnalysis(analysisToken)) return;
+        setSourceBadge('source-dart', error.message || 'DART 동기화 실패', 'error');
+    });
 
+    const reportsTask = (async () => {
+        const reports = await reportsPromise;
+        if (!isActiveAnalysis(analysisToken)) return;
+        state.reports = Array.isArray(reports) ? reports : [];
+        renderReports(state.reports);
+    })().catch((error) => {
+        console.warn('report sync failed', error);
+        if (!isActiveAnalysis(analysisToken)) return;
+        renderReports([]);
+    });
+
+    const quoteTask = (async () => {
         const quotePayload = await quotePromise;
-        if (analysisToken !== state.analysisToken) return;
-        const resolvedMarket = quotePayload?.market || dailyChartPayload?.market || '';
+        if (!isActiveAnalysis(analysisToken)) return;
+        const resolvedMarket = quotePayload?.market || '';
         if (resolvedMarket && resolvedMarket !== 'AUTO') {
             state.company.market = resolvedMarket;
         }
@@ -1062,35 +1195,26 @@ async function startSearch() {
         if (state.quote) {
             state.quoteSource = 'yfinance_python';
             setSourceBadge('source-market', 'Yahoo Finance 시세 연동됨', 'success');
+        } else if (!state.chartDaily.length) {
+            setSourceBadge('source-market', quotePayload?.error || 'Yahoo Finance 시세를 불러오지 못했습니다.', 'error');
         }
-        renderStockStrip(state.quote, latestChartPoint);
-        if (state.summaries.length) {
-            if (state.annualsAll.length) {
-                syncFinancialHistoryViews();
-            }
-            autoFillMetrics(state.summaries[0]?.summary || {}, state.quote || latestChartPoint || null, state.summaries[1]?.summary || null);
-            calcMetrics();
-            buildRatings();
+        refreshDerivedAnalysis();
+        maybeStartInitialBriefing(analysisToken);
+    })().catch((error) => {
+        console.error('quote sync failed', error);
+        if (!isActiveAnalysis(analysisToken)) return;
+        if (!state.chartDaily.length) {
+            setSourceBadge('source-market', error.message || 'Yahoo Finance 시세 동기화 실패', 'error');
         }
+    });
 
-        if (state.summaries.length) {
-            await generateBriefing();
-            if (analysisToken !== state.analysisToken) return;
-        } else {
-            setSourceBadge('source-gemini', 'Gemini 대기', 'warn');
-        }
+    await Promise.allSettled([chartTask, financialTask, reportsTask, quoteTask]);
+    if (!isActiveAnalysis(analysisToken)) return;
 
-        setStatus(`${company.name} 분석이 완료되었습니다.`, 'success');
-        if (isMobileHybridViewport()) {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        } else {
-            document.getElementById('dashboard').scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-    } catch (error) {
-        console.error(error);
-        setStatus(error.message || '분석 중 알 수 없는 오류가 발생했습니다.', 'error');
-        setSourceBadge('source-dart', 'DART 실패', 'error');
+    if (!state.summaries.length) {
         setSourceBadge('source-gemini', 'Gemini 대기', 'warn');
+    } else {
+        maybeStartInitialBriefing(analysisToken);
     }
 }
 
@@ -1102,7 +1226,9 @@ async function loadCompanyDirectory(force = false) {
         return state.companyDirectoryPromise;
     }
 
-    const request = fetchJson(buildProxyUrl('company-directory', '', {}, 'company_directory'))
+    const request = fetchJson(buildProxyUrl('company-directory', '', {}, 'company_directory'), {
+        timeoutMs: FETCH_TIMEOUT_MS.companyDirectory
+    })
         .then((payload) => {
             const remoteDirectory = Array.isArray(payload?.directory) ? payload.directory : [];
             if (remoteDirectory.length) {
@@ -1225,16 +1351,33 @@ function resolveCompany(input, options = {}) {
 }
 
 async function fetchJson(url, options = {}) {
-    const response = await fetch(url, options);
-    const contentType = response.headers.get('content-type') || '';
-    const data = contentType.includes('application/json') ? await response.json() : await response.text();
-    if (!response.ok) {
-        const message = typeof data === 'object'
-            ? (typeof data.error === 'string' ? data.error : data.error?.message || data.message || response.statusText)
-            : response.statusText;
-        throw new Error(message);
+    const { timeoutMs = FETCH_TIMEOUT_MS.default, ...fetchOptions } = options;
+    const controller = new AbortController();
+    const timeoutId = timeoutMs > 0
+        ? setTimeout(() => controller.abort(), timeoutMs)
+        : null;
+
+    try {
+        const response = await fetch(url, { ...fetchOptions, signal: controller.signal });
+        const contentType = response.headers.get('content-type') || '';
+        const data = contentType.includes('application/json') ? await response.json() : await response.text();
+        if (!response.ok) {
+            const message = typeof data === 'object'
+                ? (typeof data.error === 'string' ? data.error : data.error?.message || data.message || response.statusText)
+                : response.statusText;
+            throw new Error(message);
+        }
+        return data;
+    } catch (error) {
+        if (error?.name === 'AbortError') {
+            throw new Error('요청 시간이 초과되었습니다.');
+        }
+        throw error;
+    } finally {
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
     }
-    return data;
 }
 
 function buildProxyUrl(service, endpoint = '', params = {}, productionAction = service) {
@@ -1300,12 +1443,16 @@ async function fetchAnnualDartYear(corpCode, year) {
             corp_code: corpCode,
             bsns_year: year,
             reprt_code: '11011'
-        })),
+        }), {
+            timeoutMs: FETCH_TIMEOUT_MS.dart
+        }),
         fetchJson(buildProxyUrl('dart', '/stockTotqySttus.json', {
             corp_code: corpCode,
             bsns_year: year,
             reprt_code: '11011'
-        }))
+        }), {
+            timeoutMs: FETCH_TIMEOUT_MS.dart
+        })
     ]);
 
     if (statementResult.status !== 'fulfilled') {
@@ -1375,7 +1522,9 @@ async function fetchQuarterlyHistory(corpCode) {
                     corp_code: corpCode,
                     bsns_year: year,
                     reprt_code: report.code
-                }));
+                }), {
+                    timeoutMs: FETCH_TIMEOUT_MS.dart
+                });
                 if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
                     rawPeriods.push({
                         year,
@@ -1414,7 +1563,9 @@ async function fetchDartReportList(corpCode) {
             end_de: end,
             page_count: 100,
             page_no: page
-        }));
+        }), {
+            timeoutMs: FETCH_TIMEOUT_MS.reports
+        });
         if (data.status !== '000' || !Array.isArray(data.list)) {
             break;
         }
@@ -1483,7 +1634,9 @@ async function fetchYfinanceQuote(stockCode, market, nameHint = '') {
         stock_code: stockCode,
         market,
         name_hint: nameHint
-    }, 'yfinance_quote'));
+    }, 'yfinance_quote'), {
+        timeoutMs: FETCH_TIMEOUT_MS.quote
+    });
 }
 
 async function fetchYfinanceChart(stockCode, market, interval, startDate, endDate, nameHint = '') {
@@ -1494,7 +1647,9 @@ async function fetchYfinanceChart(stockCode, market, interval, startDate, endDat
         start_date: startDate,
         end_date: endDate,
         name_hint: nameHint
-    }, 'yfinance_chart'));
+    }, 'yfinance_chart'), {
+        timeoutMs: FETCH_TIMEOUT_MS.chart
+    });
 }
 
 function buildDartCompanySearchUrl(company) {
@@ -3816,6 +3971,7 @@ async function generateBriefing() {
         const response = await fetchJson(buildProxyPostUrl('gemini'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            timeoutMs: FETCH_TIMEOUT_MS.gemini,
             body: JSON.stringify({
                 models: BRIEFING_MODEL_CANDIDATES,
                 contents: [{ parts: [{ text: prompt }] }],
