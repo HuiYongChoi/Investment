@@ -2965,8 +2965,17 @@ function renderPriceChart(data) {
     canvas.onwheel = (event) => {
         if (!state.chartFullSeries.length || !state.chartWindow) return;
         event.preventDefault();
-        // 수평(deltaX) > 수직(deltaY) → 트랙패드 좌우 스크롤: 타임라인 패닝
-        if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+        // macOS 핀치 제스처: 브라우저가 ctrlKey=true로 표시 → 항상 줌
+        if (event.ctrlKey) {
+            const factor = event.deltaY < 0 ? 0.91 : 1.11;
+            state.chartDrag = null;
+            state.chartPinch = null;
+            zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, event.clientX, padding.left, padding.right));
+            return;
+        }
+        // 수평 스크롤 판정: deltaX > deltaY 이거나 deltaX > 3(px) → 패닝
+        // 살짝 대각선 스와이프도 패닝으로 처리하기 위해 임계값 추가
+        if (Math.abs(event.deltaX) > Math.abs(event.deltaY) || Math.abs(event.deltaX) > 3) {
             const drawWidth = getCanvasClientDrawWidth(canvas, padding.left, padding.right);
             const visiblePoints = Math.max(1, state.chartWindow.end - state.chartWindow.start);
             const deltaPoints = Math.round((event.deltaX / drawWidth) * visiblePoints);
@@ -2975,13 +2984,13 @@ function renderPriceChart(data) {
                 state.chartWindow, deltaPoints, state.chartFullSeries.length
             );
             renderCharts({ viewport: 'preserve' });
-        } else {
-            // 트랙패드 상하 스크롤 / 마우스 휠 → 확대·축소 (감도 50% 완화)
-            const factor = event.deltaY < 0 ? 0.91 : 1.11;
-            state.chartDrag = null;
-            state.chartPinch = null;
-            zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, event.clientX, padding.left, padding.right));
+            return;
         }
+        // 상하 스크롤 / 마우스 휠 → 확대·축소
+        const factor = event.deltaY < 0 ? 0.91 : 1.11;
+        state.chartDrag = null;
+        state.chartPinch = null;
+        zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, event.clientX, padding.left, padding.right));
     };
 
     canvas.onpointerdown = (event) => {
@@ -3117,8 +3126,17 @@ function setupZoomPan(canvas, padLeft, padRight, onHoverMove, onHoverEnd) {
     canvas.onwheel = (e) => {
         if (!state.chartFullSeries.length || !state.chartWindow) return;
         e.preventDefault();
-        // 수평(deltaX) > 수직(deltaY) → 트랙패드 좌우 스크롤: 타임라인 패닝
-        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        // macOS 핀치 제스처: 브라우저가 ctrlKey=true로 표시 → 항상 줌
+        if (e.ctrlKey) {
+            const factor = e.deltaY < 0 ? 0.91 : 1.11;
+            state.techDrag = null;
+            state.techPinch = null;
+            zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, e.clientX, padLeft, padRight));
+            if (onHoverEnd) onHoverEnd();
+            return;
+        }
+        // 수평 스크롤 판정: deltaX > deltaY 이거나 deltaX > 3(px) → 패닝
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || Math.abs(e.deltaX) > 3) {
             const drawWidth = getCanvasClientDrawWidth(canvas, padLeft, padRight);
             const visiblePoints = Math.max(1, state.chartWindow.end - state.chartWindow.start);
             const deltaPoints = Math.round((e.deltaX / drawWidth) * visiblePoints);
@@ -3128,14 +3146,14 @@ function setupZoomPan(canvas, padLeft, padRight, onHoverMove, onHoverEnd) {
             );
             if (onHoverEnd) onHoverEnd();
             renderCharts({ viewport: 'preserve' });
-        } else {
-            // 트랙패드 상하 스크롤 / 마우스 휠 → 확대·축소 (감도 50% 완화)
-            const factor = e.deltaY < 0 ? 0.91 : 1.11;
-            state.techDrag = null;
-            state.techPinch = null;
-            zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, e.clientX, padLeft, padRight));
-            if (onHoverEnd) onHoverEnd();
+            return;
         }
+        // 상하 스크롤 / 마우스 휠 → 확대·축소
+        const factor = e.deltaY < 0 ? 0.91 : 1.11;
+        state.techDrag = null;
+        state.techPinch = null;
+        zoomSharedChartViewport(factor, getCanvasAnchorRatio(canvas, e.clientX, padLeft, padRight));
+        if (onHoverEnd) onHoverEnd();
     };
 
     canvas.onpointerdown = (e) => {
