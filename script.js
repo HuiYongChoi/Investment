@@ -3977,7 +3977,7 @@ async function generateBriefing() {
                 contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: {
                     temperature: 0.4,
-                    maxOutputTokens: 4096
+                    maxOutputTokens: 8192
                 }
             })
         });
@@ -3992,13 +3992,20 @@ async function generateBriefing() {
             savedAt: new Date().toISOString()
         });
         const modelUsed = response?.model || response?.modelUsed || response?.modelTried || '';
+        const isTruncated = response?._truncated === true;
+        if (isTruncated) {
+            console.warn('[Gemini] 서버에서 MAX_TOKENS 절단 응답을 반환했습니다. 브리핑 일부가 잘렸을 수 있습니다.');
+        }
         state.briefingMode = 'live';
         renderBriefing(
             text,
             'Gemini Live',
-            modelUsed ? `Gemini 모델 ${modelUsed} 응답으로 브리핑을 생성했습니다.` : 'Gemini 응답으로 브리핑을 생성했습니다.'
+            modelUsed
+                ? `Gemini 모델 ${modelUsed} 응답으로 브리핑을 생성했습니다.${isTruncated ? ' (응답 일부 절단)' : ''}`
+                : `Gemini 응답으로 브리핑을 생성했습니다.${isTruncated ? ' (응답 일부 절단)' : ''}`
         );
-        setSourceBadge('source-gemini', 'Gemini 응답 완료', 'success');
+        setSourceBadge('source-gemini', isTruncated ? 'Gemini 응답 (일부 절단)' : 'Gemini 응답 완료', isTruncated ? 'warn' : 'success');
+
     } catch (error) {
         console.error('Gemini briefing fallback', error);
         const cachedBriefing = readBriefingCache(company, briefingSignature);
@@ -4033,7 +4040,13 @@ function collectGeminiResponseText(response) {
             .filter(Boolean)
             .join('\n')
             .trim();
-        if (text) return text;
+        if (text) {
+            const finishReason = candidate?.finishReason || '';
+            if (finishReason === 'MAX_TOKENS') {
+                console.warn('[Gemini] finishReason=MAX_TOKENS: 응답이 토큰 한도로 잘렸습니다. maxOutputTokens 증가를 검토하세요.');
+            }
+            return text;
+        }
     }
     return '';
 }

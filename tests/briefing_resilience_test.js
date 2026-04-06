@@ -89,7 +89,7 @@ function run() {
     const scriptSource = readFile('/Users/huiyong/Desktop/Vibe Investment/script.js');
     assert(scriptSource.includes('readBriefingCache('), 'script.js should read cached Gemini briefings before falling back.');
     assert(scriptSource.includes('writeBriefingCache('), 'script.js should persist successful Gemini briefings.');
-    assert(scriptSource.includes('maxOutputTokens: 4096'), 'Gemini generation config should raise maxOutputTokens to 4096 for long briefings.');
+    assert(scriptSource.includes('maxOutputTokens: 8192'), 'Gemini generation config should raise maxOutputTokens to 8192 for long briefings.');
     assert(!scriptSource.includes('stopSequences'), 'Gemini requests should not include stopSequences that truncate the briefing early.');
     assert(scriptSource.includes('collectGeminiResponseText(response)'), 'Gemini briefing should join text from all returned content parts instead of only the first line.');
     assert(scriptSource.includes("console.log('Raw Gemini Response:', text);"), 'Gemini response handler should log the raw response text before rendering.');

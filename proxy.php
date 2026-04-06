@@ -971,13 +971,24 @@ try {
         $body = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
 
         $lastUpstream = null;
+        $truncatedFallback = null; // MAX_TOKENS 절단 응답 보관 (모든 모델 실패 시 최후 수단)
         foreach (gemini_model_candidates($requestedModels) as $model) {
             $url = GEMINI_MODEL_BASE . rawurlencode($model) . ':generateContent?key=' . rawurlencode($key);
             $upstream = request_upstream($url, ['Content-Type: application/json'], $body, 'POST');
             $decoded = safe_json_decode($upstream['body']);
             $hasText = !empty($decoded['candidates'][0]['content']['parts'][0]['text']);
+            $finishReason = trim((string) ($decoded['candidates'][0]['finishReason'] ?? ''));
 
             if ($upstream['status'] >= 200 && $upstream['status'] < 300 && $hasText) {
+                // MAX_TOKENS: 응답이 잘린 경우 → 다음 모델로 폴백 시도 (단, 절단 응답은 최후 수단으로 보관)
+                if ($finishReason === 'MAX_TOKENS') {
+                    if ($truncatedFallback === null) {
+                        $truncatedFallback = ['status' => $upstream['status'], 'body' => $decoded, 'model' => $model];
+                    }
+                    $lastUpstream = ['status' => $upstream['status'], 'body' => $decoded, 'model' => $model];
+                    continue; // 다음 모델 시도
+                }
+                // STOP 또는 정상 종료: 바로 성공 응답
                 $decoded['modelUsed'] = $model;
                 json_response($upstream['status'], $decoded);
             }
@@ -998,6 +1009,13 @@ try {
         }
 
         if ($lastUpstream !== null) {
+            // 모든 모델이 MAX_TOKENS로 잘린 경우 → truncatedFallback을 최후 수단으로 반환
+            if ($truncatedFallback !== null) {
+                $fb = $truncatedFallback['body'];
+                $fb['modelUsed'] = $truncatedFallback['model'];
+                $fb['_truncated'] = true; // 프론트 디버깅용 마커
+                json_response($truncatedFallback['status'], $fb);
+            }
             $responsePayload = is_array($lastUpstream['body']) ? $lastUpstream['body'] : ['error' => ['message' => 'Gemini upstream error']];
             $responsePayload['modelTried'] = $lastUpstream['model'];
             json_response($lastUpstream['status'], $responsePayload);
