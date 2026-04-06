@@ -1498,14 +1498,18 @@ async function fetchMultiYearDart(corpCode, limit = 3, excludedYears = []) {
     for (let year = currentYear - 1; year >= currentYear - 15; year -= 1) {
         if (skipYears.has(year)) continue;
         candidateYears.push(year);
-        if (candidateYears.length >= limit * 3) break; // 너무 넓은 범위 방지
+        if (candidateYears.length >= limit * 2) break;
     }
 
-    // 모든 연도를 한 번에 병렬로 요청 (직렬 배치 대기 제거)
-    const settled = await Promise.allSettled(candidateYears.map((year) => fetchAnnualDartYear(corpCode, year)));
-    const results = settled
-        .filter((r) => r.status === 'fulfilled' && r.value)
-        .map((r) => r.value);
+    const results = [];
+    // 브라우저 동시 연결 제한(6개)을 고려하여 3개씩 배치 처리
+    for (let i = 0; i < candidateYears.length && results.length < limit; i += 3) {
+        const batch = candidateYears.slice(i, i + 3);
+        const settled = await Promise.allSettled(batch.map((y) => fetchAnnualDartYear(corpCode, y)));
+        settled.forEach((r) => {
+            if (r.status === 'fulfilled' && r.value) results.push(r.value);
+        });
+    }
 
     return InvestmentLogic.buildDartAnnualPeriods(results, limit);
 }
@@ -1513,8 +1517,6 @@ async function fetchMultiYearDart(corpCode, limit = 3, excludedYears = []) {
 async function fetchQuarterlyHistory(corpCode) {
     const currentYear = getCurrentYearKst();
     const reportCodes = InvestmentLogic.getQuarterlyReportConfigs();
-
-    // 연도 × 분기 조합을 모두 병렬 fetch (직렬 이중 루프 제거)
     const tasks = [];
     for (let year = currentYear; year >= currentYear - 2; year -= 1) {
         for (const report of reportCodes) {
@@ -1522,36 +1524,40 @@ async function fetchQuarterlyHistory(corpCode) {
         }
     }
 
-    const settled = await Promise.allSettled(tasks.map(({ year, report }) =>
-        fetchJson(buildProxyUrl('dart', '/fnlttSinglAcnt.json', {
-            corp_code: corpCode,
-            bsns_year: year,
-            reprt_code: report.code
-        }), { timeoutMs: FETCH_TIMEOUT_MS.dart })
-            .then((data) => {
-                if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
-                    return {
-                        year,
-                        label: `${year} ${report.annual ? '4분기(사업보고서)' : report.label}`,
-                        period: `Q${report.rank}`,
-                        sortKey: year * 10 + report.rank,
-                        rank: report.rank,
-                        reportCode: report.code,
-                        isAnnual: Boolean(report.annual),
-                        annual: Boolean(report.annual),
-                        list: data.list
-                    };
-                }
-                return null;
-            })
-            .catch(() => null)
-    ));
+    const results = [];
+    // 브라우저 동시 연결 제한을 고려하여 4개씩 배치 처리
+    for (let i = 0; i < tasks.length; i += 4) {
+        const batch = tasks.slice(i, i + 4);
+        const settled = await Promise.allSettled(batch.map(({ year, report }) =>
+            fetchJson(buildProxyUrl('dart', '/fnlttSinglAcnt.json', {
+                corp_code: corpCode,
+                bsns_year: year,
+                reprt_code: report.code
+            }), { timeoutMs: FETCH_TIMEOUT_MS.dart })
+                .then((data) => {
+                    if (data.status === '000' && Array.isArray(data.list) && data.list.length) {
+                        return {
+                            year,
+                            label: `${year} ${report.annual ? '4분기(사업보고서)' : report.label}`,
+                            period: `Q${report.rank}`,
+                            sortKey: year * 10 + report.rank,
+                            rank: report.rank,
+                            reportCode: report.code,
+                            isAnnual: Boolean(report.annual),
+                            annual: Boolean(report.annual),
+                            list: data.list
+                        };
+                    }
+                    return null;
+                })
+                .catch(() => null)
+        ));
+        settled.forEach((r) => {
+            if (r.status === 'fulfilled' && r.value) results.push(r.value);
+        });
+    }
 
-    const rawPeriods = settled
-        .filter((r) => r.status === 'fulfilled' && r.value)
-        .map((r) => r.value);
-
-    return InvestmentLogic.buildDartQuarterlyPeriods(rawPeriods);
+    return InvestmentLogic.buildDartQuarterlyPeriods(results);
 }
 
 async function fetchDartReportList(corpCode) {
