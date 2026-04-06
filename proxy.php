@@ -124,7 +124,7 @@ function gemini_key(): string
 
 function gemini_model_candidates(array $requested = []): array
 {
-    $defaults = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    $defaults = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
     $merged = [];
     foreach (array_merge($requested, $defaults) as $model) {
         $normalized = trim((string) $model);
@@ -975,8 +975,9 @@ try {
             $url = GEMINI_MODEL_BASE . rawurlencode($model) . ':generateContent?key=' . rawurlencode($key);
             $upstream = request_upstream($url, ['Content-Type: application/json'], $body, 'POST');
             $decoded = safe_json_decode($upstream['body']);
+            $hasText = !empty($decoded['candidates'][0]['content']['parts'][0]['text']);
 
-            if ($upstream['status'] >= 200 && $upstream['status'] < 300 && !empty($decoded['candidates'][0]['content']['parts'][0]['text'])) {
+            if ($upstream['status'] >= 200 && $upstream['status'] < 300 && $hasText) {
                 $decoded['modelUsed'] = $model;
                 json_response($upstream['status'], $decoded);
             }
@@ -986,6 +987,10 @@ try {
                 'body' => $decoded ?: ['error' => ['message' => $upstream['body']]],
                 'model' => $model,
             ];
+
+            if ($upstream['status'] >= 200 && $upstream['status'] < 300) {
+                continue;
+            }
 
             if ($upstream['status'] < 500 && !in_array($upstream['status'], [404, 429], true)) {
                 break;

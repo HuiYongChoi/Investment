@@ -6,7 +6,7 @@ const KAKAO_STORAGE_TOKEN = 'invest_nav_kakao_token';
 const KAKAO_STORAGE_ERROR = 'invest_nav_kakao_error';
 const KAKAO_STORAGE_RETURN_URL = 'invest_nav_kakao_return_url';
 const KAKAO_STORAGE_PROFILE = 'invest_nav_kakao_profile';
-const BRIEFING_MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+const BRIEFING_MODEL_CANDIDATES = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 const KAKAO_REDIRECT_URI = InvestmentLogic.resolveKakaoRedirectUri(location.href);
 const CHART_HISTORY_YEARS = 5;
 const CHART_DEFAULT_WINDOWS = {
@@ -106,13 +106,16 @@ const state = {
     mobileTab: 'home',
     mobileContentTab: 'chart',
     lastAnalysis: { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] },
-    selectedIndicators: new Set(['RSI', 'MACD', 'STOCH', 'BOLL', 'MA']),
+    selectedIndicators: new Set(),
     analysisToken: 0
 };
 let priceHoverIndex = null;
+let briefingRefreshTimer = null;
 
 lucide.createIcons();
 bindEvents();
+syncIndicatorChipState();
+resetFinancialSectionToggles();
 startClock();
 initKakao();
 syncKakaoAuthUI(null, { loggedIn: false });
@@ -158,7 +161,6 @@ function bindEvents() {
     });
     suggestionBox.addEventListener('click', onSuggestionClick);
     document.getElementById('report-list').addEventListener('click', onReportListClick);
-    document.getElementById('calc-btn').addEventListener('click', calcMetrics);
     document.getElementById('tech-refresh-btn').addEventListener('click', () => {
         if (!state.chartVisible.length) return;
         refreshTechnicals();
@@ -175,6 +177,7 @@ function bindEvents() {
         button.addEventListener('click', onChartZoomClick);
     });
     document.getElementById('indicator-toggle').addEventListener('click', onIndicatorToggle);
+    document.getElementById('card-financials')?.addEventListener('click', onFinancialSectionToggle);
     if (sectorPresetSelect) {
         sectorPresetSelect.addEventListener('change', onValuationSectorPresetChange);
     }
@@ -209,6 +212,35 @@ function bindEvents() {
             hideCompanySuggestions();
         }
     });
+}
+
+function syncIndicatorChipState() {
+    document.querySelectorAll('.indicator-chip').forEach((button) => {
+        const indicator = button.dataset.indicator;
+        button.classList.toggle('active', state.selectedIndicators.has(indicator));
+    });
+}
+
+function setFinancialSectionExpanded(sectionKey, expanded) {
+    const toggle = document.querySelector(`[data-fin-toggle="${sectionKey}"]`);
+    const body = document.querySelector(`[data-fin-body="${sectionKey}"]`);
+    if (!toggle || !body) return;
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    body.classList.toggle('hidden', !expanded);
+}
+
+function resetFinancialSectionToggles() {
+    ['annual', 'metrics', 'quarterly'].forEach((sectionKey) => {
+        setFinancialSectionExpanded(sectionKey, false);
+    });
+}
+
+function onFinancialSectionToggle(event) {
+    const toggle = event.target.closest('[data-fin-toggle]');
+    if (!toggle) return;
+    const sectionKey = toggle.dataset.finToggle;
+    const nextExpanded = toggle.getAttribute('aria-expanded') !== 'true';
+    setFinancialSectionExpanded(sectionKey, nextExpanded);
 }
 
 function renderCompanySuggestions(rawQuery = '') {
@@ -883,6 +915,7 @@ async function startSearch() {
     state.financialPriceHistory = [];
     state.summaries = [];
     state.lastAnalysis = { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] };
+    state.selectedIndicators = new Set();
     priceHoverIndex = null;
     setStatus(`${company.name} 분석을 시작합니다. DART, Yahoo Finance 시세와 다중 기간 차트를 동기화하는 중입니다.`);
     setSourceBadge('source-dart', 'DART 동기화 중');
@@ -900,6 +933,8 @@ async function startSearch() {
     document.getElementById('stock-realtime').innerHTML = '';
     document.getElementById('fin-period-select').value = '3';
     setFinancialHistoryLoading(false);
+    syncIndicatorChipState();
+    resetFinancialSectionToggles();
     resetMetricManualInputs();
     renderReports([]);
     renderFinancialTable('fin-annual-table', []);
@@ -1885,6 +1920,38 @@ function onValuationManualInput(event) {
     calcMetrics();
 }
 
+function scheduleBriefingRefresh(reason = 'valuation') {
+    if (state.briefingMode === 'idle') return;
+    if (!state.company || !state.ratings || !state.metrics || !state.summaries.length) return;
+
+    if (briefingRefreshTimer) {
+        clearTimeout(briefingRefreshTimer);
+        briefingRefreshTimer = null;
+    }
+
+    if (state.briefingMode === 'local') {
+        renderBriefing(
+            buildLocalBriefing(),
+            'Local Quant Briefing',
+            reason === 'valuation'
+                ? '가치 평가 변경사항을 반영해 기관형 로컬 브리핑을 다시 계산했습니다.'
+                : '최신 분석 변경사항을 반영해 기관형 로컬 브리핑을 다시 계산했습니다.',
+            true
+        );
+        setSourceBadge('source-gemini', 'Gemini 대체 브리핑', 'warn');
+        return;
+    }
+
+    document.getElementById('briefing-meta').textContent = reason === 'valuation'
+        ? '가치 평가 변경사항을 AI 브리핑에 반영하는 중입니다.'
+        : '최신 분석 변경사항을 AI 브리핑에 반영하는 중입니다.';
+    setSourceBadge('source-gemini', 'Gemini 브리핑 갱신 중', 'warn');
+    briefingRefreshTimer = setTimeout(() => {
+        briefingRefreshTimer = null;
+        void generateBriefing();
+    }, 450);
+}
+
 function renderForwardEpsWarning(show) {
     const warning = document.getElementById('forward-eps-warning');
     if (!warning) return;
@@ -2090,6 +2157,7 @@ function calcMetrics() {
         srimPrice: srimFairValue
     };
     state.metrics = state.lastAnalysis.metrics;
+    scheduleBriefingRefresh('valuation');
 
     const items = [
         {
@@ -2618,7 +2686,7 @@ function onIndicatorToggle(event) {
     } else {
         state.selectedIndicators.add(indicator);
     }
-    button.classList.toggle('active', state.selectedIndicators.has(indicator));
+    syncIndicatorChipState();
     renderCharts();
 }
 
@@ -3613,7 +3681,7 @@ async function generateBriefing() {
 [기업(${company}) 핵심 퀀트 데이터]
 - 종합 재무 건전성 랭킹: ${totalPct}% (수익성 ${state.ratings.profitability.score}/5, 건전성 ${state.ratings.stability.score}/5)
 - 주요 지표: 영업이익률 ${summary?.operatingMargin?.toFixed(1) ?? '-'}%, 부채비율 ${summary?.debtRatio?.toFixed(1) ?? '-'}%, ROE ${summary?.roe?.toFixed(1) ?? '-'}%
-- 밸류에이션: 적정주가 ${state.metrics.targetPrice ? state.metrics.targetPrice.toLocaleString() + '원' : '-'} (현재가 대비 상승여력 ${state.metrics.upside?.toFixed(1) ?? '-'}%)
+- 밸류에이션: 최종 목표가 ${state.metrics.targetPrice ? state.metrics.targetPrice.toLocaleString() + '원' : '-'} (PER 모델 ${state.metrics.perModelPrice ? state.metrics.perModelPrice.toLocaleString() + '원' : '-'}, 무형자산 가산 ${state.metrics.premiumRate?.toFixed?.(0) ?? '0'}%, 현재가 대비 상승여력 ${state.metrics.upside?.toFixed(1) ?? '-'}%)
 - 기술적 시그널: ${technicalCards.map((card) => `${card.label}(${card.signal})`).join(', ') || '-'}
 - 차트 소스: ${formatChartSourceName()}
 
@@ -3654,6 +3722,7 @@ async function generateBriefing() {
             savedAt: new Date().toISOString()
         });
         const modelUsed = response?.model || response?.modelUsed || response?.modelTried || '';
+        state.briefingMode = 'live';
         renderBriefing(
             text,
             'Gemini Live',
@@ -3664,6 +3733,7 @@ async function generateBriefing() {
         console.warn('Gemini briefing fallback', error);
         const cachedBriefing = readBriefingCache(company, briefingSignature);
         if (cachedBriefing?.text) {
+            state.briefingMode = 'cached';
             renderBriefing(
                 cachedBriefing.text,
                 'Cached Gemini',
@@ -3673,6 +3743,7 @@ async function generateBriefing() {
             return;
         }
 
+        state.briefingMode = 'local';
         renderBriefing(
             buildLocalBriefing(),
             'Local Quant Briefing',

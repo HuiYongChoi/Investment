@@ -19,7 +19,7 @@ KIWOOM_BASE = 'https://api.kiwoom.com'
 KIWOOM_TOKEN_URL = 'https://api.kiwoom.com/oauth2/token'
 NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock'
 GEMINI_MODEL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
-GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'].freeze
+GEMINI_MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'].freeze
 KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token'
 KAKAO_USER_URL = 'https://kapi.kakao.com/v2/user/me'
 COMPANY_DIRECTORY_CACHE = File.join(Dir.tmpdir, 'investment-navigator-company-directory.json')
@@ -774,6 +774,8 @@ server.mount_proc '/gemini' do |req, res|
         status: upstream[:status],
         body: decoded.is_a?(Hash) ? decoded.merge('modelTried' => model) : { 'raw' => upstream[:body], 'modelTried' => model }
       }
+      next if upstream[:status] < 400
+
       break if upstream[:status] < 500 && ![404, 429].include?(upstream[:status])
     end
 

@@ -344,14 +344,29 @@
                         <span>과거 연도 재무와 투자 지표를 불러오는 중입니다.</span>
                     </div>
                 </div>
-                <h3 class="section-title">연간 실적</h3>
-                <div id="fin-annual-table" class="table-wrap"></div>
-                <h3 class="section-title">투자 지표</h3>
-                <div id="fin-metrics-table" class="table-wrap"></div>
+                <button class="fin-section-toggle" type="button" data-fin-toggle="annual" aria-expanded="false">
+                    <span>연간 실적</span>
+                    <span class="fin-section-chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="fin-section-body hidden" data-fin-body="annual">
+                    <div id="fin-annual-table" class="table-wrap"></div>
+                </div>
+                <button class="fin-section-toggle" type="button" data-fin-toggle="metrics" aria-expanded="false">
+                    <span>투자 지표</span>
+                    <span class="fin-section-chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="fin-section-body hidden" data-fin-body="metrics">
+                    <div id="fin-metrics-table" class="table-wrap"></div>
+                </div>
             </div>
             <div class="fin-section">
-                <h3 class="section-title">분기 실적</h3>
-                <div id="fin-quarterly-table" class="table-wrap"></div>
+                <button class="fin-section-toggle" type="button" data-fin-toggle="quarterly" aria-expanded="false">
+                    <span>분기 실적</span>
+                    <span class="fin-section-chevron" aria-hidden="true">⌄</span>
+                </button>
+                <div class="fin-section-body hidden" data-fin-body="quarterly">
+                    <div id="fin-quarterly-table" class="table-wrap"></div>
+                </div>
             </div>
         </section>
 
@@ -435,10 +450,6 @@
                     </div>
                 </section>
             </div>
-            <button class="btn-primary" id="calc-btn">
-                <i data-lucide="refresh-cw"></i>
-                <span>가치 지표 재계산</span>
-            </button>
             <div class="metrics-guide" id="metrics-guide">
                 <div class="valuation-preset-row">
                     <span class="sector-badge" id="sector-name-badge">프리셋 없음</span>
@@ -471,23 +482,23 @@
             </div>
             <div class="chart-toolbar">
                 <div class="indicator-toggle" id="indicator-toggle">
-                    <button class="indicator-chip active" data-indicator="RSI">
+                    <button class="indicator-chip" data-indicator="RSI">
                         RSI
                         <span class="chip-hint">?<span class="chip-tooltip"><strong>RSI (상대강도지수)</strong><br>14일 기준 모멘텀 오실레이터<br>🟢 매수: RSI ≤ 30 (과매도 구간)<br>🔴 매도: RSI ≥ 70 (과매수 구간)<br>⚪ 중립: 30 ~ 70 구간</span></span>
                     </button>
-                    <button class="indicator-chip active" data-indicator="MACD">
+                    <button class="indicator-chip" data-indicator="MACD">
                         MACD
                         <span class="chip-hint">?<span class="chip-tooltip"><strong>MACD (이동평균수렴확산)</strong><br>단기(12일) - 장기(26일) EMA 차이<br>🟢 매수: MACD선이 Signal선 상향돌파<br>🔴 매도: MACD선이 Signal선 하향돌파<br>히스토그램이 0선을 기준으로 방향 판단</span></span>
                     </button>
-                    <button class="indicator-chip active" data-indicator="STOCH">
+                    <button class="indicator-chip" data-indicator="STOCH">
                         스토캐스틱
                         <span class="chip-hint">?<span class="chip-tooltip"><strong>스토캐스틱 (14, 3)</strong><br>%K / %D 모멘텀 오실레이터<br>🟢 매수: %K가 %D 상향돌파 & K &lt; 25<br>🔴 매도: %K가 %D 하향돌파 & K &gt; 75<br>⚪ 중립: 25 ~ 75 구간</span></span>
                     </button>
-                    <button class="indicator-chip active" data-indicator="BOLL">
+                    <button class="indicator-chip" data-indicator="BOLL">
                         볼린저 밴드
                         <span class="chip-hint">?<span class="chip-tooltip"><strong>볼린저 밴드 (20일, 2σ)</strong><br>가격 변동성 기반 채널 지표<br>🟢 매수: 현재가 ≤ 하단 밴드 이탈<br>🔴 매도: 현재가 ≥ 상단 밴드 돌파<br>중간선(Middle) = 20일 이동평균</span></span>
                     </button>
-                    <button class="indicator-chip active" data-indicator="MA">
+                    <button class="indicator-chip" data-indicator="MA">
                         골든/데드크로스
                         <span class="chip-hint">?<span class="chip-tooltip"><strong>골든 / 데드크로스 (MA5 / MA20)</strong><br>단기·장기 이동평균 교차 신호<br>🟢 골든크로스(매수): MA5가 MA20 상향돌파<br>🔴 데드크로스(매도): MA5가 MA20 하향돌파</span></span>
                     </button>

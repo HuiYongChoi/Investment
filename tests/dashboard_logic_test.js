@@ -534,6 +534,8 @@ assert(scriptSource.includes("input.addEventListener('input', onValuationManualI
 assert(scriptSource.includes("document.getElementById('m-sector-preset')"), 'Valuation controls should wire the sector preset dropdown');
 assert(scriptSource.includes("document.getElementById('m-trailing-eps')"), 'Valuation controls should populate the trailing TTM EPS read-only field');
 assert(scriptSource.includes("document.getElementById('forward-eps-warning')"), 'Valuation rendering should target the forward EPS warning indicator');
+assert(scriptSource.includes("scheduleBriefingRefresh('valuation');"), 'Valuation recalculation should schedule a fresh briefing render when metrics change.');
+assert(scriptSource.includes("if (state.briefingMode === 'idle') return;"), 'Briefing refresh should stay dormant until the first briefing exists.');
 assert(scriptSource.includes("최종 목표가"), 'Valuation output should include the premium-adjusted final target card');
 assert(scriptSource.includes("metric-result-primary"), 'Valuation output should mark the final target card as the primary emphasized result');
 assert(scriptSource.includes("document.getElementById('mobile-tabbar')"), 'Mobile UX should wire the bottom tab bar container');
@@ -562,6 +564,7 @@ assert(!scriptSource.includes('function addXP('), 'XP progression logic should b
 assert(!scriptSource.includes("localStorage.getItem('invest_nav_xp')"), 'XP localStorage state should be removed from the frontend');
 assert(scriptSource.includes('당신은 월스트리트 탑티어 헤지펀드의 수석 퀀트 애널리스트입니다.'), 'Gemini prompt should use the hedge-fund quant analyst persona');
 assert(scriptSource.includes("[거시 경제(Macro) 환경]"), 'Gemini prompt should include a dedicated macro environment section');
+assert(scriptSource.includes("- 밸류에이션: 최종 목표가"), 'Gemini prompt should describe the recalculated valuation using the final target price wording.');
 assert(scriptSource.includes("document.getElementById('fx-usdkrw')?.innerText || '-'"), 'Gemini prompt should inject USD/KRW from the market bar');
 assert(scriptSource.includes("document.getElementById('vix-value')?.innerText || '-'"), 'Gemini prompt should inject VIX from the market bar');
 assert(scriptSource.includes("document.getElementById('wti-value')?.innerText || '-'"), 'Gemini prompt should inject WTI from the market bar');
@@ -737,6 +740,7 @@ assert(phpProxySource.includes("request_yfinance_bridge('quote', ['stock_code' =
 assert(htmlSource.includes('일반 제조'), 'Valuation form should include the general-manufacturing preset option');
 assert(htmlSource.includes('id="metrics-guide"'), 'Valuation section should include the dynamic guide container');
 assert(htmlSource.includes('id="sector-premium-badge"'), 'Valuation section should include the premium badge slot');
+assert(!htmlSource.includes('id="calc-btn"'), 'Valuation section should remove the redundant manual recalculation button.');
 assert(htmlSource.includes('class="help-icon"'), 'Market bar should render a compact VIX help icon');
 assert(htmlSource.includes('class="vix-tooltip"'), 'Market bar should include the VIX tooltip layer');
 assert(htmlSource.includes('class="market-groups"'), 'Top market area should wrap global and domestic cards into grouped layout containers');

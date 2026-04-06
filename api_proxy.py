@@ -24,7 +24,7 @@ KIWOOM_BASE = "https://api.kiwoom.com"
 KIWOOM_TOKEN_URL = "https://api.kiwoom.com/oauth2/token"
 NAVER_STOCK_BASE = "https://m.stock.naver.com/api/stock"
 GEMINI_MODEL_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
+GEMINI_MODELS = ("gemini-3-flash-preview", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
 KAKAO_TOKEN_URL = "https://kauth.kakao.com/oauth/token"
 KAKAO_USER_URL = "https://kapi.kakao.com/v2/user/me"
 KST = dt.timezone(dt.timedelta(hours=9))
@@ -761,7 +761,8 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                     json_body=payload,
                 )
                 decoded = safe_json(raw)
-                if status < 400 and decoded.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text"):
+                has_text = decoded.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text")
+                if status < 400 and has_text:
                     decoded["modelUsed"] = model
                     self.send_json(status, decoded)
                     return
@@ -772,6 +773,9 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                     last_body = json.dumps(decoded, ensure_ascii=False)
                 else:
                     last_body = raw
+
+                if status < 400:
+                    continue
 
                 if status < 500 and status not in (404, 429):
                     break

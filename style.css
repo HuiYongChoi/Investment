@@ -1463,6 +1463,59 @@ header#header {
     position: relative;
 }
 
+.fin-section {
+    margin-top: 8px;
+}
+
+.fin-section + .fin-section {
+    margin-top: 18px;
+}
+
+.fin-section-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.035);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.fin-section-toggle:hover {
+    border-color: rgba(79, 140, 255, 0.28);
+    background: rgba(79, 140, 255, 0.06);
+}
+
+.fin-section-toggle[aria-expanded="true"] {
+    border-color: rgba(79, 140, 255, 0.34);
+    background: rgba(79, 140, 255, 0.08);
+}
+
+.fin-section-chevron {
+    font-size: 1rem;
+    color: var(--text-faint);
+    transition: transform 0.18s ease;
+}
+
+.fin-section-toggle[aria-expanded="true"] .fin-section-chevron {
+    transform: rotate(180deg);
+}
+
+.fin-section-body {
+    padding-top: 14px;
+}
+
+.fin-section-body .table-wrap {
+    margin-bottom: 0;
+}
+
 .fin-history-overlay {
     position: absolute;
     inset: 0;
@@ -2115,6 +2168,11 @@ header#header {
 
     .fin-toolbar {
         align-items: stretch;
+    }
+
+    .fin-section-toggle {
+        padding: 14px 16px;
+        font-size: 0.9rem;
     }
 
     .fin-period-control,
