@@ -3819,11 +3819,12 @@ async function generateBriefing() {
                 contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: {
                     temperature: 0.4,
-                    maxOutputTokens: 2048
+                    maxOutputTokens: 4096
                 }
             })
         });
         const text = collectGeminiResponseText(response);
+        console.log('Raw Gemini Response:', text);
         if (!text) {
             throw new Error('Gemini 응답에 브리핑 본문이 없습니다.');
         }
