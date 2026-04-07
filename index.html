@@ -267,9 +267,9 @@
                 </a>
             </div>
             <div class="source-row">
-                <span class="source-badge" id="source-dart">DART 준비 중</span>
-                <span class="source-badge" id="source-market">Yahoo Finance 준비 중</span>
-                <span class="source-badge" id="source-gemini">Gemini 준비 중</span>
+                <span class="source-badge" id="source-dart">공시 준비 중</span>
+                <span class="source-badge" id="source-market">시세 준비 중</span>
+                <span class="source-badge" id="source-gemini">리포트 준비 중</span>
             </div>
             <div id="stock-realtime" class="stock-strip hidden"></div>
         </section>
@@ -279,7 +279,7 @@
                 <div class="card-icon chart-gradient"><i data-lucide="chart-candlestick"></i></div>
                 <div class="card-copy">
                     <h2>주가 흐름 및 추세</h2>
-                    <p class="card-sub" id="chart-meta">Yahoo Finance (yfinance Python) 가격 차트에 MA5, MA20, MA60, MA120, MA200을 표시하고 휠 확대/축소와 드래그 이동을 지원합니다.</p>
+                    <p class="card-sub" id="chart-meta">캔들차트에 MA5, MA20, MA60, MA120, MA200을 표시합니다. 휠로 확대·축소하고 드래그로 이동할 수 있습니다.</p>
                 </div>
             </div>
             <div class="chart-toolbar">
@@ -365,14 +365,14 @@
                 <div class="card-icon metric-gradient"><i data-lucide="calculator"></i></div>
                 <div class="card-copy">
                     <h2>가치 지표 및 적정주가</h2>
-                    <p class="card-sub">API 연동값은 읽기 전용으로 보여주고, 사용자 가정값으로 적정주가를 다시 계산합니다.</p>
+                    <p class="card-sub">시장 데이터를 기반으로 자동 계산된 밸류에이션 지표와 나만의 가정을 합쳐 적정주가를 계산합니다.</p>
                 </div>
             </div>
             <div class="valuation-tracks">
                 <section class="valuation-track valuation-track-readonly">
                     <div class="valuation-track-head">
-                        <h3>API 연동값 (읽기 전용)</h3>
-                        <p>Yahoo Finance와 재무 데이터로 자동 계산된 기준값입니다.</p>
+                        <h3>시장 데이터 (자동 계산)</h3>
+                        <p>실시간 시세와 재무 데이터를 기반으로 자동 계산된 기준값입니다.</p>
                     </div>
                     <div class="input-grid valuation-grid">
                         <label class="input-block">
@@ -530,7 +530,7 @@
                 <div class="card-icon brand-gradient"><i data-lucide="bot"></i></div>
                 <div class="card-copy">
                     <h2>Gemini AI 투자 브리핑</h2>
-                    <p class="card-sub" id="briefing-meta">Gemini 응답이 실패하면 로컬 요약 브리핑으로 자동 전환합니다.</p>
+                    <p class="card-sub" id="briefing-meta">AI가 주요 재무·기술 지표를 종합해 투자 판단에 도움이 되는 인사이트를 제공합니다.</p>
                 </div>
                 <div class="header-actions">
                     <button class="btn-outline" id="kakao-send-btn">

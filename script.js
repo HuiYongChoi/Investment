@@ -1287,11 +1287,11 @@ async function startSearch() {
     priceHoverIndex = null;
     setStatus(`${company.name} 분석을 시작합니다. DART, Yahoo Finance 시세와 다중 기간 차트를 동기화하는 중입니다.`);
     setSourceBadge('source-dart', 'DART 동기화 중');
-    setSourceBadge('source-market', 'Yahoo Finance 동기화 중');
+    setSourceBadge('source-market', '실시간 시세 동기화 중');
     setSourceBadge('source-gemini', 'Gemini 대기 중');
 
     renderCompanyHeading(company.name, []);
-    document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 Yahoo Finance (yfinance Python) 일·주·월·연/YTD 가격 흐름을 분석합니다.`;
+    document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 시세 데이터를 분석합니다.`;
     document.getElementById('dart-link').href = buildDartCompanySearchUrl(company);
     document.getElementById('dashboard').classList.remove('hidden');
     setMobileTab('chart-finance');
@@ -1425,19 +1425,19 @@ function applyChartPayload(dailyChartPayload, company, startDate) {
         state.financialPriceHistory = dailyPoints.slice();
         state.chartSource = 'yfinance_python';
         writeChartCache(company.stockCode, state.chartDaily, state.chartWeekly);
-        setSourceBadge('source-market', 'Yahoo Finance 차트 연동됨', 'success');
+        setSourceBadge('source-market', '차트 데이터 연동됨', 'success');
     } else if (!state.chartDaily.length && cachedChart) {
         state.chartDaily = cachedChart.daily;
         state.chartWeekly = cachedChart.weekly.length ? cachedChart.weekly : aggregateCandles(cachedChart.daily, 'week');
         state.financialPriceHistory = cachedChart.daily.slice();
         state.chartSource = 'cache';
-        setSourceBadge('source-market', 'Yahoo Finance 실패 · 저장된 마지막 차트 사용', 'warn');
+        setSourceBadge('source-market', '차트 실패 · 저장된 마지막 차트 사용', 'warn');
     } else if (!state.chartDaily.length) {
         state.chartDaily = [];
         state.chartWeekly = [];
         state.financialPriceHistory = [];
         state.chartSource = 'unavailable';
-        setSourceBadge('source-market', dailyChartPayload?.error || 'Yahoo Finance 차트를 불러오지 못했습니다.', 'error');
+        setSourceBadge('source-market', dailyChartPayload?.error || '차트 데이터를 불러오지 못했습니다.', 'error');
     }
 
     refreshTechnicals(false);
@@ -1469,7 +1469,7 @@ async function continueAnalysisSync({
     })().catch((error) => {
         console.error('chart sync failed', error);
         if (!isActiveAnalysis(analysisToken)) return;
-        setSourceBadge('source-market', error.message || 'Yahoo Finance 차트 동기화 실패', 'error');
+        setSourceBadge('source-market', '차트 동기화 실패', 'error');
     });
 
     const financialTask = (async () => {
@@ -1524,9 +1524,9 @@ async function continueAnalysisSync({
             : null;
         if (state.quote) {
             state.quoteSource = 'yfinance_python';
-            setSourceBadge('source-market', 'Yahoo Finance 시세 연동됨', 'success');
+            setSourceBadge('source-market', '실시간 시세 연동됨', 'success');
         } else if (!state.chartDaily.length) {
-            setSourceBadge('source-market', quotePayload?.error || 'Yahoo Finance 시세를 불러오지 못했습니다.', 'error');
+            setSourceBadge('source-market', quotePayload?.error || '실시간 시세를 불러오지 못했습니다.', 'error');
         }
         refreshDerivedAnalysis();
         maybeStartInitialBriefing(analysisToken);
@@ -1534,7 +1534,7 @@ async function continueAnalysisSync({
         console.error('quote sync failed', error);
         if (!isActiveAnalysis(analysisToken)) return;
         if (!state.chartDaily.length) {
-            setSourceBadge('source-market', error.message || 'Yahoo Finance 시세 동기화 실패', 'error');
+            setSourceBadge('source-market', error.message || '시세 동기화 실패', 'error');
         }
     });
 
@@ -1941,7 +1941,7 @@ function formatChartSourceStatus() {
         ? ` · ${state.chartVisible.length}/${state.chartFullSeries.length}봉`
         : '';
     if (state.chartSource === 'yfinance_python') {
-        return `Yahoo Finance (yfinance Python) 차트${coverage}`;
+        return `실시간 차트 데이터${coverage}`;
     }
     if (state.chartSource === 'cache') {
         return `저장된 마지막 Yahoo Finance 차트${coverage}`;
@@ -1951,7 +1951,7 @@ function formatChartSourceStatus() {
 
 function formatChartSourceName() {
     if (state.chartSource === 'yfinance_python') {
-        return 'Yahoo Finance (yfinance Python)';
+        return '실시간 차트 데이터';
     }
     if (state.chartSource === 'cache') {
         return '저장된 마지막 Yahoo Finance 차트';
@@ -1961,7 +1961,7 @@ function formatChartSourceName() {
 
 function formatQuoteSourceText() {
     if (state.quoteSource === 'yfinance_python') {
-        return 'Yahoo Finance (yfinance Python) 현재가 기준';
+        return '실시간 현재가 기준';
     }
     if (state.quoteSource === 'yfinance_chart') {
         return '최근 Yahoo Finance 차트 기준';
@@ -3040,7 +3040,7 @@ const INDICATOR_TOOLTIPS = {
 function renderTechnicalCards() {
     const container = document.getElementById('technical-grid');
     if (!state.technicals) {
-        container.innerHTML = '<div class="report-item">Yahoo Finance 차트 데이터가 충분할 때 기술적 분석 카드가 표시됩니다.</div>';
+        container.innerHTML = '<div class="report-item">충분한 차트 데이터가 수집되면 기술적 분석 카드가 표시됩니다.</div>';
         return;
     }
 
