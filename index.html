@@ -562,10 +562,18 @@
                     </button>
                 </div>
             </div>
+            <div class="briefing-action-row">
+                <button class="btn-primary briefing-generate-btn" id="briefing-generate-btn" type="button">
+                    <svg class="briefing-generate-spinner hidden spin" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="42 18"></circle>
+                    </svg>
+                    <span id="briefing-generate-label">보고서 작성</span>
+                </button>
+            </div>
             <div id="briefing-content">
                 <div class="loading-area">
-                    <i data-lucide="loader-2" class="spin"></i>
-                    <p>분석 데이터를 정리 중입니다.</p>
+                    <i data-lucide="bot"></i>
+                    <p>분석 항목을 고른 뒤 보고서 작성 버튼을 눌러 AI 리포트를 생성하세요.</p>
                 </div>
             </div>
         </section>

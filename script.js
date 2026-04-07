@@ -125,10 +125,13 @@ const state = {
     mobileContentTab: 'chart',
     lastAnalysis: { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] },
     selectedIndicators: new Set(),
-    analysisToken: 0
+    analysisToken: 0,
+    briefingRequested: false,
+    briefingDirty: false
 };
 let priceHoverIndex = null;
 let briefingRefreshTimer = null;
+let briefingButtonResetTimer = null;
 let marketSummaryReloadTimer = null;
 
 lucide.createIcons();
@@ -205,6 +208,7 @@ function bindEvents() {
     document.getElementById('mobile-kakao-login')?.addEventListener('click', beginKakaoLogin);
     document.getElementById('mobile-kakao-logout')?.addEventListener('click', logoutKakao);
     document.getElementById('kakao-send-btn').addEventListener('click', sendBriefingToKakao);
+    document.getElementById('briefing-generate-btn').addEventListener('click', onBriefingGenerateClick);
     document.getElementById('chart-range-controls').addEventListener('click', onChartRangeClick);
     document.getElementById('chart-reset-btn').addEventListener('click', resetChartZoom);
     document.querySelectorAll('[data-chart-zoom]').forEach((button) => {
@@ -306,6 +310,7 @@ function onBriefingModuleClick(event) {
         state.briefingModulesToInclude.add(module);
     }
     syncBriefingModuleUI();
+    scheduleBriefingRefresh('modules');
 }
 
 function syncBriefingModuleUI() {
@@ -322,6 +327,88 @@ function getSelectedBriefingModules() {
         hasTechnical: state.briefingModulesToInclude.has('technical'),
         hasValuation: state.briefingModulesToInclude.has('valuation')
     };
+}
+
+function canGenerateBriefing() {
+    return Boolean(
+        state.company &&
+        state.summaries.length &&
+        state.ratings &&
+        state.metrics &&
+        (state.quote || state.chartDaily.length)
+    );
+}
+
+function setBriefingGenerateButtonState(mode = 'idle') {
+    const button = document.getElementById('briefing-generate-btn');
+    const label = document.getElementById('briefing-generate-label');
+    const spinner = button?.querySelector('.briefing-generate-spinner');
+    if (!button || !label || !spinner) return;
+
+    button.classList.remove('is-loading', 'is-complete');
+    spinner.classList.add('hidden');
+
+    if (briefingButtonResetTimer) {
+        clearTimeout(briefingButtonResetTimer);
+        briefingButtonResetTimer = null;
+    }
+
+    if (mode === 'loading') {
+        button.classList.add('is-loading');
+        button.disabled = true;
+        spinner.classList.remove('hidden');
+        label.textContent = '작성중...';
+        return;
+    }
+
+    if (mode === 'complete') {
+        button.classList.add('is-complete');
+        button.disabled = true;
+        label.textContent = '완료';
+        briefingButtonResetTimer = setTimeout(() => {
+            setBriefingGenerateButtonState('idle');
+        }, 1400);
+        return;
+    }
+
+    button.disabled = !canGenerateBriefing();
+    label.textContent = state.briefingDirty ? '다시 작성' : '보고서 작성';
+}
+
+function renderBriefingIdle(message = '분석 항목을 고른 뒤 보고서 작성 버튼을 눌러 AI 리포트를 생성하세요.') {
+    document.getElementById('briefing-meta').textContent = '원하는 분석 항목만 골라 사용자 주도로 AI 리포트를 생성합니다.';
+    document.getElementById('briefing-content').innerHTML = `
+        <div class="loading-area">
+            <i data-lucide="bot"></i>
+            <p>${escapeHtml(message)}</p>
+        </div>
+    `;
+    lucide.createIcons();
+}
+
+async function onBriefingGenerateClick() {
+    if (!canGenerateBriefing()) {
+        setStatus('핵심 재무와 시세 동기화가 끝난 뒤 보고서 작성을 눌러주세요.', 'warn');
+        return;
+    }
+
+    state.briefingRequested = true;
+    state.briefingDirty = false;
+    setBriefingGenerateButtonState('loading');
+    document.getElementById('briefing-meta').textContent = '선택한 분석 항목만 반영해 AI 리포트를 작성하는 중입니다.';
+    setSourceBadge('source-gemini', '리포트 작성 중', 'warn');
+
+    try {
+        const result = await generateBriefing();
+        if (result?.mode === 'live') {
+            setBriefingGenerateButtonState('complete');
+        } else {
+            setBriefingGenerateButtonState('idle');
+        }
+    } catch (error) {
+        console.error('manual briefing trigger failed', error);
+        setBriefingGenerateButtonState('idle');
+    }
 }
 
 function buildDynamicBriefingInstruction(selected) {
@@ -747,26 +834,20 @@ function updateSuggestionsMaxHeight(input) {
 
 function mobileKeyboardActivate(input) {
     document.getElementById('search-hero')?.classList.add('keyboard-active');
-    // Save scroll position and lock body to prevent iOS background scroll bounce
-    _mobileKeyboardScrollY = window.scrollY;
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${_mobileKeyboardScrollY}px`;
-    document.body.style.width = '100%';
-    document.body.style.overflowY = 'scroll';
     updateSuggestionsMaxHeight(input);
 }
 
 function mobileKeyboardDeactivate() {
     document.getElementById('search-hero')?.classList.remove('keyboard-active');
-    // Restore body scroll and scroll position
-    document.body.style.position = '';
-    document.body.style.top = '';
-    document.body.style.width = '';
-    document.body.style.overflowY = '';
-    // RAF으로 레이아웃 복원 후 스크롤 위치 복원 (iOS 이중 스크롤 방지)
-    const savedY = _mobileKeyboardScrollY;
-    requestAnimationFrame(() => window.scrollTo(0, savedY));
     document.documentElement.style.removeProperty('--suggestions-max-height');
+}
+
+function scrollViewportTop() {
+    try {
+        window.scrollTo({ top: 0, behavior: 'instant' });
+    } catch (error) {
+        window.scrollTo(0, 0);
+    }
 }
 
 function syncMobileHeaderChrome() {
@@ -798,10 +879,9 @@ function setMobileTab(tab, options = {}) {
         });
     }
     if (options.scroll && isMobileHybridViewport()) {
-        const target = tab === 'home'
-            ? document.getElementById('search-hero')
-            : dashboard;
-        target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        requestAnimationFrame(() => {
+            scrollViewportTop();
+        });
     }
 }
 
@@ -822,7 +902,9 @@ function setMobileContentTab(tab, options = {}) {
     });
 
     if (options.scroll && isMobileHybridViewport()) {
-        contentTabbar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        requestAnimationFrame(() => {
+            scrollViewportTop();
+        });
     }
 
     if (!dashboard.classList.contains('hidden') && state.mobileTab === 'chart-finance' && (tab === 'chart' || tab === 'technical')) {
@@ -864,7 +946,7 @@ function onMobileTabClick(event) {
 function onMobileContentTabClick(event) {
     const button = event.target.closest('[data-mobile-content-target]');
     if (!button) return;
-    setMobileContentTab(button.dataset.mobileContentTarget, { scroll: false });
+    setMobileContentTab(button.dataset.mobileContentTarget, { scroll: true });
 }
 
 function setMarketChg(id, changePct, options = {}) {
@@ -1315,6 +1397,8 @@ async function startSearch() {
     state.summaries = [];
     state.briefingMode = 'idle';
     state.briefingRequestToken = 0;
+    state.briefingRequested = false;
+    state.briefingDirty = false;
     state.lastAnalysis = { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] };
     state.selectedIndicators = new Set();
     state.briefingModulesToInclude = new Set(['core', 'metrics']);
@@ -1323,7 +1407,7 @@ async function startSearch() {
     setStatus(`${company.name} 분석을 시작합니다. DART, Yahoo Finance 시세와 다중 기간 차트를 동기화하는 중입니다.`);
     setSourceBadge('source-dart', 'DART 동기화 중');
     setSourceBadge('source-market', '실시간 시세 동기화 중');
-    setSourceBadge('source-gemini', 'Gemini 대기 중');
+    setSourceBadge('source-gemini', '보고서 작성 대기', 'warn');
 
     renderCompanyHeading(company.name, []);
     document.getElementById('company-meta').textContent = `${getCurrentYearKst()}년 기준 최근 3개년 실적과 시세 데이터를 분석합니다.`;
@@ -1344,6 +1428,8 @@ async function startSearch() {
     renderTechnicalCards();
     renderTechSummary();
     renderCharts();
+    renderBriefingIdle();
+    setBriefingGenerateButtonState('idle');
     document.getElementById('chart-status').textContent = 'Yahoo Finance 차트 동기화 중';
 
     const startDate = `${getCurrentYearKst() - CHART_HISTORY_YEARS}0101`;
@@ -1422,32 +1508,6 @@ function refreshDerivedAnalysis() {
     return latestChartPoint;
 }
 
-function maybeStartInitialBriefing(analysisToken) {
-    if (!isActiveAnalysis(analysisToken)) return;
-    if (!state.company || !state.summaries.length || !state.ratings || !state.metrics) return;
-    if (!state.quote && !state.chartDaily.length) return;
-    if (state.briefingRequestToken === analysisToken || state.briefingMode !== 'idle') return;
-
-    state.briefingRequestToken = analysisToken;
-    setSourceBadge('source-gemini', 'Gemini 브리핑 생성 중', 'warn');
-    void (async () => {
-        try {
-            await generateBriefing();
-            if (!isActiveAnalysis(analysisToken)) return;
-            setStatus(`${state.company?.name || '기업'} 핵심 데이터 동기화가 완료되었습니다.`, 'success');
-            if (isMobileHybridViewport()) {
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-            } else {
-                document.getElementById('dashboard').scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-        } finally {
-            if (state.briefingRequestToken === analysisToken) {
-                state.briefingRequestToken = 0;
-            }
-        }
-    })();
-}
-
 function applyChartPayload(dailyChartPayload, company, startDate) {
     const dailyPoints = dailyChartPayload?.live
         ? InvestmentLogic.normalizeYfinanceChartRows(dailyChartPayload.rows, { startDate })
@@ -1499,7 +1559,6 @@ async function continueAnalysisSync({
         }
         applyChartPayload(dailyChartPayload, company, startDate);
         refreshDerivedAnalysis();
-        maybeStartInitialBriefing(analysisToken);
         setStatus(`${company.name} 차트를 먼저 표시했습니다. 재무와 시세를 이어서 정리하는 중입니다.`);
     })().catch((error) => {
         console.error('chart sync failed', error);
@@ -1520,7 +1579,6 @@ async function continueAnalysisSync({
             syncFinancialHistoryViews();
             refreshDerivedAnalysis();
             setSourceBadge('source-dart', 'DART 공시 연동됨', 'success');
-            maybeStartInitialBriefing(analysisToken);
         } else {
             state.annuals = [];
             state.annualsAll = [];
@@ -1564,7 +1622,6 @@ async function continueAnalysisSync({
             setSourceBadge('source-market', quotePayload?.error || '실시간 시세를 불러오지 못했습니다.', 'error');
         }
         refreshDerivedAnalysis();
-        maybeStartInitialBriefing(analysisToken);
     })().catch((error) => {
         console.error('quote sync failed', error);
         if (!isActiveAnalysis(analysisToken)) return;
@@ -1576,11 +1633,8 @@ async function continueAnalysisSync({
     await Promise.allSettled([chartTask, financialTask, reportsTask, quoteTask]);
     if (!isActiveAnalysis(analysisToken)) return;
 
-    if (!state.summaries.length) {
-        setSourceBadge('source-gemini', 'Gemini 대기', 'warn');
-    } else {
-        maybeStartInitialBriefing(analysisToken);
-    }
+    setSourceBadge('source-gemini', canGenerateBriefing() ? '보고서 작성 대기' : '리포트 준비 중', canGenerateBriefing() ? 'warn' : 'warn');
+    setBriefingGenerateButtonState('idle');
 }
 
 async function loadCompanyDirectory(force = false) {
@@ -2567,7 +2621,6 @@ function onValuationManualInput(event) {
 }
 
 function scheduleBriefingRefresh(reason = 'valuation') {
-    if (state.briefingMode === 'idle') return;
     if (!state.company || !state.ratings || !state.metrics || !state.summaries.length) return;
 
     if (briefingRefreshTimer) {
@@ -2575,27 +2628,19 @@ function scheduleBriefingRefresh(reason = 'valuation') {
         briefingRefreshTimer = null;
     }
 
-    if (state.briefingMode === 'local') {
-        renderBriefing(
-            buildLocalBriefing(),
-            'Local Quant Briefing',
-            reason === 'valuation'
-                ? '가치 평가 변경사항을 반영해 기관형 로컬 브리핑을 다시 계산했습니다.'
-                : '최신 분석 변경사항을 반영해 기관형 로컬 브리핑을 다시 계산했습니다.',
-            true
-        );
-        setSourceBadge('source-gemini', 'Gemini 대체 브리핑', 'warn');
+    if (!state.briefingRequested && state.briefingMode === 'idle') {
+        setBriefingGenerateButtonState('idle');
         return;
     }
 
+    state.briefingDirty = true;
     document.getElementById('briefing-meta').textContent = reason === 'valuation'
-        ? '가치 평가 변경사항을 AI 브리핑에 반영하는 중입니다.'
-        : '최신 분석 변경사항을 AI 브리핑에 반영하는 중입니다.';
-    setSourceBadge('source-gemini', 'Gemini 브리핑 갱신 중', 'warn');
-    briefingRefreshTimer = setTimeout(() => {
-        briefingRefreshTimer = null;
-        void generateBriefing();
-    }, 450);
+        ? '가치 평가가 바뀌었습니다. 보고서 작성 버튼을 눌러 AI 리포트를 다시 생성하세요.'
+        : reason === 'modules'
+            ? '분석 항목이 바뀌었습니다. 보고서 작성 버튼을 눌러 선택 항목 기준으로 다시 생성하세요.'
+            : '분석 데이터가 바뀌었습니다. 보고서 작성 버튼을 눌러 AI 리포트를 다시 생성하세요.';
+    setSourceBadge('source-gemini', '보고서 갱신 대기', 'warn');
+    setBriefingGenerateButtonState('idle');
 }
 
 function renderForwardEpsWarning(show) {
@@ -4409,6 +4454,9 @@ async function generateBriefing() {
                 : `Gemini 응답으로 브리핑을 생성했습니다.${isTruncated ? ' (응답 일부 절단)' : ''}`
         );
         setSourceBadge('source-gemini', isTruncated ? 'Gemini 응답 (일부 절단)' : 'Gemini 응답 완료', isTruncated ? 'warn' : 'success');
+        state.briefingRequested = true;
+        state.briefingDirty = false;
+        return { mode: 'live', truncated: isTruncated, model: modelUsed };
 
     } catch (error) {
         console.error('Gemini briefing fallback', error);
@@ -4421,7 +4469,9 @@ async function generateBriefing() {
                 `Gemini 실시간 호출이 제한되어 저장된 응답(${formatCachedBriefingTime(cachedBriefing.savedAt)})을 표시합니다.`
             );
             setSourceBadge('source-gemini', 'Gemini 저장 응답 사용', 'warn');
-            return;
+            state.briefingRequested = true;
+            state.briefingDirty = false;
+            return { mode: 'cached' };
         }
 
         state.briefingMode = 'local';
@@ -4432,6 +4482,9 @@ async function generateBriefing() {
             true
         );
         setSourceBadge('source-gemini', 'Gemini 대체 브리핑', 'warn');
+        state.briefingRequested = true;
+        state.briefingDirty = false;
+        return { mode: 'local' };
     }
 }
 

@@ -39,3 +39,9 @@ Investment Navigator는 한국 상장기업의 가치투자 판단을 돕는 경
 3. **재무/공시:** 최근 3개년 연간 실적과 최신 분기 실적을 함께 보여주며, DART 실제 공시를 기준으로 판단합니다.
 4. **브리핑 대체:** Gemini API 호출 실패 시 에러를 발생시키지 않고, 즉시 `buildLocalBriefing()` 함수를 활용한 로컬 폴백(Fallback) 브리핑으로 자연스럽게 전환해야 합니다.
 5. **불확실성 대처:** 기존의 Canvas 렌더링 공식(`xAt`, `yAt`)이나 지표 계산식을 수정할 때 기획 의도가 모호하다면 임의로 코드를 덮어쓰지 말고 사용자에게 질문하여 확인받습니다.
+
+## 6. 서버 배포 원칙 (Deployment)
+- **실전 우선 배포 경로:** 가장 안정적으로 검증된 방식은 `scp`로 파일을 **서버 홈 디렉터리(`/home/bitnami/`)**에 먼저 업로드한 뒤, `ssh`로 접속해 **기존 파일을 `/home/bitnami/deploy_backups/<timestamp>-...`에 백업하고 `sudo cp`로 `/opt/bitnami/apache/htdocs/`에 반영하는 2단계 방식**입니다.
+- **웹루트 직접 쓰기 금지:** `/opt/bitnami/apache/htdocs/`는 `scp`로 직접 덮어쓰기 시 `Permission denied`가 날 수 있으므로, **웹루트로 바로 업로드하려고 반복 시도하지 않습니다.**
+- **샌드박스/키 접근 차단 시 대안:** 현재 실행 환경에서 `.pem` 접근이나 `ssh/scp` 자체가 막히면, 그때만 GitHub Push 후 서버 `git pull` 또는 사용자의 `./deploy.sh` 실행 방식으로 전환합니다.
+- **배포 후 검증 필수:** 배포가 끝나면 `curl`, `rg`, `php -l`, `python3 -m py_compile` 등으로 **라이브 파일과 런타임이 실제 반영되었는지 확인한 뒤** 완료로 판단합니다.
