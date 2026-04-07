@@ -114,6 +114,7 @@ function run() {
     assertEqual(investmentRows.length, 2, 'buildHistoricalInvestmentRows should create one valuation row per annual summary.');
     assertEqual(investmentRows[0].year, 2025, 'buildHistoricalInvestmentRows should keep the latest year first.');
     assertEqual(investmentRows[0].eps, 15, 'Historical EPS should use the parsed diluted EPS from DART instead of net income divided by year share count.');
+    assertEqual(investmentRows[0].basicEps, 15, 'Historical rows should keep a separate EPS/basic EPS field available for table rendering.');
     assertEqual(investmentRows[0].bps, 50, 'Historical BPS should use annual equity divided by year share count.');
     assertApprox(investmentRows[0].per, 20, 0.001, 'Historical PER should use mapped year-end close divided by diluted EPS.');
     assertApprox(investmentRows[0].pbr, 6, 0.001, 'Historical PBR should use mapped year-end close divided by BPS.');
@@ -121,6 +122,7 @@ function run() {
     assertApprox(investmentRows[0].roic, 18.4615, 0.001, 'Historical ROIC should use the invested-capital proxy from annual statements.');
     assertApprox(investmentRows[0].changes.yearEndClose, 50, 0.001, 'Historical year-end close should include the year-over-year change rate.');
     assertApprox(investmentRows[0].changes.eps, 50, 0.001, 'Historical diluted EPS should include the year-over-year change rate.');
+    assertApprox(investmentRows[0].changes.basicEps, 50, 0.001, 'Historical EPS/basic EPS should include the year-over-year change rate.');
     assertApprox(investmentRows[0].changes.per, 0, 0.001, 'Historical PER should reflect the diluted EPS-based comparison.');
 
     const quarterlyMetricPeriods = InvestmentLogic.selectQuarterlyMetricPeriods([
@@ -138,8 +140,10 @@ function run() {
     assert(scriptSource.includes('ensureFinancialHistoryCoverage('), 'script.js should add on-demand annual history fetching.');
     assert(scriptSource.includes('renderHistoricalMetricsTable('), 'script.js should render the historical investment metrics table.');
     assert(scriptSource.includes('selectQuarterlyMetricPeriods('), 'script.js should use the quarterly metric period selector when rendering quarterly investment metrics.');
+    assert(scriptSource.includes("label: '희석 EPS'"), 'Quarterly and annual investment metrics should include the diluted EPS row.');
+    assert(scriptSource.includes("label: 'EPS'"), 'Quarterly and annual investment metrics should include the EPS row.');
     assert(htmlSource.includes('fin-period-select'), 'index.html should expose the financial history period select.');
-    assert(htmlSource.includes('fin-metrics-table'), 'index.html should include the investment metrics table container.');
+    assert(htmlSource.includes('fin-active-table'), 'index.html should include the active financial table container.');
 
     console.log('on_demand_financial_history_test: ok');
 }

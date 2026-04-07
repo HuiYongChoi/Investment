@@ -52,8 +52,10 @@ function run() {
         }
     ], { 2025: 1100 }, 10);
     assertEqual(annualRows[0].eps, 55, 'Annual investment row EPS should fall back to 기본 EPS when 희석 EPS is zero.');
+    assertEqual(annualRows[0].basicEps, 55, 'Annual investment rows should preserve the basic EPS column for side-by-side rendering.');
 
     assert(scriptSource.includes("label: '희석 EPS'"), 'Investment metrics table should show the simplified 희석 EPS label.');
+    assert(scriptSource.includes("label: 'EPS'"), 'Investment metrics tables should render the basic EPS row alongside 희석 EPS.');
     assert(!scriptSource.includes("label: '희석 EPS (Diluted EPS)'"), 'Investment metrics table should remove the Diluted EPS English suffix.');
     assert(!scriptSource.includes('해당 연도 마지막 종가'), 'Historical metrics table should remove the year-end close helper copy.');
     assert(scriptSource.includes('metric-help-icon'), 'Investment metrics renderer should include an EPS help icon.');

@@ -124,8 +124,10 @@ function run() {
         2024: 200
     });
     assertEqual(investmentRows[0].eps, 15, 'Historical investment rows should use the parsed diluted EPS instead of net income divided by shares.');
+    assertEqual(investmentRows[0].basicEps, 14, 'Historical investment rows should keep the basic EPS value for parallel rendering.');
     assertApprox(investmentRows[0].per, 20, 0.001, 'Historical PER should use the mapped diluted EPS value.');
     assertApprox(investmentRows[0].changes.eps, 50, 0.001, 'Historical diluted EPS should still carry the year-over-year delta.');
+    assertApprox(investmentRows[0].changes.basicEps, ((14 - 9) / 9) * 100, 0.001, 'Historical basic EPS should also carry the year-over-year delta.');
 
     const normalizedQuote = InvestmentLogic.normalizeYfinanceQuote({
         currentPrice: 250,
@@ -146,6 +148,7 @@ function run() {
     assert(scriptSource.includes('summary?.dilutedEps'), 'Valuation fallback logic should reference the parsed diluted EPS from DART summaries.');
     assert(!scriptSource.includes("safeDivide(summary?.netIncome || 0, lastTrade.sharesOutstanding)"), 'Valuation fallback should no longer derive EPS from net income divided by shares.');
     assert(scriptSource.includes("label: '희석 EPS'"), 'Historical investment table should relabel EPS as 희석 EPS.');
+    assert(scriptSource.includes("label: 'EPS'"), 'Historical and quarterly investment tables should also render a separate EPS row.');
     assert(htmlSource.includes('선행 희석 EPS (원)'), 'Read-only valuation form should relabel the forward EPS field as diluted EPS.');
     assert(htmlSource.includes('TTM 희석 EPS (원)'), 'Read-only valuation form should relabel the TTM EPS field as diluted EPS.');
     assert(htmlSource.includes('조정 희석 EPS (원)'), 'Manual valuation override field should relabel the adjusted EPS input as diluted EPS.');

@@ -1380,12 +1380,16 @@
                 const summary = period?.summary || {};
                 const shareCount = parseNumberText(period?.shareCount) ?? defaultShareCount;
                 const close = parseNumberText(closeMap[period?.year]);
-                const eps = resolvePreferredEpsValue(
+                const dilutedEps = resolvePreferredEpsValue(
                     summary?.dilutedEps ?? period?.dilutedEps,
                     summary?.basicEps ?? period?.basicEps
                 );
+                const basicEps = resolvePreferredEpsValue(
+                    summary?.basicEps ?? period?.basicEps,
+                    summary?.dilutedEps ?? period?.dilutedEps
+                );
                 const bps = shareCount > 0 ? safeDivide(parseNumberText(summary?.equity) ?? 0, shareCount) : null;
-                const per = close !== null && eps && eps > 0 ? safeDivide(close, eps) : null;
+                const per = close !== null && dilutedEps && dilutedEps > 0 ? safeDivide(close, dilutedEps) : null;
                 const pbr = close !== null && bps && bps > 0 ? safeDivide(close, bps) : null;
 
                 return {
@@ -1393,7 +1397,9 @@
                     label: period?.label || '',
                     yearEndClose: close,
                     shareCount: shareCount || null,
-                    eps,
+                    eps: dilutedEps,
+                    dilutedEps,
+                    basicEps,
                     bps,
                     per,
                     pbr,
@@ -1405,7 +1411,7 @@
 
         return rows.map((row, index) => {
             const previous = rows[index + 1] || null;
-            const changeKeys = ['yearEndClose', 'shareCount', 'eps', 'bps', 'per', 'pbr', 'roe', 'roic'];
+            const changeKeys = ['yearEndClose', 'shareCount', 'eps', 'dilutedEps', 'basicEps', 'bps', 'per', 'pbr', 'roe', 'roic'];
             const changes = changeKeys.reduce((accumulator, key) => {
                 accumulator[key] = computePeriodChange(row[key], previous?.[key]);
                 return accumulator;

@@ -660,6 +660,10 @@ header#header {
     box-shadow: var(--shadow-soft);
 }
 
+.search-row.search-active {
+    z-index: 30;
+}
+
 .search-input-wrap {
     position: relative;
     flex: 1;
@@ -2918,25 +2922,7 @@ header#header {
 
 /* ── Mobile keyboard UX ─────────────────────────────────────── */
 @media (max-width: 860px) {
-    /* Smooth collapse of hero text when keyboard opens */
-    #search-hero h1,
-    #search-hero > p {
-        transition: opacity 0.18s ease, max-height 0.22s ease, margin 0.22s ease;
-        max-height: 400px;
-        overflow: hidden;
-    }
-
-    #search-hero.keyboard-active h1,
-    #search-hero.keyboard-active > p {
-        opacity: 0;
-        max-height: 0;
-        margin: 0;
-        pointer-events: none;
-    }
-
-    #search-hero.keyboard-active {
-        padding-top: 16px;
-        padding-bottom: 16px;
-        transition: padding 0.22s ease;
+    .search-row.search-active {
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.22);
     }
 }

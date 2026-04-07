@@ -862,7 +862,6 @@ function isMobileHybridViewport() {
 }
 
 // --- Mobile keyboard UX ---
-let _mobileKeyboardScrollY = 0;
 
 function updateSuggestionsMaxHeight(input) {
     const vv = window.visualViewport;
@@ -875,12 +874,12 @@ function updateSuggestionsMaxHeight(input) {
 }
 
 function mobileKeyboardActivate(input) {
-    document.getElementById('search-hero')?.classList.add('keyboard-active');
+    document.querySelector('.search-row')?.classList.add('search-active');
     updateSuggestionsMaxHeight(input);
 }
 
 function mobileKeyboardDeactivate() {
-    document.getElementById('search-hero')?.classList.remove('keyboard-active');
+    document.querySelector('.search-row')?.classList.remove('search-active');
     document.documentElement.style.removeProperty('--suggestions-max-height');
 }
 
@@ -2365,7 +2364,8 @@ function renderHistoricalMetricsTable(containerId, rows) {
     const metricRows = [
         { label: '연말 종가', key: 'yearEndClose', type: 'money' },
         { label: '발행주식수', key: 'shareCount', type: 'shares' },
-        { label: '희석 EPS', key: 'eps', type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
+        { label: '희석 EPS', key: 'dilutedEps', type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
+        { label: 'EPS', key: 'basicEps', type: 'money' },
         { label: 'BPS', key: 'bps', type: 'money' },
         { label: 'PER', key: 'per', type: 'multiple' },
         { label: 'PBR', key: 'pbr', type: 'multiple' },
@@ -2408,7 +2408,8 @@ function renderQuarterlyMetricsTable(containerId, periods) {
 
     const summaries = buildFinancialRows(validPeriods);
     const rows = [
-        { label: '희석 EPS', key: 'eps', type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
+        { label: '희석 EPS', key: 'dilutedEps', type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
+        { label: 'EPS', key: 'basicEps', type: 'money' },
         { label: '영업이익률', key: 'operatingMargin', type: 'pct' },
         { label: '순이익률',   key: 'netMargin',       type: 'pct' },
         { label: 'ROE',        key: 'roe',             type: 'pct' },
@@ -2420,11 +2421,15 @@ function renderQuarterlyMetricsTable(containerId, periods) {
     const headerCells = summaries.map((p) => `<th>${p.label}</th>`).join('');
     const body = rows.map((row) => {
         const cells = summaries.map((p, i) => {
-            const current = row.key === 'eps'
+            const current = row.key === 'dilutedEps'
                 ? InvestmentLogic.resolvePreferredEpsValue(p.summary?.dilutedEps, p.summary?.basicEps)
+                : row.key === 'basicEps'
+                ? InvestmentLogic.resolvePreferredEpsValue(p.summary?.basicEps, p.summary?.dilutedEps)
                 : p.summary[row.key];
-            const prev = row.key === 'eps'
+            const prev = row.key === 'dilutedEps'
                 ? InvestmentLogic.resolvePreferredEpsValue(summaries[i + 1]?.summary?.dilutedEps, summaries[i + 1]?.summary?.basicEps)
+                : row.key === 'basicEps'
+                ? InvestmentLogic.resolvePreferredEpsValue(summaries[i + 1]?.summary?.basicEps, summaries[i + 1]?.summary?.dilutedEps)
                 : summaries[i + 1]?.summary[row.key];
             const growth = computeGrowth(current, prev);
             return `<td><span class="fin-val">${formatMetricValue(current, row.type)}</span>${renderChangeBadge(growth)}</td>`;
