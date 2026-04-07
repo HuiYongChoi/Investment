@@ -964,6 +964,7 @@ header#header {
     color: var(--text-secondary);
     font-size: 0.78rem;
     font-weight: 800;
+    white-space: nowrap;
 }
 
 .stock-strip {
@@ -2212,7 +2213,38 @@ header#header {
 
 .header-actions {
     display: flex;
+    gap: 8px;
+    flex-wrap: nowrap;
+    width: 100%;
+}
+
+.briefing-actions {
+    flex: 1 0 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
+    width: 100%;
+    margin-top: 8px;
+}
+
+.header-actions > * {
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.briefing-actions > * {
+    width: 100%;
+    min-height: 46px;
+}
+
+#card-briefing .card-header {
+    align-items: flex-start;
     flex-wrap: wrap;
 }
 
@@ -2222,58 +2254,62 @@ header#header {
     color: #d9ffe7;
 }
 
-.pdf-export-mode {
+.pdf-export {
     background: #ffffff !important;
     color: #000000 !important;
 }
 
-.pdf-export-mode::before,
-.pdf-export-mode::after {
+.pdf-export::before,
+.pdf-export::after {
     display: none !important;
 }
 
-.pdf-export-mode .card,
-.pdf-export-mode .market-pill,
-.pdf-export-mode .ss-item,
-.pdf-export-mode #briefing-content,
-.pdf-export-mode .briefing-section,
-.pdf-export-mode .briefing-badge,
-.pdf-export-mode .source-badge,
-.pdf-export-mode .table-wrap,
-.pdf-export-mode .fin-table td,
-.pdf-export-mode .fin-table th {
+.pdf-export .card,
+.pdf-export .market-pill,
+.pdf-export .ss-item,
+.pdf-export #briefing-content,
+.pdf-export .briefing-section,
+.pdf-export .briefing-badge,
+.pdf-export .source-badge,
+.pdf-export .table-wrap,
+.pdf-export .fin-table td,
+.pdf-export .fin-table th {
     background: #ffffff !important;
     color: #000000 !important;
     border-color: rgba(0, 0, 0, 0.14) !important;
     box-shadow: none !important;
 }
 
-.pdf-export-mode .card-sub,
-.pdf-export-mode .market-note,
-.pdf-export-mode .ss-sub,
-.pdf-export-mode .briefing-body,
-.pdf-export-mode .briefing-list,
-.pdf-export-mode .fin-chg,
-.pdf-export-mode .source-badge,
-.pdf-export-mode .market-label,
-.pdf-export-mode .ss-label {
+.pdf-export #briefing-content::before {
+    display: none !important;
+}
+
+.pdf-export .card-sub,
+.pdf-export .market-note,
+.pdf-export .ss-sub,
+.pdf-export .briefing-body,
+.pdf-export .briefing-list,
+.pdf-export .fin-chg,
+.pdf-export .source-badge,
+.pdf-export .market-label,
+.pdf-export .ss-label {
     color: #334155 !important;
 }
 
-.pdf-export-mode .logo-name,
-.pdf-export-mode .hero-accent,
-.pdf-export-mode .good,
-.pdf-export-mode .up,
-.pdf-export-mode .warn,
-.pdf-export-mode .bad,
-.pdf-export-mode .down,
-.pdf-export-mode .hot,
-.pdf-export-mode .cool {
+.pdf-export .logo-name,
+.pdf-export .hero-accent,
+.pdf-export .good,
+.pdf-export .up,
+.pdf-export .warn,
+.pdf-export .bad,
+.pdf-export .down,
+.pdf-export .hot,
+.pdf-export .cool {
     color: #000000 !important;
     -webkit-text-fill-color: #000000 !important;
 }
 
-.pdf-export-mode canvas {
+.pdf-export canvas {
     background: #ffffff !important;
 }
 
@@ -2422,6 +2458,16 @@ header#header {
     .header-actions .btn-outline,
     .header-actions .btn-primary {
         flex: 1;
+    }
+
+    .briefing-actions {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .briefing-actions > * {
+        min-height: 44px;
+        font-size: 0.82rem;
     }
 }
 

@@ -403,7 +403,7 @@ function setBriefingCopyButtonState(mode = 'idle') {
 }
 
 function renderBriefingIdle(message = '분석 항목을 고른 뒤 보고서 작성 버튼을 눌러 AI 리포트를 생성하세요.') {
-    document.getElementById('briefing-meta').textContent = '원하는 분석 항목만 골라 사용자 주도로 AI 리포트를 생성합니다.';
+    document.getElementById('briefing-meta').textContent = '선택한 항목만 반영해 리포트를 생성합니다.';
     document.getElementById('briefing-content').innerHTML = `
         <div class="loading-area">
             <i data-lucide="bot"></i>
@@ -422,7 +422,7 @@ async function onBriefingGenerateClick() {
     state.briefingRequested = true;
     state.briefingDirty = false;
     setBriefingGenerateButtonState('loading');
-    document.getElementById('briefing-meta').textContent = '선택한 분석 항목만 반영해 AI 리포트를 작성하는 중입니다.';
+    document.getElementById('briefing-meta').textContent = '선택한 항목 기준으로 리포트를 작성하고 있습니다.';
     setSourceBadge('source-gemini', '리포트 작성 중', 'warn');
 
     try {
@@ -4495,12 +4495,10 @@ async function generateBriefing() {
         state.briefingMode = 'live';
         renderBriefing(
             text,
-            'Gemini Live',
-            modelUsed
-                ? `Gemini 모델 ${modelUsed} 응답으로 브리핑을 생성했습니다.${isTruncated ? ' (응답 일부 절단)' : ''}`
-                : `Gemini 응답으로 브리핑을 생성했습니다.${isTruncated ? ' (응답 일부 절단)' : ''}`
+            'AI 브리핑',
+            '선택한 항목 기준 AI 브리핑입니다.'
         );
-        setSourceBadge('source-gemini', isTruncated ? 'Gemini 응답 (일부 절단)' : 'Gemini 응답 완료', isTruncated ? 'warn' : 'success');
+        setSourceBadge('source-gemini', isTruncated ? 'AI 브리핑 일부 절단' : 'AI 브리핑 완료', isTruncated ? 'warn' : 'success');
         state.briefingRequested = true;
         state.briefingDirty = false;
         return { mode: 'live', truncated: isTruncated, model: modelUsed };
@@ -4512,10 +4510,10 @@ async function generateBriefing() {
             state.briefingMode = 'cached';
             renderBriefing(
                 cachedBriefing.text,
-                'Cached Gemini',
-                `Gemini 실시간 호출이 제한되어 저장된 응답(${formatCachedBriefingTime(cachedBriefing.savedAt)})을 표시합니다.`
+                '저장된 브리핑',
+                `저장된 브리핑입니다. (${formatCachedBriefingTime(cachedBriefing.savedAt)})`
             );
-            setSourceBadge('source-gemini', 'Gemini 저장 응답 사용', 'warn');
+            setSourceBadge('source-gemini', '저장 브리핑', 'warn');
             state.briefingRequested = true;
             state.briefingDirty = false;
             return { mode: 'cached' };
@@ -4524,11 +4522,11 @@ async function generateBriefing() {
         state.briefingMode = 'local';
         renderBriefing(
             buildLocalBriefing(),
-            'Local Quant Briefing',
-            describeGeminiFailure(error),
+            '기본 브리핑',
+            '핵심 지표 기반 요약 브리핑입니다.',
             true
         );
-        setSourceBadge('source-gemini', 'Gemini 대체 브리핑', 'warn');
+        setSourceBadge('source-gemini', '기본 브리핑', 'warn');
         state.briefingRequested = true;
         state.briefingDirty = false;
         return { mode: 'local' };
@@ -4587,17 +4585,7 @@ function formatCachedBriefingTime(value) {
 }
 
 function describeGeminiFailure(error) {
-    const message = String(error?.message || '').trim();
-    if (/leaked|reported as leaked/i.test(message)) {
-        return 'Gemini API 키가 유출로 차단되어 기관형 로컬 브리핑으로 전환했습니다.';
-    }
-    if (/quota|RESOURCE_EXHAUSTED|Too Many Requests|429/i.test(message)) {
-        return 'Gemini 할당량이 일시적으로 소진되어 기관형 로컬 브리핑으로 전환했습니다.';
-    }
-    if (/API key|permission|403|401/i.test(message)) {
-        return 'Gemini 인증 설정 이슈로 기관형 로컬 브리핑으로 전환했습니다.';
-    }
-    return 'Gemini 실시간 응답을 받지 못해 기관형 로컬 브리핑으로 전환했습니다.';
+    return '';
 }
 
 function renderBriefing(content, badge, meta, isLocal = false) {
@@ -4615,11 +4603,11 @@ function renderBriefing(content, badge, meta, isLocal = false) {
             state.briefingMode = 'local';
             renderBriefing(
                 buildLocalBriefing(),
-                'Local Quant Briefing',
-                'Gemini 브리핑 렌더링 중 오류가 발생해 기관형 로컬 브리핑으로 전환했습니다.',
+                '기본 브리핑',
+                '핵심 지표 기반 요약 브리핑입니다.',
                 true
             );
-            setSourceBadge('source-gemini', 'Gemini 대체 브리핑', 'warn');
+            setSourceBadge('source-gemini', '기본 브리핑', 'warn');
             return;
         }
 
@@ -4724,25 +4712,35 @@ function renderBriefingSections(sections) {
 
 async function exportPdf() {
     if (!state.company) return;
-    const dashboard = document.getElementById('dashboard');
-    if (!dashboard) return;
+    const exportTarget = document.getElementById('card-briefing');
+    if (!exportTarget) return;
 
-    dashboard.classList.add('pdf-export-mode');
+    const previousWidth = exportTarget.style.width;
+    const previousMaxWidth = exportTarget.style.maxWidth;
+    const previousMinWidth = exportTarget.style.minWidth;
+
+    exportTarget.classList.add('pdf-export');
+    exportTarget.style.width = '800px';
+    exportTarget.style.maxWidth = '800px';
+    exportTarget.style.minWidth = '800px';
     await new Promise((resolve) => requestAnimationFrame(resolve));
 
     try {
-        await html2pdf().from(dashboard).set({
+        await html2pdf().from(exportTarget).set({
             margin: 10,
             filename: `InvestmentNavigator_${state.company.name}_${getCurrentYearKst()}.pdf`,
             image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', width: 800, windowWidth: 800 },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
         }).save();
     } catch (error) {
         console.error('pdf export failed', error);
         alert('PDF 리포트 생성에 실패했습니다.');
     } finally {
-        dashboard.classList.remove('pdf-export-mode');
+        exportTarget.classList.remove('pdf-export');
+        exportTarget.style.width = previousWidth;
+        exportTarget.style.maxWidth = previousMaxWidth;
+        exportTarget.style.minWidth = previousMinWidth;
     }
 }
 

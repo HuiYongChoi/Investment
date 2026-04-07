@@ -77,11 +77,38 @@ function run() {
         chartSource: 'Yahoo Finance (yfinance Python)'
     });
 
+    const fallbackSectionsWithoutValuation = InvestmentLogic.buildFallbackBriefingSections({
+        company: '삼성전자',
+        macro: {
+            usdKrw: '1,520.00원',
+            vix: '34.1',
+            wti: '82.4달러'
+        },
+        ratings: {
+            totalPct: 78,
+            profitability: 4,
+            stability: 3,
+            efficiency: 4
+        },
+        summary: {
+            operatingMargin: 15.2,
+            debtRatio: 42.5,
+            roe: 18.4
+        },
+        metrics: {},
+        technicalSignals: [],
+        anomalies: [],
+        chartSource: 'Yahoo Finance (yfinance Python)'
+    });
+
     assertEqual(fallbackSections.length, 4, 'buildFallbackBriefingSections should always return four institutional sections.');
     assert(fallbackSections[0].body.some((line) => String(line).includes('삼성전자')), 'Fallback briefing should include the company name.');
-    assert(fallbackSections[1].body.some((line) => String(line).includes('MACD(매수)')), 'Fallback briefing should include dynamic technical signals.');
+    assert(fallbackSections[0].body.some((line) => String(line).includes('최종 목표가')), 'Fallback briefing should include the fair value sentence when valuation data is available.');
+    assert(fallbackSectionsWithoutValuation[0].body.every((line) => !String(line).includes('최종 목표가')), 'Fallback briefing should omit the fair value sentence when valuation data is missing.');
+    assert(fallbackSections[0].body.some((line) => String(line).includes('환율 1,520.00원 / VIX 34.1 / WTI 82.4달러')), 'Fallback briefing should summarize macro data in a compact format.');
+    assert(fallbackSections[1].body.some((line) => String(line).includes('영업이익률')), 'Fallback catalysts should focus on operating margin and ROE.');
     assert(fallbackSections[2].body.some((line) => String(line).includes('흑자부도 위험')), 'Fallback briefing should surface anomaly warnings.');
-    assert(fallbackSections[2].body.some((line) => String(line).includes('1,520.00원')), 'Fallback briefing should include macro data context.');
+    assert(fallbackSections[3].body[0] === 'Hold 의견입니다. 보수적 리스크 관리를 권장합니다.', 'Fallback opinion should end with a concise professional recommendation.');
 
     const cacheKey = InvestmentLogic.buildBriefingCacheKey('삼성전자', 'sig-123');
     assertEqual(cacheKey, 'invest_nav_briefing_v2_삼성전자_sig-123', 'buildBriefingCacheKey should produce a stable cache key.');
@@ -98,6 +125,9 @@ function run() {
     assert(scriptSource.includes("console.error('Gemini briefing fallback'"), 'Gemini fallback path should log rendering/API failures with console.error.');
     assert(scriptSource.includes("console.error('formatBriefingText failed'"), 'Briefing formatter should log markdown/rendering failures before falling back.');
     assert(scriptSource.includes("console.error('Briefing render failed'"), 'Briefing renderer should log UI rendering failures before showing a fallback briefing.');
+    assert(!scriptSource.includes('Gemini 실시간 호출이 제한되어 저장된 응답'), 'UI copy should not surface long system-excuse text for cached Gemini responses.');
+    assert(!scriptSource.includes('기관형 로컬 브리핑으로 전환했습니다.'), 'UI copy should not expose verbose fallback excuses to users.');
+    assert(!scriptSource.includes('Local Quant Briefing'), 'UI should use a cleaner localized fallback badge instead of the old English label.');
 
     console.log('briefing_resilience_test: ok');
 }

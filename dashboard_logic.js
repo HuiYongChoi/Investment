@@ -1499,7 +1499,6 @@
         const metrics = payload.metrics || {};
         const technicalSignals = Array.isArray(payload.technicalSignals) ? payload.technicalSignals.filter(Boolean) : [];
         const anomalies = Array.isArray(payload.anomalies) ? payload.anomalies.filter(Boolean) : [];
-        const chartSource = String(payload.chartSource || '차트 미연결').trim();
 
         const totalPct = parseNumberText(ratings.totalPct) ?? 0;
         const profitability = parseNumberText(ratings.profitability) ?? 0;
@@ -1518,44 +1517,48 @@
                 : 'Reduce';
 
         const anomalyLine = anomalies.length
-            ? anomalies.join(' / ')
-            : '재무 법의학상 중대한 이상치는 아직 식별되지 않았습니다.';
+            ? anomalies.map((line) => String(line || '')
+                .replace(/재무\s*법의학상/gi, '재무상')
+                .replace(/\s+/g, ' ')
+                .trim())
+                .join(' / ')
+            : '개별 재무상 특이 징후는 제한적입니다.';
+
+        const summaryBody = [
+            `${company}의 종합 재무 점수는 ${totalPct.toFixed(0)}%이며, 수익성 ${profitability}/5, 건전성 ${stability}/5, 효율성 ${efficiency}/5 조합입니다.`
+        ];
+        if (targetPrice > 0 && upside !== null) {
+            summaryBody.push(`최종 목표가는 ${Math.round(targetPrice).toLocaleString()}원이며, 현재가 대비 상승여력은 ${upside > 0 ? '+' : ''}${upside.toFixed(1)}%입니다.`);
+        }
+        summaryBody.push(`거시 환경: 환율 ${macro.usdKrw || '-'} / VIX ${macro.vix || '-'} / WTI ${macro.wti || '-'}`);
 
         return [
             {
                 title: '핵심 요약 (Investment Thesis)',
-                body: [
-                    `${company}의 종합 재무 점수는 ${totalPct.toFixed(0)}%이며, 수익성 ${profitability}/5, 건전성 ${stability}/5, 효율성 ${efficiency}/5 조합입니다.`,
-                    `현재 적정가 추정치는 ${targetPrice ? `${Math.round(targetPrice).toLocaleString()}원` : '-'}이며, 현재가 대비 상승여력은 ${upside === null ? '-' : `${upside > 0 ? '+' : ''}${upside.toFixed(1)}%`}입니다.`,
-                    `거시 환경은 USD/KRW ${macro.usdKrw || '-'}, VIX ${macro.vix || '-'}, WTI ${macro.wti || '-'} 수준입니다.`
-                ],
+                body: summaryBody,
                 listLike: false
             },
             {
                 title: '상승 촉매 및 강점 (Catalysts & Strengths)',
                 body: [
-                    `- 영업이익률 ${operatingMargin === null ? '-' : `${operatingMargin.toFixed(1)}%`}와 ROE ${roe === null ? '-' : `${roe.toFixed(1)}%`}를 기준으로 수익성 체력을 점검할 수 있습니다.`,
-                    `- 기술적 시그널은 ${technicalSignals.length ? technicalSignals.join(', ') : '뚜렷한 우위 없음'}으로 요약됩니다.`,
-                    `- 차트 데이터 소스는 ${chartSource} 기준입니다.`
+                    `- 영업이익률 ${operatingMargin === null ? '-' : `${operatingMargin.toFixed(1)}%`}와 ROE ${roe === null ? '-' : `${roe.toFixed(1)}%`}를 기준으로 볼 때 수익성과 자본 효율은 양호한 편입니다.`,
+                    `- ${technicalSignals.length ? `기술 시그널은 ${technicalSignals.join(', ')} 흐름으로 관찰됩니다.` : '기술 신호는 중립 구간으로 해석됩니다.'}`
                 ],
                 listLike: true
             },
             {
-                title: '핵심 리스크 및 매크로 역풍 (Risks & Headwinds)',
+                title: '핵심 리스크 (Risks & Headwinds)',
                 body: [
-                    `- 부채비율은 ${debtRatio === null ? '-' : `${debtRatio.toFixed(1)}%`} 수준으로, 금리와 환율 환경 변화에 민감할 수 있습니다.`,
-                    `- USD/KRW ${macro.usdKrw || '-'}, VIX ${macro.vix || '-'}, WTI ${macro.wti || '-'} 환경은 실적 추정치와 할인율에 직접 영향을 줄 수 있습니다.`,
-                    `- ${anomalyLine}`,
-                    `- VIX와 유가 변동성 확대는 멀티플 수축과 원가 부담 확대로 이어질 수 있습니다.`
+                    `- 부채비율은 ${debtRatio === null ? '-' : `${debtRatio.toFixed(1)}%`} 수준으로, 금리 환경 변화에 따라 밸류에이션 변동성이 커질 수 있습니다.`,
+                    `- 환율, VIX, 유가 변동성 확대는 수급 위축과 원가 부담 압력으로 이어질 수 있습니다.`,
+                    `- ${anomalyLine}`
                 ],
                 listLike: true
             },
             {
-                title: '최종 투자의견 (Strong Buy / Buy / Hold / Reduce) 및 대응 전략',
+                title: '투자의견 (Rating) 및 요약',
                 body: [
-                    `${opinion} 의견입니다.`,
-                    `${company}은 현재 적정주가, 재무 점수, 기술적 집계, DART 원문을 함께 교차 검증하는 접근이 적합합니다.`,
-                    'Gemini 실시간 응답이 불가할 때도 동일한 기관 보고서 프레임으로 핵심 판단축을 유지합니다.'
+                    `${opinion} 의견입니다. 보수적 리스크 관리를 권장합니다.`
                 ],
                 listLike: false
             }
