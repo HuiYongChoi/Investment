@@ -119,6 +119,7 @@ const state = {
     briefingRequestToken: 0,
     finSegPeriod: 'annual',
     finSegType: 'performance',
+    briefingModulesToInclude: new Set(['core', 'metrics']),
     mobileTab: 'home',
     mobileContentTab: 'chart',
     lastAnalysis: { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] },
@@ -211,6 +212,7 @@ function bindEvents() {
     document.getElementById('indicator-toggle').addEventListener('click', onIndicatorToggle);
     document.getElementById('card-financials')?.addEventListener('click', onFinSegClick);
     document.getElementById('card-technical')?.addEventListener('click', onTechSectionToggle);
+    document.getElementById('card-briefing')?.addEventListener('click', onBriefingModuleClick);
     if (sectorPresetSelect) {
         sectorPresetSelect.addEventListener('change', onValuationSectorPresetChange);
     }
@@ -261,6 +263,96 @@ function syncFinSegUI() {
     document.querySelectorAll('[data-fin-seg-type]').forEach((btn) => {
         btn.classList.toggle('active', btn.dataset.finSegType === state.finSegType);
     });
+}
+
+function onBriefingModuleClick(event) {
+    const btn = event.target.closest('[data-briefing-module]');
+    if (!btn) return;
+    const module = btn.dataset.briefingModule;
+    if (state.briefingModulesToInclude.has(module)) {
+        state.briefingModulesToInclude.delete(module);
+    } else {
+        state.briefingModulesToInclude.add(module);
+    }
+    syncBriefingModuleUI();
+}
+
+function syncBriefingModuleUI() {
+    document.querySelectorAll('[data-briefing-module]').forEach((btn) => {
+        const module = btn.dataset.briefingModule;
+        btn.classList.toggle('active', state.briefingModulesToInclude.has(module));
+    });
+}
+
+function getSelectedBriefingModules() {
+    return {
+        hasCore: state.briefingModulesToInclude.has('core'),
+        hasMetrics: state.briefingModulesToInclude.has('metrics'),
+        hasTechnical: state.briefingModulesToInclude.has('technical'),
+        hasValuation: state.briefingModulesToInclude.has('valuation')
+    };
+}
+
+function buildDynamicBriefingInstruction(selected) {
+    const modules = [];
+    if (selected.hasCore) modules.push('핵심 재무');
+    if (selected.hasMetrics) modules.push('투자 지표');
+    if (selected.hasTechnical) modules.push('기술적 분석');
+    if (selected.hasValuation) modules.push('가치 평가');
+
+    const moduleList = modules.join(', ');
+    return modules.length === 4
+        ? '당신은 월스트리트 탑티어 헤지펀드의 수석 퀀트 애널리스트입니다. 제공된 거시 경제(Macro) 지표와 개별 기업의 퀀트 데이터를 종합하여, 기관 투자자 클라이언트를 위한 냉철하고 날카로운 투자 브리핑을 작성하세요.'
+        : `당신은 월스트리트 탑티어 헤지펀드의 수석 퀀트 애널리스트입니다. 다음 선택된 항목들([${moduleList}])을 중심으로 집중 분석하여, 기관 투자자 클라이언트를 위한 냉철하고 날카로운 투자 브리핑을 작성하세요.`;
+}
+
+function buildBriefingPrompt(selected, company, technicalCards, summary, totalPct, anomalyText) {
+    let macroSection = `
+[거시 경제(Macro) 환경]
+- 환율(USD/KRW): ${document.getElementById('fx-usdkrw')?.innerText || '-'}
+- VIX 공포지수: ${document.getElementById('vix-value')?.innerText || '-'}
+- WTI 원유: ${document.getElementById('wti-value')?.innerText || '-'}`;
+
+    let coreSection = selected.hasCore ? `
+[기업(${company}) 핵심 재무]
+- 종합 재무 건전성 랭킹: ${totalPct}% (수익성 ${state.ratings.profitability.score}/5, 건전성 ${state.ratings.stability.score}/5)
+- 주요 지표: 영업이익률 ${summary?.operatingMargin?.toFixed(1) ?? '-'}%, 부채비율 ${summary?.debtRatio?.toFixed(1) ?? '-'}%, ROE ${summary?.roe?.toFixed(1) ?? '-'}%` : '';
+
+    let metricsSection = selected.hasMetrics ? `
+[투자 지표]
+- 밸류에이션: 최종 목표가 ${state.metrics.targetPrice ? state.metrics.targetPrice.toLocaleString() + '원' : '-'} (PER 모델 ${state.metrics.perModelPrice ? state.metrics.perModelPrice.toLocaleString() + '원' : '-'}, 무형자산 가산 ${state.metrics.premiumRate?.toFixed?.(0) ?? '0'}%, 현재가 대비 상승여력 ${state.metrics.upside?.toFixed(1) ?? '-'}%)` : '';
+
+    let technicalSection = selected.hasTechnical ? `
+[기술적 시그널]
+- 차트 기술지표: ${technicalCards.map((card) => `${card.label}(${card.signal})`).join(', ') || '-'}
+- 차트 소스: ${formatChartSourceName()}` : '';
+
+    let valuationSection = selected.hasValuation ? `
+[가치 평가 평가(Valuation Assessment)]
+- 목표가 산정 모델: PER ${state.metrics.perModelPrice ? state.metrics.perModelPrice.toLocaleString() + '원' : '-'}, 무형자산 프리미엄 ${state.metrics.premiumRate?.toFixed?.(0) ?? '0'}%
+- 최종 목표가: ${state.metrics.targetPrice ? state.metrics.targetPrice.toLocaleString() + '원' : '-'}
+- 상승여력(Upside): ${state.metrics.upside?.toFixed(1) ?? '-'}%` : '';
+
+    let anomaliesSection = `
+[재무 이상치 / Red Flags]
+- ${anomalyText}`;
+
+    let guidelines = `
+[작성 지침 - 반드시 준수할 것]
+1. 데이터의 단순 나열을 엄격히 금지합니다. 숫자가 의미하는 바(Context)를 통찰력 있게 해석하세요.
+2. 현재 환율과 유가 등 거시 환경이 해당 기업의 실적(수출/수입/원가 등)에 미칠 영향을 반드시 1~2문장으로 추론하여 포함하세요.
+3. 경어체를 사용하되, 감정을 배제한 매우 건조하고 전문적인 '보고서 문체(존댓말)'를 사용하세요.
+4. 마크다운을 사용하여 다음 ${
+        selected.hasCore && selected.hasMetrics && selected.hasTechnical && selected.hasValuation ? '4' : '3-4'
+    }가지 섹션으로 정확히 나누어 출력하세요:
+   🎯 **핵심 요약 (Investment Thesis)**
+   📈 **상승 촉매 및 강점 (Catalysts & Strengths)**
+   ⚠️ **핵심 리스크 및 매크로 역풍 (Risks & Headwinds)**
+   ⚖️ **최종 투자의견 (Strong Buy / Buy / Hold / Reduce) 및 대응 전략**`;
+
+    return [macroSection, coreSection, metricsSection, technicalSection, valuationSection, anomaliesSection, guidelines]
+        .filter(Boolean)
+        .join('\n');
 }
 
 function resetFinancialSectionToggles() {
@@ -4143,44 +4235,25 @@ async function generateBriefing() {
         })
         .filter(Boolean);
     const anomalyText = anomalies.length ? anomalies.join(', ') : '-';
+
+    // 선택된 모듈 정보
+    const selected = getSelectedBriefingModules();
+
     const briefingSignature = [
         state.company?.stockCode || company,
         Math.round(state.lastAnalysis.totalPct || 0),
         Math.round(state.metrics.targetPrice || 0),
         Math.round(state.metrics.upside || 0),
         technicalCards.map((card) => `${card.label}:${card.signal}`).join('|'),
-        anomalyText
+        anomalyText,
+        Array.from(state.briefingModulesToInclude).sort().join('|')
     ].join('__');
 
-    const prompt = `
-당신은 월스트리트 탑티어 헤지펀드의 수석 퀀트 애널리스트입니다. 
-제공된 거시 경제(Macro) 지표와 개별 기업의 퀀트 데이터를 종합하여, 기관 투자자 클라이언트를 위한 냉철하고 날카로운 투자 브리핑을 작성하세요.
+    // 동적 지시어 및 프롬프트 생성
+    const systemInstruction = buildDynamicBriefingInstruction(selected);
+    const dataPrompt = buildBriefingPrompt(selected, company, technicalCards, summary, totalPct, anomalyText);
 
-[거시 경제(Macro) 환경]
-- 환율(USD/KRW): ${document.getElementById('fx-usdkrw')?.innerText || '-'}
-- VIX 공포지수: ${document.getElementById('vix-value')?.innerText || '-'}
-- WTI 원유: ${document.getElementById('wti-value')?.innerText || '-'}
-
-[기업(${company}) 핵심 퀀트 데이터]
-- 종합 재무 건전성 랭킹: ${totalPct}% (수익성 ${state.ratings.profitability.score}/5, 건전성 ${state.ratings.stability.score}/5)
-- 주요 지표: 영업이익률 ${summary?.operatingMargin?.toFixed(1) ?? '-'}%, 부채비율 ${summary?.debtRatio?.toFixed(1) ?? '-'}%, ROE ${summary?.roe?.toFixed(1) ?? '-'}%
-- 밸류에이션: 최종 목표가 ${state.metrics.targetPrice ? state.metrics.targetPrice.toLocaleString() + '원' : '-'} (PER 모델 ${state.metrics.perModelPrice ? state.metrics.perModelPrice.toLocaleString() + '원' : '-'}, 무형자산 가산 ${state.metrics.premiumRate?.toFixed?.(0) ?? '0'}%, 현재가 대비 상승여력 ${state.metrics.upside?.toFixed(1) ?? '-'}%)
-- 기술적 시그널: ${technicalCards.map((card) => `${card.label}(${card.signal})`).join(', ') || '-'}
-- 차트 소스: ${formatChartSourceName()}
-
-[재무 이상치 / Red Flags]
-- ${anomalyText}
-
-[작성 지침 - 반드시 준수할 것]
-1. 데이터의 단순 나열을 엄격히 금지합니다. 숫자가 의미하는 바(Context)를 통찰력 있게 해석하세요. (예: "이익률은 높으나 부채가 과도하여 흑자 부도 리스크 잠재됨")
-2. 현재 환율과 유가 등 거시 환경이 해당 기업의 실적(수출/수입/원가 등)에 미칠 영향을 반드시 1~2문장으로 추론하여 포함하세요.
-3. 경어체를 사용하되, 감정을 배제한 매우 건조하고 전문적인 '보고서 문체(존댓말)'를 사용하세요.
-4. 마크다운을 사용하여 다음 4가지 섹션으로 정확히 나누어 출력하세요:
-   🎯 **핵심 요약 (Investment Thesis)**
-   📈 **상승 촉매 및 강점 (Catalysts & Strengths)**
-   ⚠️ **핵심 리스크 및 매크로 역풍 (Risks & Headwinds)**
-   ⚖️ **최종 투자의견 (Strong Buy / Buy / Hold / Reduce) 및 대응 전략**
-    `.trim();
+    const prompt = `${systemInstruction}\n\n${dataPrompt}`.trim();
 
     try {
         const response = await fetchJson(buildProxyPostUrl('gemini'), {
@@ -4348,32 +4421,51 @@ function buildLocalBriefing() {
         ...(Array.isArray(state.lastAnalysis?.anomalies) ? state.lastAnalysis.anomalies : []),
         ...(Array.isArray(summary?.anomalies) ? summary.anomalies : [])
     ].filter(Boolean);
-    const sections = InvestmentLogic.buildFallbackBriefingSections({
+
+    const selected = getSelectedBriefingModules();
+
+    // 선택된 모듈만 포함하여 데이터 조립
+    const dataToAnalyze = {
         company: state.company?.name || '',
         macro: {
             usdKrw: document.getElementById('fx-usdkrw')?.innerText || '-',
             vix: document.getElementById('vix-value')?.innerText || '-',
             wti: document.getElementById('wti-value')?.innerText || '-'
         },
-        ratings: {
-            totalPct: state.lastAnalysis.totalPct || 0,
-            profitability: state.ratings?.profitability?.score || 0,
-            stability: state.ratings?.stability?.score || 0,
-            efficiency: state.ratings?.efficiency?.score || 0
-        },
-        summary: {
-            operatingMargin: summary.operatingMargin,
-            debtRatio: summary.debtRatio,
-            roe: summary.roe
-        },
-        metrics: {
-            targetPrice: state.metrics?.targetPrice,
-            upside: state.metrics?.upside
-        },
-        technicalSignals: (state.technicals?.cards || []).map((card) => `${card.label}(${card.signal})`),
+        ...(selected.hasCore && {
+            ratings: {
+                totalPct: state.lastAnalysis.totalPct || 0,
+                profitability: state.ratings?.profitability?.score || 0,
+                stability: state.ratings?.stability?.score || 0,
+                efficiency: state.ratings?.efficiency?.score || 0
+            },
+            summary: {
+                operatingMargin: summary.operatingMargin,
+                debtRatio: summary.debtRatio,
+                roe: summary.roe
+            }
+        }),
+        ...(selected.hasMetrics && {
+            metrics: {
+                targetPrice: state.metrics?.targetPrice,
+                upside: state.metrics?.upside
+            }
+        }),
+        ...(selected.hasTechnical && {
+            technicalSignals: (state.technicals?.cards || []).map((card) => `${card.label}(${card.signal})`)
+        }),
+        ...(selected.hasValuation && {
+            valuation: {
+                targetPrice: state.metrics?.targetPrice,
+                premiumRate: state.metrics?.premiumRate,
+                perModelPrice: state.metrics?.perModelPrice
+            }
+        }),
         anomalies,
         chartSource: formatChartSourceName()
-    });
+    };
+
+    const sections = InvestmentLogic.buildFallbackBriefingSections(dataToAnalyze);
     return renderBriefingSections(sections);
 }
 

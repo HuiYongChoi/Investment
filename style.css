@@ -2581,6 +2581,74 @@ header#header {
     }
 }
 
+/* ── Gemini Briefing Module Selection UI ──────────────────── */
+.briefing-modules-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 0;
+    border-top: 1px solid var(--glass-border);
+    border-bottom: 1px solid var(--glass-border);
+    margin-bottom: 16px;
+}
+
+.briefing-modules-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.briefing-modules-group {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.briefing-module-chip {
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    white-space: nowrap;
+}
+
+.briefing-module-chip:hover {
+    border-color: rgba(79, 140, 255, 0.28);
+    color: var(--text-primary);
+    background: rgba(79, 140, 255, 0.05);
+}
+
+.briefing-module-chip.active {
+    background: rgba(79, 140, 255, 0.16);
+    border-color: rgba(79, 140, 255, 0.4);
+    color: #8fd3ff;
+    box-shadow: 0 1px 3px rgba(79, 140, 255, 0.15);
+}
+
+@media (max-width: 860px) {
+    .briefing-modules-controls {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .briefing-modules-group {
+        width: 100%;
+    }
+
+    .briefing-module-chip {
+        flex: 1;
+        text-align: center;
+    }
+}
+
 /* ── Mobile keyboard UX ─────────────────────────────────────── */
 @media (max-width: 860px) {
     /* Smooth collapse of hero text when keyboard opens */
