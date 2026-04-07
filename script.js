@@ -269,6 +269,10 @@ function onBriefingModuleClick(event) {
     const btn = event.target.closest('[data-briefing-module]');
     if (!btn) return;
     const module = btn.dataset.briefingModule;
+    // 마지막 1개는 해제 불가 (빈 프롬프트 방지)
+    if (state.briefingModulesToInclude.has(module) && state.briefingModulesToInclude.size <= 1) {
+        return;
+    }
     if (state.briefingModulesToInclude.has(module)) {
         state.briefingModulesToInclude.delete(module);
     } else {
@@ -706,7 +710,7 @@ let _mobileKeyboardScrollY = 0;
 
 function updateSuggestionsMaxHeight(input) {
     const vv = window.visualViewport;
-    if (!vv) return;
+    if (!vv || !input) return;
     const inputRect = input.getBoundingClientRect();
     // Space below the input within the visual viewport
     const available = (vv.offsetTop + vv.height) - inputRect.bottom - 16;
@@ -732,7 +736,9 @@ function mobileKeyboardDeactivate() {
     document.body.style.top = '';
     document.body.style.width = '';
     document.body.style.overflowY = '';
-    window.scrollTo(0, _mobileKeyboardScrollY);
+    // RAF으로 레이아웃 복원 후 스크롤 위치 복원 (iOS 이중 스크롤 방지)
+    const savedY = _mobileKeyboardScrollY;
+    requestAnimationFrame(() => window.scrollTo(0, savedY));
     document.documentElement.style.removeProperty('--suggestions-max-height');
 }
 
@@ -1249,6 +1255,8 @@ async function startSearch() {
     state.briefingRequestToken = 0;
     state.lastAnalysis = { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] };
     state.selectedIndicators = new Set();
+    state.briefingModulesToInclude = new Set(['core', 'metrics']);
+    syncBriefingModuleUI();
     priceHoverIndex = null;
     setStatus(`${company.name} 분석을 시작합니다. DART, Yahoo Finance 시세와 다중 기간 차트를 동기화하는 중입니다.`);
     setSourceBadge('source-dart', 'DART 동기화 중');

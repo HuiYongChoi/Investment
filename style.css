@@ -2646,6 +2646,7 @@ header#header {
     .briefing-module-chip {
         flex: 1;
         text-align: center;
+        min-width: 0;
     }
 }
 
