@@ -44,6 +44,7 @@ const CHART_MA_COLORS = {
     120: '#a855f7',
     200: '#f97316'
 };
+const DILUTED_EPS_TOOLTIP_TEXT = '스톡옵션, 전환사채 등 잠재적 주식이 모두 실제 주식으로 전환되었다고 가정하고 보수적으로 계산한 1주당 순이익입니다.';
 
 const COMPANY_MAP = {
     '삼성전자': { corpCode: '00126380', stockCode: '005930', market: 'KOSPI' },
@@ -238,11 +239,37 @@ function bindEvents() {
     });
     window.addEventListener('resize', debounce(() => {
         syncMobileTabUI();
+        positionMetricTooltips();
         if (!document.getElementById('dashboard').classList.contains('hidden')) {
             renderCharts();
         }
     }, 120));
+    document.addEventListener('mouseover', (event) => {
+        const button = event.target.closest('.metric-help-icon');
+        if (button) {
+            positionMetricTooltipElement(button);
+        }
+    });
+    document.addEventListener('focusin', (event) => {
+        const button = event.target.closest('.metric-help-icon');
+        if (button) {
+            positionMetricTooltipElement(button);
+        }
+    });
     document.addEventListener('click', (event) => {
+        const metricHelpButton = event.target.closest('.metric-help-icon');
+        if (metricHelpButton) {
+            event.preventDefault();
+            event.stopPropagation();
+            const willOpen = !metricHelpButton.classList.contains('tooltip-open');
+            closeMetricTooltips(metricHelpButton);
+            metricHelpButton.classList.toggle('tooltip-open', willOpen);
+            if (willOpen) {
+                positionMetricTooltipElement(metricHelpButton);
+            }
+            return;
+        }
+        closeMetricTooltips();
         if (!event.target.closest('.search-input-wrap')) {
             hideCompanySuggestions();
         }
@@ -2152,6 +2179,50 @@ function renderChangeBadge(growth) {
     return `<span class="fin-chg ${chgClass}">${growth > 0 ? '+' : ''}${growth.toFixed(1)}%</span>`;
 }
 
+function renderMetricLabel(label, tooltipText = '') {
+    const safeLabel = escapeHtml(label);
+    if (!tooltipText) {
+        return safeLabel;
+    }
+    return `
+        <span class="metric-label-cell">
+            <span>${safeLabel}</span>
+            <button class="metric-help-icon" type="button" aria-label="${escapeHtml(label)} 설명 보기">
+                <span aria-hidden="true">?</span>
+                <span class="metric-help-tooltip" role="tooltip">${escapeHtml(tooltipText)}</span>
+            </button>
+        </span>
+    `;
+}
+
+function closeMetricTooltips(exceptButton = null) {
+    document.querySelectorAll('.metric-help-icon.tooltip-open').forEach((button) => {
+        if (button !== exceptButton) {
+            button.classList.remove('tooltip-open');
+        }
+    });
+}
+
+function positionMetricTooltipElement(button) {
+    if (!button) return;
+    const tooltip = button.querySelector('.metric-help-tooltip');
+    if (!tooltip) return;
+    button.classList.remove('metric-tooltip-right');
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const buttonRect = button.getBoundingClientRect();
+    const preferredWidth = Math.min(260, Math.max(220, tooltip.scrollWidth || 0));
+    const overflowRight = buttonRect.left + preferredWidth > (viewportWidth - 16);
+    if (overflowRight) {
+        button.classList.add('metric-tooltip-right');
+    }
+}
+
+function positionMetricTooltips() {
+    document.querySelectorAll('.metric-help-icon').forEach((button) => {
+        positionMetricTooltipElement(button);
+    });
+}
+
 function renderHistoricalMetricsTable(containerId, rows) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -2163,7 +2234,7 @@ function renderHistoricalMetricsTable(containerId, rows) {
     const metricRows = [
         { label: '연말 종가', key: 'yearEndClose', type: 'money' },
         { label: '발행주식수', key: 'shareCount', type: 'shares' },
-        { label: '희석 EPS (Diluted EPS)', key: 'eps', type: 'money' },
+        { label: '희석 EPS', key: 'eps', type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
         { label: 'BPS', key: 'bps', type: 'money' },
         { label: 'PER', key: 'per', type: 'multiple' },
         { label: 'PBR', key: 'pbr', type: 'multiple' },
@@ -2174,12 +2245,9 @@ function renderHistoricalMetricsTable(containerId, rows) {
     const headerCells = rows.map((row) => `<th>${row.year}</th>`).join('');
     const body = metricRows.map((metric) => `
         <tr>
-            <td>${metric.label}</td>
+            <td>${renderMetricLabel(metric.label, metric.tooltip)}</td>
             ${rows.map((row) => {
-                const metaText = metric.key === 'yearEndClose' && row.yearEndClose !== null && row.yearEndClose !== undefined
-                    ? '<span class="fin-meta">해당 연도 마지막 종가</span>'
-                    : '';
-                return `<td><span class="fin-val">${formatMetricValue(row[metric.key], metric.type)}</span>${renderChangeBadge(row?.changes?.[metric.key])}${metaText}</td>`;
+                return `<td><span class="fin-val">${formatMetricValue(row[metric.key], metric.type)}</span>${renderChangeBadge(row?.changes?.[metric.key])}</td>`;
             }).join('')}
         </tr>
     `).join('');
@@ -2195,6 +2263,7 @@ function renderHistoricalMetricsTable(containerId, rows) {
             <tbody>${body}</tbody>
         </table>
     `;
+    positionMetricTooltips();
 }
 
 function renderQuarterlyMetricsTable(containerId, periods) {
@@ -2208,6 +2277,7 @@ function renderQuarterlyMetricsTable(containerId, periods) {
 
     const summaries = buildFinancialRows(validPeriods);
     const rows = [
+        { label: '희석 EPS', key: 'eps', type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
         { label: '영업이익률', key: 'operatingMargin', type: 'pct' },
         { label: '순이익률',   key: 'netMargin',       type: 'pct' },
         { label: 'ROE',        key: 'roe',             type: 'pct' },
@@ -2219,12 +2289,16 @@ function renderQuarterlyMetricsTable(containerId, periods) {
     const headerCells = summaries.map((p) => `<th>${p.label}</th>`).join('');
     const body = rows.map((row) => {
         const cells = summaries.map((p, i) => {
-            const current = p.summary[row.key];
-            const prev = summaries[i + 1]?.summary[row.key];
+            const current = row.key === 'eps'
+                ? InvestmentLogic.resolvePreferredEpsValue(p.summary?.dilutedEps, p.summary?.basicEps)
+                : p.summary[row.key];
+            const prev = row.key === 'eps'
+                ? InvestmentLogic.resolvePreferredEpsValue(summaries[i + 1]?.summary?.dilutedEps, summaries[i + 1]?.summary?.basicEps)
+                : summaries[i + 1]?.summary[row.key];
             const growth = computeGrowth(current, prev);
             return `<td><span class="fin-val">${formatMetricValue(current, row.type)}</span>${renderChangeBadge(growth)}</td>`;
         }).join('');
-        return `<tr><td>${row.label}</td>${cells}</tr>`;
+        return `<tr><td>${renderMetricLabel(row.label, row.tooltip)}</td>${cells}</tr>`;
     }).join('');
 
     container.innerHTML = `
@@ -2233,6 +2307,7 @@ function renderQuarterlyMetricsTable(containerId, periods) {
             <tbody>${body}</tbody>
         </table>
     `;
+    positionMetricTooltips();
 }
 
 function setFinancialHistoryLoading(isLoading, message = '') {

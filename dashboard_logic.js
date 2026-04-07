@@ -143,6 +143,20 @@
         return numerator / denominator;
     }
 
+    function resolvePreferredEpsValue(dilutedEps, basicEps) {
+        const diluted = parseNumberText(dilutedEps);
+        if (diluted !== null && diluted !== 0) {
+            return diluted;
+        }
+
+        const basic = parseNumberText(basicEps);
+        if (basic !== null && basic !== 0) {
+            return basic;
+        }
+
+        return diluted ?? basic;
+    }
+
     function findStatementAmount(list, aliases) {
         const rows = Array.isArray(list) ? list : [];
         const normalizedAliases = (aliases || []).map(normalizeAccountName);
@@ -198,7 +212,7 @@
         const netIncome = findStatementAmount(filterStatementRowsByMetric(list, 'netIncome'), STATEMENT_ACCOUNT_ALIASES.netIncome);
         const dilutedEpsValue = findStatementValue(filterStatementRowsByMetric(list, 'dilutedEps'), STATEMENT_ACCOUNT_ALIASES.dilutedEps, null);
         const basicEps = findStatementValue(filterStatementRowsByMetric(list, 'basicEps'), STATEMENT_ACCOUNT_ALIASES.basicEps, null);
-        const dilutedEps = dilutedEpsValue !== null ? dilutedEpsValue : basicEps;
+        const dilutedEps = resolvePreferredEpsValue(dilutedEpsValue, basicEps);
         const assets = findStatementAmount(filterStatementRowsByMetric(list, 'assets'), STATEMENT_ACCOUNT_ALIASES.assets);
         const liabilities = findStatementAmount(filterStatementRowsByMetric(list, 'liabilities'), STATEMENT_ACCOUNT_ALIASES.liabilities);
         const equity = findStatementAmount(filterStatementRowsByMetric(list, 'equity'), STATEMENT_ACCOUNT_ALIASES.equity);
@@ -846,8 +860,9 @@
         const explicitChangePct = parseSignedNumberText(payload?.changePct ?? payload?.regularMarketChangePercent);
         const change = explicitChange ?? (previousClose !== null ? close - previousClose : 0);
         const changePct = explicitChangePct ?? (previousClose ? percentage(change, previousClose) : 0);
-        const dilutedEps = parseNumberText(
-            payload?.dilutedEPS ?? payload?.dilutedEps ?? payload?.trailingEps ?? payload?.epsTrailing ?? payload?.ttmEps
+        const dilutedEps = resolvePreferredEpsValue(
+            payload?.dilutedEPS ?? payload?.dilutedEps,
+            payload?.basicEps ?? payload?.trailingEps ?? payload?.epsTrailing ?? payload?.ttmEps
         );
 
         return {
@@ -1365,9 +1380,10 @@
                 const summary = period?.summary || {};
                 const shareCount = parseNumberText(period?.shareCount) ?? defaultShareCount;
                 const close = parseNumberText(closeMap[period?.year]);
-                const dilutedEps = parseNumberText(summary?.dilutedEps ?? period?.dilutedEps);
-                const basicEps = parseNumberText(summary?.basicEps ?? period?.basicEps);
-                const eps = dilutedEps !== null ? dilutedEps : basicEps;
+                const eps = resolvePreferredEpsValue(
+                    summary?.dilutedEps ?? period?.dilutedEps,
+                    summary?.basicEps ?? period?.basicEps
+                );
                 const bps = shareCount > 0 ? safeDivide(parseNumberText(summary?.equity) ?? 0, shareCount) : null;
                 const per = close !== null && eps && eps > 0 ? safeDivide(close, eps) : null;
                 const pbr = close !== null && bps && bps > 0 ? safeDivide(close, bps) : null;
@@ -1661,6 +1677,7 @@
         normalizeYfinanceQuote,
         computeValuationOutputs,
         parseFormattedNumber,
+        resolvePreferredEpsValue,
         panChartWindow,
         resolveChartAnchorRatio,
         resolveBaseValuationVariables,

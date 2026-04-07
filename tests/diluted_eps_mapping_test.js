@@ -130,20 +130,22 @@ function run() {
     const normalizedQuote = InvestmentLogic.normalizeYfinanceQuote({
         currentPrice: 250,
         previousClose: 200,
-        dilutedEPS: 7.5,
+        dilutedEPS: 0,
+        basicEps: 6.2,
         trailingEps: 6.2,
         epsForward: 9.4
     }, '');
-    assertEqual(normalizedQuote.trailingEps, 7.5, 'Yahoo quote normalization should prefer dilutedEPS over legacy trailingEps.');
+    assertEqual(normalizedQuote.trailingEps, 6.2, 'Yahoo quote normalization should fall back to basic/trailing EPS when dilutedEPS is zero.');
 
     const bridgeSource = readFile('/Users/huiyong/Desktop/Vibe Investment/yfinance_bridge.py');
     const scriptSource = readFile('/Users/huiyong/Desktop/Vibe Investment/script.js');
     const htmlSource = readFile('/Users/huiyong/Desktop/Vibe Investment/index.html');
 
     assert(bridgeSource.includes('info.get("dilutedEPS")'), 'yfinance bridge should map dilutedEPS directly from Yahoo Finance.');
+    assert(bridgeSource.includes('"basicEps": basic_eps'), 'yfinance bridge should expose a basic EPS fallback payload when diluted EPS is unavailable.');
     assert(scriptSource.includes('summary?.dilutedEps'), 'Valuation fallback logic should reference the parsed diluted EPS from DART summaries.');
     assert(!scriptSource.includes("safeDivide(summary?.netIncome || 0, lastTrade.sharesOutstanding)"), 'Valuation fallback should no longer derive EPS from net income divided by shares.');
-    assert(scriptSource.includes("label: '희석 EPS (Diluted EPS)'"), 'Historical investment table should relabel EPS as 희석 EPS (Diluted EPS).');
+    assert(scriptSource.includes("label: '희석 EPS'"), 'Historical investment table should relabel EPS as 희석 EPS.');
     assert(htmlSource.includes('선행 희석 EPS (원)'), 'Read-only valuation form should relabel the forward EPS field as diluted EPS.');
     assert(htmlSource.includes('TTM 희석 EPS (원)'), 'Read-only valuation form should relabel the TTM EPS field as diluted EPS.');
     assert(htmlSource.includes('조정 희석 EPS (원)'), 'Manual valuation override field should relabel the adjusted EPS input as diluted EPS.');
