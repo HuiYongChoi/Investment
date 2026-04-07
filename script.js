@@ -117,6 +117,8 @@ const state = {
     summaries: [],
     briefingMode: 'idle',
     briefingRequestToken: 0,
+    finSegPeriod: 'annual',
+    finSegType: 'performance',
     mobileTab: 'home',
     mobileContentTab: 'chart',
     lastAnalysis: { fin: {}, scores: {}, totalPct: 0, metrics: {}, anomalies: [] },
@@ -207,7 +209,7 @@ function bindEvents() {
         button.addEventListener('click', onChartZoomClick);
     });
     document.getElementById('indicator-toggle').addEventListener('click', onIndicatorToggle);
-    document.getElementById('card-financials')?.addEventListener('click', onFinancialSectionToggle);
+    document.getElementById('card-financials')?.addEventListener('click', onFinSegClick);
     document.getElementById('card-technical')?.addEventListener('click', onTechSectionToggle);
     if (sectorPresetSelect) {
         sectorPresetSelect.addEventListener('change', onValuationSectorPresetChange);
@@ -252,26 +254,45 @@ function syncIndicatorChipState() {
     });
 }
 
-function setFinancialSectionExpanded(sectionKey, expanded) {
-    const toggle = document.querySelector(`[data-fin-toggle="${sectionKey}"]`);
-    const body = document.querySelector(`[data-fin-body="${sectionKey}"]`);
-    if (!toggle || !body) return;
-    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    body.classList.toggle('hidden', !expanded);
-}
-
-function resetFinancialSectionToggles() {
-    ['annual', 'metrics', 'quarterly', 'quarterly-metrics'].forEach((sectionKey) => {
-        setFinancialSectionExpanded(sectionKey, false);
+function syncFinSegUI() {
+    document.querySelectorAll('[data-fin-seg-period]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.finSegPeriod === state.finSegPeriod);
+    });
+    document.querySelectorAll('[data-fin-seg-type]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.finSegType === state.finSegType);
     });
 }
 
-function onFinancialSectionToggle(event) {
-    const toggle = event.target.closest('[data-fin-toggle]');
-    if (!toggle) return;
-    const sectionKey = toggle.dataset.finToggle;
-    const nextExpanded = toggle.getAttribute('aria-expanded') !== 'true';
-    setFinancialSectionExpanded(sectionKey, nextExpanded);
+function resetFinancialSectionToggles() {
+    state.finSegPeriod = 'annual';
+    state.finSegType = 'performance';
+    syncFinSegUI();
+}
+
+function renderActiveFinancialTable() {
+    const period = state.finSegPeriod;
+    const type = state.finSegType;
+    if (period === 'annual' && type === 'performance') {
+        renderFinancialTable('fin-active-table', state.annuals);
+    } else if (period === 'annual' && type === 'metrics') {
+        renderHistoricalMetricsTable('fin-active-table', state.historicalMetrics);
+    } else if (period === 'quarterly' && type === 'performance') {
+        renderFinancialTable('fin-active-table', state.quarterlies);
+    } else {
+        renderQuarterlyMetricsTable('fin-active-table', state.quarterlies);
+    }
+}
+
+function onFinSegClick(event) {
+    const btn = event.target.closest('[data-fin-seg-period], [data-fin-seg-type]');
+    if (!btn) return;
+    if (btn.dataset.finSegPeriod) {
+        state.finSegPeriod = btn.dataset.finSegPeriod;
+    } else {
+        state.finSegType = btn.dataset.finSegType;
+    }
+    syncFinSegUI();
+    renderActiveFinancialTable();
 }
 
 function setTechSectionExpanded(key, expanded) {
@@ -1157,10 +1178,7 @@ async function startSearch() {
     resetFinancialSectionToggles();
     resetMetricManualInputs();
     renderReports([]);
-    renderFinancialTable('fin-annual-table', []);
-    renderHistoricalMetricsTable('fin-metrics-table', []);
-    renderFinancialTable('fin-quarterly-table', []);
-    renderQuarterlyMetricsTable('fin-quarterly-metrics-table', []);
+    renderActiveFinancialTable();
     renderTechnicalCards();
     renderTechSummary();
     renderCharts();
@@ -1332,8 +1350,7 @@ async function continueAnalysisSync({
         if (!isActiveAnalysis(analysisToken)) return;
 
         state.quarterlies = quarterliesResult.status === 'fulfilled' ? quarterliesResult.value : [];
-        renderFinancialTable('fin-quarterly-table', state.quarterlies);
-        renderQuarterlyMetricsTable('fin-quarterly-metrics-table', state.quarterlies);
+        renderActiveFinancialTable();
 
         if (annualsResult.status === 'fulfilled' && annualsResult.value.length) {
             state.annualsAll = annualsResult.value;
@@ -1346,9 +1363,9 @@ async function continueAnalysisSync({
             state.annuals = [];
             state.annualsAll = [];
             state.summaries = [];
+            state.historicalMetrics = [];
             applySummaryAnomalies();
-            renderFinancialTable('fin-annual-table', []);
-            renderHistoricalMetricsTable('fin-metrics-table', []);
+            renderActiveFinancialTable();
             setSourceBadge('source-dart', 'DART 재무제표를 불러오지 못했습니다.', 'error');
         }
     })().catch((error) => {
@@ -2201,7 +2218,6 @@ function syncFinancialHistoryViews() {
         summary: item.summary || summarizeStatement(item.list)
     }));
     applySummaryAnomalies();
-    renderFinancialTable('fin-annual-table', state.annuals);
     const priceMap = InvestmentLogic.buildYearEndCloseMap(
         state.financialPriceHistory.length ? state.financialPriceHistory : state.chartDaily
     );
@@ -2210,7 +2226,7 @@ function syncFinancialHistoryViews() {
         priceMap,
         state.quote?.sharesOutstanding || 0
     );
-    renderHistoricalMetricsTable('fin-metrics-table', state.historicalMetrics);
+    renderActiveFinancialTable();
 }
 
 async function ensureFinancialHistoryCoverage(desiredYears, analysisToken = state.analysisToken) {
