@@ -697,6 +697,10 @@ header#header {
     background: rgba(10, 15, 24, 0.96);
     box-shadow: var(--shadow-soft);
     z-index: 20;
+    max-height: var(--suggestions-max-height, 320px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .company-option {
@@ -1476,25 +1480,63 @@ header#header {
     animation: spin 0.85s linear infinite;
 }
 
-.fin-history-section {
+.fin-table-viewport {
     position: relative;
+    min-height: 320px;
+    margin-top: 20px;
 }
 
-.fin-section {
-    margin-top: 8px;
+/* 세그먼트 컨트롤 */
+.fin-seg-controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
 }
 
-.fin-section + .fin-section {
-    margin-top: 18px;
+.fin-seg-group {
+    display: flex;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 3px;
+    gap: 2px;
 }
 
-.fin-section-toggle {
+.fin-seg-btn {
+    padding: 7px 16px;
+    border: none;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.fin-seg-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.fin-seg-btn.active {
+    background: rgba(79, 140, 255, 0.22);
+    color: #8fd3ff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+/* 기술적 분석 섹션 토글 */
+.tech-detail-toggle {
     width: 100%;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     padding: 16px 18px;
+    margin-top: 14px;
     border-radius: 18px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.035);
@@ -1502,40 +1544,27 @@ header#header {
     font-size: 0.95rem;
     font-weight: 800;
     cursor: pointer;
-    transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+    transition: border-color 0.18s ease, background 0.18s ease;
 }
 
-.fin-section-toggle:hover {
+.tech-detail-toggle:hover {
     border-color: rgba(79, 140, 255, 0.28);
     background: rgba(79, 140, 255, 0.06);
 }
 
-.fin-section-toggle[aria-expanded="true"] {
+.tech-detail-toggle[aria-expanded="true"] {
     border-color: rgba(79, 140, 255, 0.34);
     background: rgba(79, 140, 255, 0.08);
 }
 
-.fin-section-chevron {
+.tech-detail-chevron {
     font-size: 1rem;
     color: var(--text-faint);
     transition: transform 0.18s ease;
 }
 
-.fin-section-toggle[aria-expanded="true"] .fin-section-chevron {
+.tech-detail-toggle[aria-expanded="true"] .tech-detail-chevron {
     transform: rotate(180deg);
-}
-
-.fin-section-body {
-    padding-top: 14px;
-}
-
-.fin-section-body .table-wrap {
-    margin-bottom: 0;
-}
-
-/* 기술적 분석 섹션 토글 */
-.tech-detail-toggle {
-    margin-top: 14px;
 }
 
 .tech-detail-body {
@@ -1543,7 +1572,6 @@ header#header {
 }
 
 /* 토글 열릴 때 페이드+슬라이드 인 */
-.fin-section-body:not(.hidden),
 .tech-detail-body:not(.hidden) {
     animation: sectionReveal 0.22s ease;
 }
@@ -2212,9 +2240,17 @@ header#header {
         align-items: stretch;
     }
 
-    .fin-section-toggle {
-        padding: 14px 16px;
-        font-size: 0.9rem;
+    .fin-seg-controls {
+        width: 100%;
+    }
+
+    .fin-seg-group {
+        flex: 1;
+    }
+
+    .fin-seg-btn {
+        flex: 1;
+        text-align: center;
     }
 
     .fin-period-control,
@@ -2542,5 +2578,99 @@ header#header {
 
     .card {
         padding: 20px 18px;
+    }
+}
+
+/* ── Gemini Briefing Module Selection UI ──────────────────── */
+.briefing-modules-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 0;
+    border-top: 1px solid var(--glass-border);
+    border-bottom: 1px solid var(--glass-border);
+    margin-bottom: 16px;
+}
+
+.briefing-modules-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.briefing-modules-group {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.briefing-module-chip {
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    white-space: nowrap;
+}
+
+.briefing-module-chip:hover {
+    border-color: rgba(79, 140, 255, 0.28);
+    color: var(--text-primary);
+    background: rgba(79, 140, 255, 0.05);
+}
+
+.briefing-module-chip.active {
+    background: rgba(79, 140, 255, 0.16);
+    border-color: rgba(79, 140, 255, 0.4);
+    color: #8fd3ff;
+    box-shadow: 0 1px 3px rgba(79, 140, 255, 0.15);
+}
+
+@media (max-width: 860px) {
+    .briefing-modules-controls {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .briefing-modules-group {
+        width: 100%;
+    }
+
+    .briefing-module-chip {
+        flex: 1;
+        text-align: center;
+        min-width: 0;
+    }
+}
+
+/* ── Mobile keyboard UX ─────────────────────────────────────── */
+@media (max-width: 860px) {
+    /* Smooth collapse of hero text when keyboard opens */
+    #search-hero h1,
+    #search-hero > p {
+        transition: opacity 0.18s ease, max-height 0.22s ease, margin 0.22s ease;
+        max-height: 400px;
+        overflow: hidden;
+    }
+
+    #search-hero.keyboard-active h1,
+    #search-hero.keyboard-active > p {
+        opacity: 0;
+        max-height: 0;
+        margin: 0;
+        pointer-events: none;
+    }
+
+    #search-hero.keyboard-active {
+        padding-top: 16px;
+        padding-bottom: 16px;
+        transition: padding 0.22s ease;
     }
 }
