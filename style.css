@@ -2212,6 +2212,67 @@ header#header {
     flex-wrap: wrap;
 }
 
+.briefing-copy-btn.is-complete {
+    border-color: rgba(34, 197, 94, 0.34);
+    background: rgba(34, 197, 94, 0.12);
+    color: #d9ffe7;
+}
+
+.pdf-export-mode {
+    background: #ffffff !important;
+    color: #000000 !important;
+}
+
+.pdf-export-mode::before,
+.pdf-export-mode::after {
+    display: none !important;
+}
+
+.pdf-export-mode .card,
+.pdf-export-mode .market-pill,
+.pdf-export-mode .ss-item,
+.pdf-export-mode #briefing-content,
+.pdf-export-mode .briefing-section,
+.pdf-export-mode .briefing-badge,
+.pdf-export-mode .source-badge,
+.pdf-export-mode .table-wrap,
+.pdf-export-mode .fin-table td,
+.pdf-export-mode .fin-table th {
+    background: #ffffff !important;
+    color: #000000 !important;
+    border-color: rgba(0, 0, 0, 0.14) !important;
+    box-shadow: none !important;
+}
+
+.pdf-export-mode .card-sub,
+.pdf-export-mode .market-note,
+.pdf-export-mode .ss-sub,
+.pdf-export-mode .briefing-body,
+.pdf-export-mode .briefing-list,
+.pdf-export-mode .fin-chg,
+.pdf-export-mode .source-badge,
+.pdf-export-mode .market-label,
+.pdf-export-mode .ss-label {
+    color: #334155 !important;
+}
+
+.pdf-export-mode .logo-name,
+.pdf-export-mode .hero-accent,
+.pdf-export-mode .good,
+.pdf-export-mode .up,
+.pdf-export-mode .warn,
+.pdf-export-mode .bad,
+.pdf-export-mode .down,
+.pdf-export-mode .hot,
+.pdf-export-mode .cool {
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+}
+
+.pdf-export-mode canvas {
+    background: #ffffff !important;
+}
+
 ::-webkit-scrollbar {
     width: 9px;
     height: 9px;

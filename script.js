@@ -132,6 +132,7 @@ const state = {
 let priceHoverIndex = null;
 let briefingRefreshTimer = null;
 let briefingButtonResetTimer = null;
+let briefingCopyResetTimer = null;
 let marketSummaryReloadTimer = null;
 
 lucide.createIcons();
@@ -203,6 +204,7 @@ function bindEvents() {
         refreshTechnicals();
     });
     document.getElementById('pdf-btn').addEventListener('click', exportPdf);
+    document.getElementById('briefing-copy-btn').addEventListener('click', copyBriefingText);
     document.getElementById('btn-kakao-login').addEventListener('click', beginKakaoLogin);
     document.getElementById('btn-kakao-logout').addEventListener('click', logoutKakao);
     document.getElementById('mobile-kakao-login')?.addEventListener('click', beginKakaoLogin);
@@ -375,6 +377,31 @@ function setBriefingGenerateButtonState(mode = 'idle') {
     label.textContent = state.briefingDirty ? '다시 작성' : '보고서 작성';
 }
 
+function setBriefingCopyButtonState(mode = 'idle') {
+    const button = document.getElementById('briefing-copy-btn');
+    const label = document.getElementById('briefing-copy-label');
+    if (!button || !label) return;
+
+    button.classList.remove('is-complete');
+    button.disabled = false;
+
+    if (briefingCopyResetTimer) {
+        clearTimeout(briefingCopyResetTimer);
+        briefingCopyResetTimer = null;
+    }
+
+    if (mode === 'complete') {
+        button.classList.add('is-complete');
+        label.textContent = '복사 완료!';
+        briefingCopyResetTimer = setTimeout(() => {
+            setBriefingCopyButtonState('idle');
+        }, 2000);
+        return;
+    }
+
+    label.textContent = '텍스트 복사';
+}
+
 function renderBriefingIdle(message = '분석 항목을 고른 뒤 보고서 작성 버튼을 눌러 AI 리포트를 생성하세요.') {
     document.getElementById('briefing-meta').textContent = '원하는 분석 항목만 골라 사용자 주도로 AI 리포트를 생성합니다.';
     document.getElementById('briefing-content').innerHTML = `
@@ -408,6 +435,21 @@ async function onBriefingGenerateClick() {
     } catch (error) {
         console.error('manual briefing trigger failed', error);
         setBriefingGenerateButtonState('idle');
+    }
+}
+
+async function copyBriefingText() {
+    const content = document.getElementById('briefing-content')?.innerText?.trim() || '';
+    if (!content) {
+        alert('복사할 브리핑 텍스트가 없습니다.');
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(content);
+        setBriefingCopyButtonState('complete');
+    } catch (error) {
+        console.error('briefing copy failed', error);
+        alert('텍스트 복사에 실패했습니다.');
     }
 }
 
@@ -4675,15 +4717,28 @@ function renderBriefingSections(sections) {
     }).join('');
 }
 
-function exportPdf() {
+async function exportPdf() {
     if (!state.company) return;
-    html2pdf().from(document.getElementById('dashboard')).set({
-        margin: 10,
-        filename: `InvestmentNavigator_${state.company.name}_${getCurrentYearKst()}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#080a10' },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    }).save();
+    const dashboard = document.getElementById('dashboard');
+    if (!dashboard) return;
+
+    dashboard.classList.add('pdf-export-mode');
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    try {
+        await html2pdf().from(dashboard).set({
+            margin: 10,
+            filename: `InvestmentNavigator_${state.company.name}_${getCurrentYearKst()}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        }).save();
+    } catch (error) {
+        console.error('pdf export failed', error);
+        alert('PDF 리포트 생성에 실패했습니다.');
+    } finally {
+        dashboard.classList.remove('pdf-export-mode');
+    }
 }
 
 function computeSMA(values, period) {

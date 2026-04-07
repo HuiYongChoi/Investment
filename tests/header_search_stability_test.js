@@ -18,7 +18,7 @@ const root = '/Users/huiyong/Desktop/Vibe Investment';
 const htmlSource = readText(`${root}/index.html`);
 const styleSource = readText(`${root}/style.css`);
 
-assert(htmlSource.includes('style.css?v=1.1.8'), 'HTML should bump the CSS asset version to invalidate stale layout cache.');
+assert(htmlSource.includes('style.css?v=1.1.9'), 'HTML should bump the CSS asset version to invalidate stale layout cache.');
 assert(styleSource.includes('.search-row {\n    position: relative;'), 'Search row should be explicitly positioned to anchor the suggestion layer.');
 assert(styleSource.includes('min-height: 84px;'), 'Search row should reserve vertical space to prevent layout shift.');
 assert(styleSource.includes('.search-input-wrap {\n    position: relative;\n    flex: 1;\n    min-height: 60px;'), 'Search input wrapper should keep a stable minimum height.');
