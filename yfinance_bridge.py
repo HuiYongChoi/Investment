@@ -383,10 +383,15 @@ def fetch_quote_payload(stock_code: str, market: str = "KOSPI", name_hint: str =
                 info.get("epsForward")
                 or info.get("forwardEps")
             )
-            trailing_eps = normalize_number(
-                info.get("trailingEps")
-                or info.get("epsTrailing")
-            )
+            diluted_eps = normalize_number(info.get("dilutedEPS"))
+            if diluted_eps is None:
+                diluted_eps = normalize_number(info.get("dilutedEps"))
+            trailing_eps = diluted_eps
+            if trailing_eps is None:
+                trailing_eps = normalize_number(
+                    info.get("trailingEps")
+                    or info.get("epsTrailing")
+                )
             forward_pe = normalize_number(
                 info.get("forwardPE")
                 or info.get("trailingPE")
@@ -416,6 +421,7 @@ def fetch_quote_payload(stock_code: str, market: str = "KOSPI", name_hint: str =
                 "volume": volume,
                 "sharesOutstanding": shares_outstanding,
                 "epsForward": forward_eps,
+                "dilutedEps": diluted_eps,
                 "trailingEps": trailing_eps,
                 "forwardPE": forward_pe,
                 "bookValue": book_value,

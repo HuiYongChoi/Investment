@@ -1996,7 +1996,7 @@ function renderHistoricalMetricsTable(containerId, rows) {
     const metricRows = [
         { label: '연말 종가', key: 'yearEndClose', type: 'money' },
         { label: '발행주식수', key: 'shareCount', type: 'shares' },
-        { label: 'EPS', key: 'eps', type: 'money' },
+        { label: '희석 EPS (Diluted EPS)', key: 'eps', type: 'money' },
         { label: 'BPS', key: 'bps', type: 'money' },
         { label: 'PER', key: 'per', type: 'multiple' },
         { label: 'PBR', key: 'pbr', type: 'multiple' },
@@ -2419,11 +2419,9 @@ function resolveValuationInputs(summary, lastTrade, previousSummary) {
     const fallbackBps = Number(lastTrade?.sharesOutstanding)
         ? safeDivide(summary?.equity || 0, lastTrade.sharesOutstanding)
         : 0;
-    const fallbackEps = Number(lastTrade?.sharesOutstanding)
-        ? safeDivide(summary?.netIncome || 0, lastTrade.sharesOutstanding)
-        : (fallbackBps && fallbackRoe ? fallbackBps * (fallbackRoe / 100) : 0);
+    const fallbackEps = Number(summary?.dilutedEps ?? summary?.basicEps) || 0;
     const forwardEps = Number(lastTrade?.forwardEps) || 0;
-    const trailingEps = Number(lastTrade?.trailingEps) || fallbackEps || 0;
+    const trailingEps = Number(lastTrade?.dilutedEps ?? lastTrade?.trailingEps) || fallbackEps || 0;
     const bps = Number(lastTrade?.bps) || fallbackBps || 0;
     const roe = Number(lastTrade?.roe) || fallbackRoe || 0;
     const forwardPer = Number(lastTrade?.forwardPer) || (forwardEps ? safeDivide(price, forwardEps) : 0) || 0;
@@ -2503,12 +2501,12 @@ function calcMetrics() {
     renderForwardEpsWarning(forwardOverheat);
 
     const epsSourceLabel = epsSource === 'manual'
-        ? '조정 EPS'
+        ? '조정 희석 EPS'
         : epsSource === 'forward'
-            ? '선행 EPS'
+            ? '선행 희석 EPS'
             : epsSource === 'ttm'
-                ? 'TTM EPS'
-                : 'EPS';
+                ? 'TTM 희석 EPS'
+                : '희석 EPS';
     const hasUpsideInputs = price > 0 && finalTargetPrice > 0;
 
     state.lastAnalysis.metrics = {
@@ -2540,16 +2538,16 @@ function calcMetrics() {
                     : '-',
             tone: lossMaking ? 'warn' : '',
             hint: lossMaking
-                ? `EPS 기준: ${epsSourceLabel} · 적자 구간은 PER보다 PBR 밴드와 자산가치를 우선 확인하세요.`
+                ? `희석 EPS 기준: ${epsSourceLabel} · 적자 구간은 PER보다 PBR 밴드와 자산가치를 우선 확인하세요.`
                 : finalTargetPrice
-                ? `PER 모델 ${Math.round(perFairValue).toLocaleString()}원 × 무형자산 가산 ${premiumRatePct.toFixed(0)}% · EPS 기준: ${epsSourceLabel}`
-                : 'EPS와 목표 PER가 잡히면 섹터 프리미엄을 반영합니다.'
+                ? `PER 모델 ${Math.round(perFairValue).toLocaleString()}원 × 무형자산 가산 ${premiumRatePct.toFixed(0)}% · 희석 EPS 기준: ${epsSourceLabel}`
+                : '희석 EPS와 목표 PER가 잡히면 섹터 프리미엄을 반영합니다.'
         },
         {
             label: 'PEG 지표',
             value: pegRatio === null ? '-' : pegRatio.toFixed(2),
             tone: pegTone,
-            hint: `목표 PER ${basePER.toFixed(1)}배 / EPS 예상 성장률 ${epsGrowth.toFixed(1)}%`
+            hint: `목표 PER ${basePER.toFixed(1)}배 / 희석 EPS 예상 성장률 ${epsGrowth.toFixed(1)}%`
         },
         {
             label: 'S-RIM 적정주가',
@@ -2563,7 +2561,7 @@ function calcMetrics() {
                 : '-',
             tone: hasUpsideInputs ? upsideTone : '',
             hint: hasUpsideInputs
-                ? `${usingManualEps ? '조정 EPS' : epsSourceLabel} 기준 최종 목표가 대비`
+                ? `${usingManualEps ? '조정 희석 EPS' : epsSourceLabel} 기준 최종 목표가 대비`
                 : '현재 주가와 최종 목표가가 모두 잡히면 상승여력을 계산합니다.'
         }
     ];

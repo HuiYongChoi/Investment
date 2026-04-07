@@ -67,6 +67,8 @@
         revenue: Object.freeze(['매출액', '영업수익', '수익(매출액)', '보험영업수익']),
         operatingIncome: Object.freeze(['영업이익', '영업손실']),
         netIncome: Object.freeze(['당기순이익', '당기순손익', '분기순이익', '반기순이익', '연결당기순이익', '당기순이익(손실)']),
+        dilutedEps: Object.freeze(['희석주당이익', '희석주당순이익']),
+        basicEps: Object.freeze(['기본주당이익', '기본주당순이익']),
         assets: Object.freeze(['자산총계']),
         liabilities: Object.freeze(['부채총계']),
         equity: Object.freeze(['자본총계']),
@@ -152,6 +154,17 @@
         return parseStatementAmount(match.thstrm_amount ?? match.amount ?? match.value);
     }
 
+    function findStatementValue(list, aliases, fallbackValue = null) {
+        const rows = Array.isArray(list) ? list : [];
+        const normalizedAliases = (aliases || []).map(normalizeAccountName);
+        const match = rows.find((item) => {
+            const accountName = normalizeAccountName(item?.account_nm || item?.accountName || '');
+            return normalizedAliases.some((alias) => accountName.includes(alias));
+        });
+        if (!match) return fallbackValue;
+        return parseStatementAmount(match.thstrm_amount ?? match.amount ?? match.value);
+    }
+
     function selectPreferredFsRows(list) {
         const rows = Array.isArray(list) ? list.filter(Boolean) : [];
         const cfsRows = rows.filter((row) => getFsDiv(row) === 'CFS');
@@ -183,6 +196,9 @@
         const revenue = findStatementAmount(filterStatementRowsByMetric(list, 'revenue'), STATEMENT_ACCOUNT_ALIASES.revenue);
         const operatingIncome = findStatementAmount(filterStatementRowsByMetric(list, 'operatingIncome'), STATEMENT_ACCOUNT_ALIASES.operatingIncome);
         const netIncome = findStatementAmount(filterStatementRowsByMetric(list, 'netIncome'), STATEMENT_ACCOUNT_ALIASES.netIncome);
+        const dilutedEpsValue = findStatementValue(filterStatementRowsByMetric(list, 'dilutedEps'), STATEMENT_ACCOUNT_ALIASES.dilutedEps, null);
+        const basicEps = findStatementValue(filterStatementRowsByMetric(list, 'basicEps'), STATEMENT_ACCOUNT_ALIASES.basicEps, null);
+        const dilutedEps = dilutedEpsValue !== null ? dilutedEpsValue : basicEps;
         const assets = findStatementAmount(filterStatementRowsByMetric(list, 'assets'), STATEMENT_ACCOUNT_ALIASES.assets);
         const liabilities = findStatementAmount(filterStatementRowsByMetric(list, 'liabilities'), STATEMENT_ACCOUNT_ALIASES.liabilities);
         const equity = findStatementAmount(filterStatementRowsByMetric(list, 'equity'), STATEMENT_ACCOUNT_ALIASES.equity);
@@ -209,6 +225,8 @@
             revenue,
             operatingIncome,
             netIncome,
+            dilutedEps,
+            basicEps,
             assets,
             liabilities,
             equity,
@@ -262,9 +280,12 @@
     }
 
     function createSyntheticQuarterSummary(baseSummary, overrides) {
+        const overrideSource = overrides || {};
         return recomputeSummaryRatios({
             ...(baseSummary || {}),
-            ...(overrides || {})
+            ...overrideSource,
+            dilutedEps: Object.prototype.hasOwnProperty.call(overrideSource, 'dilutedEps') ? overrideSource.dilutedEps : null,
+            basicEps: Object.prototype.hasOwnProperty.call(overrideSource, 'basicEps') ? overrideSource.basicEps : null
         });
     }
 
@@ -825,6 +846,9 @@
         const explicitChangePct = parseSignedNumberText(payload?.changePct ?? payload?.regularMarketChangePercent);
         const change = explicitChange ?? (previousClose !== null ? close - previousClose : 0);
         const changePct = explicitChangePct ?? (previousClose ? percentage(change, previousClose) : 0);
+        const dilutedEps = parseNumberText(
+            payload?.dilutedEPS ?? payload?.dilutedEps ?? payload?.trailingEps ?? payload?.epsTrailing ?? payload?.ttmEps
+        );
 
         return {
             name: String(payload?.shortName ?? payload?.longName ?? payload?.name ?? '').trim(),
@@ -838,7 +862,8 @@
             low: parseNumberText(payload?.dayLow ?? payload?.low ?? payload?.regularMarketDayLow) ?? 0,
             volume: parseNumberText(payload?.volume ?? payload?.regularMarketVolume ?? payload?.lastVolume) ?? 0,
             forwardEps: parseNumberText(payload?.epsForward ?? payload?.forwardEps),
-            trailingEps: parseNumberText(payload?.trailingEps ?? payload?.epsTrailing ?? payload?.ttmEps),
+            dilutedEps,
+            trailingEps: dilutedEps,
             forwardPer: parseNumberText(payload?.forwardPE ?? payload?.forwardPer ?? payload?.trailingPE),
             bps: parseNumberText(payload?.bookValue ?? payload?.bps),
             roe: parseNumberText(payload?.returnOnEquity ?? payload?.roe),
@@ -1340,7 +1365,9 @@
                 const summary = period?.summary || {};
                 const shareCount = parseNumberText(period?.shareCount) ?? defaultShareCount;
                 const close = parseNumberText(closeMap[period?.year]);
-                const eps = shareCount > 0 ? safeDivide(parseNumberText(summary?.netIncome) ?? 0, shareCount) : null;
+                const dilutedEps = parseNumberText(summary?.dilutedEps ?? period?.dilutedEps);
+                const basicEps = parseNumberText(summary?.basicEps ?? period?.basicEps);
+                const eps = dilutedEps !== null ? dilutedEps : basicEps;
                 const bps = shareCount > 0 ? safeDivide(parseNumberText(summary?.equity) ?? 0, shareCount) : null;
                 const per = close !== null && eps && eps > 0 ? safeDivide(close, eps) : null;
                 const pbr = close !== null && bps && bps > 0 ? safeDivide(close, bps) : null;
