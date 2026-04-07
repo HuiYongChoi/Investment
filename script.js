@@ -1197,6 +1197,40 @@ function consumeKakaoMessage() {
     writeKakaoStorage(KAKAO_STORAGE_ERROR, '');
 }
 
+function logKakaoSendError(error) {
+    const response =
+        error?.response?.data ??
+        error?.responseJSON ??
+        error?.response ??
+        error?.error ??
+        error?.body ??
+        null;
+    const code =
+        error?.code ??
+        response?.code ??
+        response?.error_code ??
+        error?.status ??
+        response?.status ??
+        'unknown';
+    const msg =
+        error?.msg ??
+        response?.msg ??
+        response?.message ??
+        response?.error_description ??
+        error?.message ??
+        'Unknown Kakao send error';
+
+    console.error('[Kakao Send Error] Full Error Response:', error);
+    if (response && response !== error) {
+        console.error('[Kakao Send Error] Response Payload:', response);
+    }
+    console.error(`[Kakao Send Error] code: ${String(code)} | msg: ${String(msg)}`, {
+        code,
+        msg,
+        response
+    });
+}
+
 async function sendBriefingToKakao() {
     if (!window.Kakao || !Kakao.Auth.getAccessToken()) {
         alert('카카오 로그인이 필요합니다.');
@@ -1225,6 +1259,7 @@ async function sendBriefingToKakao() {
         });
         alert('카카오톡 나에게 보내기가 완료되었습니다.');
     } catch (error) {
+        logKakaoSendError(error);
         alert('카카오톡 전송에 실패했습니다. 메시지 API 권한과 로그인 상태를 확인해주세요.');
     }
 }
