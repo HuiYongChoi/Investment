@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Investment Navigator</title>
     <meta name="description" content="DART 공시, Yahoo Finance 시세, Gemini 브리핑, Kakao 로그인을 결합한 투자 분석 대시보드">
-    <link rel="stylesheet" href="style.css?v=1.1.5">
+    <link rel="stylesheet" href="style.css?v=1.1.6">
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.6/kakao.min.js" crossorigin="anonymous"></script>
@@ -15,7 +15,7 @@
         <div class="header-left">
             <div class="logo-icon"><i data-lucide="compass"></i></div>
             <div class="logo-text">
-                <span class="logo-name">INVEST NAV</span>
+                <span class="logo-name">Invest Navigator</span>
             </div>
         </div>
         <div class="header-right mobile-header-auth">
@@ -41,14 +41,16 @@
                 </svg>
                 <span>카카오</span>
             </button>
-            <div id="mobile-kakao-profile" class="mobile-auth-chip hidden">
-                <img id="mobile-kakao-profile-img" src="" alt="카카오 프로필">
-                <div class="mobile-auth-meta">
-                    <span id="mobile-kakao-nickname">카카오 사용자</span>
-                    <span id="mobile-kakao-login-state">카카오 로그인 유지 중</span>
+            <div class="mobile-auth-inline">
+                <div id="mobile-kakao-profile" class="mobile-auth-chip hidden">
+                    <img id="mobile-kakao-profile-img" src="" alt="카카오 프로필">
+                    <div class="mobile-auth-meta">
+                        <span id="mobile-kakao-nickname">카카오 사용자</span>
+                        <span id="mobile-kakao-login-state">카카오 로그인 유지 중</span>
+                    </div>
                 </div>
+                <button id="mobile-kakao-logout" class="mobile-auth-logout hidden" type="button">로그아웃</button>
             </div>
-            <button id="mobile-kakao-logout" class="mobile-auth-logout hidden" type="button">로그아웃</button>
         </div>
     </header>
 

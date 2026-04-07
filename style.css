@@ -122,6 +122,11 @@ header#header {
     gap: 16px;
 }
 
+.header-left {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
 .header-right {
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -150,12 +155,14 @@ header#header {
 .logo-text {
     display: flex;
     flex-direction: column;
+    min-width: 0;
 }
 
 .logo-name {
     font-size: 1.24rem;
     font-weight: 800;
     letter-spacing: -0.03em;
+    white-space: nowrap;
 }
 
 .logo-sub {
@@ -523,6 +530,13 @@ header#header {
 
 .mobile-auth-strip {
     display: none;
+}
+
+.mobile-auth-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
 }
 
 .mobile-auth-chip {
@@ -2260,11 +2274,14 @@ header#header {
         margin-left: auto;
         justify-content: flex-end;
         gap: 6px;
+        flex-wrap: nowrap;
+        min-width: 0;
     }
 
     .mobile-header-auth {
         align-items: center;
         gap: 6px;
+        flex-wrap: nowrap;
     }
 
     body.mobile-dashboard-active .logo-text {
@@ -2292,6 +2309,11 @@ header#header {
     .mobile-header-auth .mobile-auth-chip,
     .mobile-header-auth .mobile-auth-logout {
         display: inline-flex;
+    }
+
+    .mobile-auth-inline {
+        flex: 0 1 auto;
+        gap: 6px;
     }
 
     .mobile-utility-strip {
@@ -2449,10 +2471,19 @@ header#header {
         min-height: 32px;
         padding: 0 9px;
         font-size: 0.72rem;
+        min-width: 0;
+        max-width: 132px;
     }
 
     .mobile-header-auth .mobile-auth-meta span:last-child {
         display: none;
+    }
+
+    .mobile-header-auth #mobile-kakao-nickname {
+        max-width: 7ch;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .mobile-auth-chip svg {
@@ -2474,7 +2505,7 @@ header#header {
 
 @media (max-width: 560px) {
     .logo-name {
-        font-size: 1.05rem;
+        font-size: 0.92rem;
     }
 
     .btn-kakao {
