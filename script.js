@@ -150,7 +150,22 @@ function bindEvents() {
     });
     companyInput.addEventListener('focus', (event) => {
         updateCompanySuggestions(event.target.value);
+        if (isMobileHybridViewport()) {
+            mobileKeyboardActivate(companyInput);
+        }
     });
+    companyInput.addEventListener('blur', () => {
+        if (isMobileHybridViewport()) {
+            mobileKeyboardDeactivate();
+        }
+    });
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+            if (document.activeElement === companyInput && isMobileHybridViewport()) {
+                updateSuggestionsMaxHeight(companyInput);
+            }
+        });
+    }
     companyInput.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             hideCompanySuggestions();
@@ -571,6 +586,41 @@ function syncKakaoAuthUI(profile, options = {}) {
 
 function isMobileHybridViewport() {
     return window.matchMedia('(max-width: 768px)').matches;
+}
+
+// --- Mobile keyboard UX ---
+let _mobileKeyboardScrollY = 0;
+
+function updateSuggestionsMaxHeight(input) {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const inputRect = input.getBoundingClientRect();
+    // Space below the input within the visual viewport
+    const available = (vv.offsetTop + vv.height) - inputRect.bottom - 16;
+    const maxH = Math.max(available, 80);
+    document.documentElement.style.setProperty('--suggestions-max-height', `${maxH}px`);
+}
+
+function mobileKeyboardActivate(input) {
+    document.getElementById('search-hero')?.classList.add('keyboard-active');
+    // Save scroll position and lock body to prevent iOS background scroll bounce
+    _mobileKeyboardScrollY = window.scrollY;
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${_mobileKeyboardScrollY}px`;
+    document.body.style.width = '100%';
+    document.body.style.overflowY = 'scroll';
+    updateSuggestionsMaxHeight(input);
+}
+
+function mobileKeyboardDeactivate() {
+    document.getElementById('search-hero')?.classList.remove('keyboard-active');
+    // Restore body scroll and scroll position
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.width = '';
+    document.body.style.overflowY = '';
+    window.scrollTo(0, _mobileKeyboardScrollY);
+    document.documentElement.style.removeProperty('--suggestions-max-height');
 }
 
 function syncMobileHeaderChrome() {

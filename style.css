@@ -697,6 +697,10 @@ header#header {
     background: rgba(10, 15, 24, 0.96);
     box-shadow: var(--shadow-soft);
     z-index: 20;
+    max-height: var(--suggestions-max-height, 320px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .company-option {
@@ -2542,5 +2546,30 @@ header#header {
 
     .card {
         padding: 20px 18px;
+    }
+}
+
+/* ── Mobile keyboard UX ─────────────────────────────────────── */
+@media (max-width: 860px) {
+    /* Smooth collapse of hero text when keyboard opens */
+    #search-hero h1,
+    #search-hero > p {
+        transition: opacity 0.18s ease, max-height 0.22s ease, margin 0.22s ease;
+        max-height: 400px;
+        overflow: hidden;
+    }
+
+    #search-hero.keyboard-active h1,
+    #search-hero.keyboard-active > p {
+        opacity: 0;
+        max-height: 0;
+        margin: 0;
+        pointer-events: none;
+    }
+
+    #search-hero.keyboard-active {
+        padding-top: 16px;
+        padding-bottom: 16px;
+        transition: padding 0.22s ease;
     }
 }
