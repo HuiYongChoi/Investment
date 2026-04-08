@@ -2219,16 +2219,18 @@ header#header {
 }
 
 .briefing-actions {
-    flex: 1 0 100%;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    flex: 0 1 auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 10px;
-    width: 100%;
-    margin-top: 8px;
+    width: auto;
+    margin-top: 0;
+    margin-left: auto;
 }
 
 .header-actions > * {
-    flex: 1 1 0;
+    flex: 0 0 auto;
     min-width: 0;
     white-space: nowrap;
     overflow: hidden;
@@ -2239,13 +2241,44 @@ header#header {
 }
 
 .briefing-actions > * {
-    width: 100%;
-    min-height: 46px;
+    width: auto;
+    min-height: 42px;
+    padding: 0 14px;
+    font-size: 0.92rem;
+    border-radius: 12px;
 }
 
 #card-briefing .card-header {
-    align-items: flex-start;
+    align-items: center;
     flex-wrap: wrap;
+}
+
+#card-briefing .card-copy {
+    flex: 1 1 320px;
+    min-width: 0;
+}
+
+.btn-kakao-share {
+    color: var(--text-primary);
+}
+
+.kakao-send-icon {
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #fee500;
+    box-shadow: inset 0 0 0 1px rgba(25, 22, 0, 0.08);
+}
+
+.kakao-send-icon svg {
+    width: 12px;
+    height: 12px;
+    display: block;
+    fill: #191600;
 }
 
 .briefing-copy-btn.is-complete {
@@ -2254,13 +2287,16 @@ header#header {
     color: #d9ffe7;
 }
 
-.pdf-export {
+.pdf-export,
+.pdf-export-mode {
     background: #ffffff !important;
     color: #000000 !important;
 }
 
 .pdf-export::before,
-.pdf-export::after {
+.pdf-export::after,
+.pdf-export-mode::before,
+.pdf-export-mode::after {
     display: none !important;
 }
 
@@ -2273,14 +2309,25 @@ header#header {
 .pdf-export .source-badge,
 .pdf-export .table-wrap,
 .pdf-export .fin-table td,
-.pdf-export .fin-table th {
+.pdf-export .fin-table th,
+.pdf-export-mode .card,
+.pdf-export-mode .market-pill,
+.pdf-export-mode .ss-item,
+.pdf-export-mode #briefing-content,
+.pdf-export-mode .briefing-section,
+.pdf-export-mode .briefing-badge,
+.pdf-export-mode .source-badge,
+.pdf-export-mode .table-wrap,
+.pdf-export-mode .fin-table td,
+.pdf-export-mode .fin-table th {
     background: #ffffff !important;
     color: #000000 !important;
     border-color: rgba(0, 0, 0, 0.14) !important;
     box-shadow: none !important;
 }
 
-.pdf-export #briefing-content::before {
+.pdf-export #briefing-content::before,
+.pdf-export-mode #briefing-content::before {
     display: none !important;
 }
 
@@ -2292,7 +2339,16 @@ header#header {
 .pdf-export .fin-chg,
 .pdf-export .source-badge,
 .pdf-export .market-label,
-.pdf-export .ss-label {
+.pdf-export .ss-label,
+.pdf-export-mode .card-sub,
+.pdf-export-mode .market-note,
+.pdf-export-mode .ss-sub,
+.pdf-export-mode .briefing-body,
+.pdf-export-mode .briefing-list,
+.pdf-export-mode .fin-chg,
+.pdf-export-mode .source-badge,
+.pdf-export-mode .market-label,
+.pdf-export-mode .ss-label {
     color: #334155 !important;
 }
 
@@ -2304,12 +2360,22 @@ header#header {
 .pdf-export .bad,
 .pdf-export .down,
 .pdf-export .hot,
-.pdf-export .cool {
+.pdf-export .cool,
+.pdf-export-mode .logo-name,
+.pdf-export-mode .hero-accent,
+.pdf-export-mode .good,
+.pdf-export-mode .up,
+.pdf-export-mode .warn,
+.pdf-export-mode .bad,
+.pdf-export-mode .down,
+.pdf-export-mode .hot,
+.pdf-export-mode .cool {
     color: #000000 !important;
     -webkit-text-fill-color: #000000 !important;
 }
 
-.pdf-export canvas {
+.pdf-export canvas,
+.pdf-export-mode canvas {
     background: #ffffff !important;
 }
 
@@ -2457,17 +2523,22 @@ header#header {
 
     .header-actions .btn-outline,
     .header-actions .btn-primary {
-        flex: 1;
+        flex: 1 1 auto;
     }
 
     .briefing-actions {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        width: 100%;
+        justify-content: stretch;
         gap: 8px;
+        margin-top: 8px;
     }
 
     .briefing-actions > * {
-        min-height: 44px;
+        flex: 1 1 calc(33.333% - 6px);
+        justify-content: center;
+        min-height: 42px;
         font-size: 0.82rem;
+        padding: 0 10px;
     }
 }
 

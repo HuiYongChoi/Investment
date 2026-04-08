@@ -2142,10 +2142,27 @@ function buildDartCompanySearchUrl(company) {
 }
 
 function buildFinancialRows(periods) {
-    return periods.map((period) => ({
-        ...period,
-        summary: period.summary || summarizeStatement(period.list)
-    }));
+    const fallbackShareCount = Number(state.quote?.sharesOutstanding) || 0;
+    return periods.map((period) => {
+        const summary = period.summary || summarizeStatement(period.list);
+        const epsMetrics = InvestmentLogic.resolveStableEpsValues({
+            dilutedEps: summary?.dilutedEps,
+            basicEps: summary?.basicEps ?? summary?.eps,
+            netIncome: summary?.netIncome,
+            dilutedShareCount: summary?.weightedDilutedShares,
+            basicShareCount: summary?.weightedBasicShares,
+            shareCount: period?.shareCount || fallbackShareCount
+        });
+        return {
+            ...period,
+            summary: {
+                ...summary,
+                eps: epsMetrics.eps,
+                dilutedEps: epsMetrics.dilutedEps,
+                basicEps: epsMetrics.basicEps
+            }
+        };
+    });
 }
 
 function summarizeStatement(list) {
@@ -2364,11 +2381,13 @@ function renderHistoricalMetricsTable(containerId, rows) {
     const metricRows = [
         { label: '연말 종가', key: 'yearEndClose', type: 'money' },
         { label: '발행주식수', key: 'shareCount', type: 'shares' },
-        { label: '희석 EPS', key: 'dilutedEps', type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
-        { label: 'EPS', key: 'basicEps', type: 'money' },
         { label: 'BPS', key: 'bps', type: 'money' },
         { label: 'PER', key: 'per', type: 'multiple' },
         { label: 'PBR', key: 'pbr', type: 'multiple' },
+        { label: '영업이익률', key: 'operatingMargin', type: 'pct' },
+        { label: '순이익률', key: 'netMargin', type: 'pct' },
+        { label: 'EPS', key: 'basicEps', type: 'money' },
+        { label: '희석 EPS', key: 'dilutedEps', type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
         { label: 'ROE', key: 'roe', type: 'pct' },
         { label: 'ROIC', key: 'roic', type: 'pct' }
     ];
@@ -2408,10 +2427,10 @@ function renderQuarterlyMetricsTable(containerId, periods) {
 
     const summaries = buildFinancialRows(validPeriods);
     const rows = [
-        { label: '희석 EPS', key: 'dilutedEps', type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
-        { label: 'EPS', key: 'basicEps', type: 'money' },
         { label: '영업이익률', key: 'operatingMargin', type: 'pct' },
         { label: '순이익률',   key: 'netMargin',       type: 'pct' },
+        { label: 'EPS',        key: 'basicEps',        type: 'money' },
+        { label: '희석 EPS',   key: 'dilutedEps',      type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
         { label: 'ROE',        key: 'roe',             type: 'pct' },
         { label: 'ROA',        key: 'roa',             type: 'pct' },
         { label: '부채비율',   key: 'debtRatio',       type: 'pct' },
@@ -4712,17 +4731,10 @@ function renderBriefingSections(sections) {
 
 async function exportPdf() {
     if (!state.company) return;
-    const exportTarget = document.getElementById('card-briefing');
+    const exportTarget = document.getElementById('dashboard');
     if (!exportTarget) return;
 
-    const previousWidth = exportTarget.style.width;
-    const previousMaxWidth = exportTarget.style.maxWidth;
-    const previousMinWidth = exportTarget.style.minWidth;
-
-    exportTarget.classList.add('pdf-export');
-    exportTarget.style.width = '800px';
-    exportTarget.style.maxWidth = '800px';
-    exportTarget.style.minWidth = '800px';
+    exportTarget.classList.add('pdf-export-mode');
     await new Promise((resolve) => requestAnimationFrame(resolve));
 
     try {
@@ -4730,17 +4742,14 @@ async function exportPdf() {
             margin: 10,
             filename: `InvestmentNavigator_${state.company.name}_${getCurrentYearKst()}.pdf`,
             image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', width: 800, windowWidth: 800 },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
         }).save();
     } catch (error) {
         console.error('pdf export failed', error);
         alert('PDF 리포트 생성에 실패했습니다.');
     } finally {
-        exportTarget.classList.remove('pdf-export');
-        exportTarget.style.width = previousWidth;
-        exportTarget.style.maxWidth = previousMaxWidth;
-        exportTarget.style.minWidth = previousMinWidth;
+        exportTarget.classList.remove('pdf-export-mode');
     }
 }
 

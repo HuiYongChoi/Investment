@@ -69,6 +69,18 @@
         netIncome: Object.freeze(['당기순이익', '당기순손익', '분기순이익', '반기순이익', '연결당기순이익', '당기순이익(손실)']),
         dilutedEps: Object.freeze(['희석주당이익', '희석주당순이익']),
         basicEps: Object.freeze(['기본주당이익', '기본주당순이익']),
+        dilutedShareCount: Object.freeze([
+            '희석주당이익계산에참여한가중평균유통보통주식수',
+            '희석가중평균유통보통주식수',
+            '희석가중평균주식수'
+        ]),
+        basicShareCount: Object.freeze([
+            '기본주당이익계산에참여한가중평균유통보통주식수',
+            '가중평균유통보통주식수',
+            '기본가중평균유통보통주식수',
+            '기본가중평균주식수',
+            '가중평균주식수'
+        ]),
         assets: Object.freeze(['자산총계']),
         liabilities: Object.freeze(['부채총계']),
         equity: Object.freeze(['자본총계']),
@@ -157,6 +169,60 @@
         return diluted ?? basic;
     }
 
+    function pickPreferredNumericValue() {
+        let fallback = null;
+        for (let index = 0; index < arguments.length; index += 1) {
+            const parsed = parseNumberText(arguments[index]);
+            if (parsed === null) continue;
+            if (fallback === null) {
+                fallback = parsed;
+            }
+            if (parsed !== 0) {
+                return parsed;
+            }
+        }
+        return fallback;
+    }
+
+    function computeDerivedEpsValue(netIncome, shareCount) {
+        const income = parseNumberText(netIncome);
+        const shares = parseNumberText(shareCount);
+        if (!Number.isFinite(income) || !Number.isFinite(shares) || shares <= 0) return null;
+        return income / shares;
+    }
+
+    function resolveStableEpsValues(input) {
+        const payload = input || {};
+        const shareCount = pickPreferredNumericValue(
+            payload.shareCount,
+            payload.basicShareCount,
+            payload.dilutedShareCount
+        );
+        const basicShareCount = pickPreferredNumericValue(payload.basicShareCount, shareCount, payload.dilutedShareCount);
+        const dilutedShareCount = pickPreferredNumericValue(payload.dilutedShareCount, basicShareCount, shareCount);
+        const computedBasic = computeDerivedEpsValue(payload.netIncome, basicShareCount);
+        const computedDiluted = computeDerivedEpsValue(payload.netIncome, dilutedShareCount);
+        const basicEps = pickPreferredNumericValue(
+            payload.basicEps,
+            payload.dilutedEps,
+            computedBasic,
+            computedDiluted
+        );
+        const dilutedEps = pickPreferredNumericValue(
+            payload.dilutedEps,
+            payload.basicEps,
+            computedDiluted,
+            computedBasic
+        );
+        return {
+            eps: pickPreferredNumericValue(dilutedEps, basicEps),
+            basicEps,
+            dilutedEps,
+            basicShareCount,
+            dilutedShareCount
+        };
+    }
+
     function findStatementAmount(list, aliases) {
         const rows = Array.isArray(list) ? list : [];
         const normalizedAliases = (aliases || []).map(normalizeAccountName);
@@ -212,7 +278,15 @@
         const netIncome = findStatementAmount(filterStatementRowsByMetric(list, 'netIncome'), STATEMENT_ACCOUNT_ALIASES.netIncome);
         const dilutedEpsValue = findStatementValue(filterStatementRowsByMetric(list, 'dilutedEps'), STATEMENT_ACCOUNT_ALIASES.dilutedEps, null);
         const basicEps = findStatementValue(filterStatementRowsByMetric(list, 'basicEps'), STATEMENT_ACCOUNT_ALIASES.basicEps, null);
-        const dilutedEps = resolvePreferredEpsValue(dilutedEpsValue, basicEps);
+        const dilutedShareCount = findStatementValue(filterStatementRowsByMetric(list, 'dilutedShareCount'), STATEMENT_ACCOUNT_ALIASES.dilutedShareCount, null);
+        const basicShareCount = findStatementValue(filterStatementRowsByMetric(list, 'basicShareCount'), STATEMENT_ACCOUNT_ALIASES.basicShareCount, null);
+        const epsMetrics = resolveStableEpsValues({
+            dilutedEps: dilutedEpsValue,
+            basicEps,
+            netIncome,
+            dilutedShareCount,
+            basicShareCount
+        });
         const assets = findStatementAmount(filterStatementRowsByMetric(list, 'assets'), STATEMENT_ACCOUNT_ALIASES.assets);
         const liabilities = findStatementAmount(filterStatementRowsByMetric(list, 'liabilities'), STATEMENT_ACCOUNT_ALIASES.liabilities);
         const equity = findStatementAmount(filterStatementRowsByMetric(list, 'equity'), STATEMENT_ACCOUNT_ALIASES.equity);
@@ -239,8 +313,11 @@
             revenue,
             operatingIncome,
             netIncome,
-            dilutedEps,
-            basicEps,
+            eps: epsMetrics.eps,
+            dilutedEps: epsMetrics.dilutedEps,
+            basicEps: epsMetrics.basicEps,
+            weightedDilutedShares: epsMetrics.dilutedShareCount,
+            weightedBasicShares: epsMetrics.basicShareCount,
             assets,
             liabilities,
             equity,
@@ -1380,16 +1457,19 @@
                 const summary = period?.summary || {};
                 const shareCount = parseNumberText(period?.shareCount) ?? defaultShareCount;
                 const close = parseNumberText(closeMap[period?.year]);
-                const dilutedEps = resolvePreferredEpsValue(
-                    summary?.dilutedEps ?? period?.dilutedEps,
-                    summary?.basicEps ?? period?.basicEps
-                );
-                const basicEps = resolvePreferredEpsValue(
-                    summary?.basicEps ?? period?.basicEps,
-                    summary?.dilutedEps ?? period?.dilutedEps
-                );
+                const epsMetrics = resolveStableEpsValues({
+                    dilutedEps: summary?.dilutedEps ?? period?.dilutedEps,
+                    basicEps: summary?.basicEps ?? period?.basicEps ?? period?.eps,
+                    netIncome: summary?.netIncome ?? period?.netIncome,
+                    dilutedShareCount: summary?.weightedDilutedShares ?? period?.weightedDilutedShares,
+                    basicShareCount: summary?.weightedBasicShares ?? period?.weightedBasicShares,
+                    shareCount
+                });
+                const dilutedEps = epsMetrics.dilutedEps;
+                const basicEps = epsMetrics.basicEps;
+                const eps = epsMetrics.eps;
                 const bps = shareCount > 0 ? safeDivide(parseNumberText(summary?.equity) ?? 0, shareCount) : null;
-                const per = close !== null && dilutedEps && dilutedEps > 0 ? safeDivide(close, dilutedEps) : null;
+                const per = close !== null && eps && eps > 0 ? safeDivide(close, eps) : null;
                 const pbr = close !== null && bps && bps > 0 ? safeDivide(close, bps) : null;
 
                 return {
@@ -1397,7 +1477,9 @@
                     label: period?.label || '',
                     yearEndClose: close,
                     shareCount: shareCount || null,
-                    eps: dilutedEps,
+                    operatingMargin: parseNumberText(summary?.operatingMargin),
+                    netMargin: parseNumberText(summary?.netMargin),
+                    eps,
                     dilutedEps,
                     basicEps,
                     bps,
@@ -1411,7 +1493,7 @@
 
         return rows.map((row, index) => {
             const previous = rows[index + 1] || null;
-            const changeKeys = ['yearEndClose', 'shareCount', 'eps', 'dilutedEps', 'basicEps', 'bps', 'per', 'pbr', 'roe', 'roic'];
+            const changeKeys = ['yearEndClose', 'shareCount', 'operatingMargin', 'netMargin', 'eps', 'dilutedEps', 'basicEps', 'bps', 'per', 'pbr', 'roe', 'roic'];
             const changes = changeKeys.reduce((accumulator, key) => {
                 accumulator[key] = computePeriodChange(row[key], previous?.[key]);
                 return accumulator;
@@ -1687,6 +1769,7 @@
         computeValuationOutputs,
         parseFormattedNumber,
         resolvePreferredEpsValue,
+        resolveStableEpsValues,
         panChartWindow,
         resolveChartAnchorRatio,
         resolveBaseValuationVariables,
