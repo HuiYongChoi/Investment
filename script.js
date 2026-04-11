@@ -1490,39 +1490,51 @@ function buildKakaoBriefingText() {
         .replace(/[ \t]+/g, ' ')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
-    // 소제목 줄에만 이모지 삽입 (줄 시작 기준, 본문 중간 단어에는 절대 적용 안 됨)
+    // 줄의 시작(^)에 해당 키워드가 있을 때만 이모지 삽입 (m 플래그로 다중 행 처리)
     text = text
-        .replace(/(^|\n)([^\n]*(?:핵심\s*요약|Investment\s*Thesis)[^\n]*)/g, '\n\n💡 $2\n ')
-        .replace(/(^|\n)([^\n]*(?:상승\s*촉매|강점|Catalysts)[^\n]*)/g, '\n\n🚀 $2\n ')
-        .replace(/(^|\n)([^\n]*(?:리스크|역풍|Risks)[^\n]*)/g, '\n\n⚠️ $2\n ')
-        .replace(/(^|\n)([^\n]*(?:재무|건전성)[^\n]*)/g, '\n\n🛡️ $2\n ')
-        .replace(/\n{3,}/g, '\n\n')  // 이모지 삽입 후 생긴 과잉 줄바꿈 정리
-        .trim();
+        .replace(/^(?:\[)?(?:핵심 요약|Investment Thesis)[^\n]*/gm, '💡 $&')
+        .replace(/^(?:\[)?(?:상승 촉매|강점|Catalysts)[^\n]*/gm, '🚀 $&')
+        .replace(/^(?:\[)?(?:리스크|역풍|Risks)[^\n]*/gm, '⚠️ $&')
+        .replace(/^(?:\[)?(?:재무|건전성)[^\n]*/gm, '🛡️ $&')
+        .replace(/^(?:\[)?(?:대응 전략|최종 투자|투자의견)[^\n]*/gm, '🎯 $&');
     return text;
 }
 
-function splitBriefingContextually(text, idealLength = 650) {
-    if (text.length <= 750) return [text];
+function splitBriefingContextually(text, maxLength = 650) {
+    const paragraphs = text.split('\n\n');
+    const chunks = [];
+    let currentChunk = '';
 
-    const searchFrom = Math.min(idealLength, text.length - 1);
+    for (const para of paragraphs) {
+        const separator = currentChunk.length > 0 ? '\n\n' : '';
+        const candidate = currentChunk + separator + para;
 
-    // 1순위: 이중 줄바꿈 (문단 끝)
-    let splitAt = text.lastIndexOf('\n\n', searchFrom);
-    // 2순위: 단일 줄바꿈 (줄 끝)
-    if (splitAt <= 0) splitAt = text.lastIndexOf('\n', searchFrom);
-    // 3순위: 문장 끝 '. ' 또는 '.\n'
-    if (splitAt <= 0) {
-        const dotSpace = text.lastIndexOf('. ', searchFrom);
-        const dotNewline = text.lastIndexOf('.\n', searchFrom);
-        splitAt = Math.max(dotSpace, dotNewline);
-        if (splitAt > 0 && text[splitAt] === '.') splitAt += 1; // 마침표 포함
+        if (candidate.length > maxLength && currentChunk.length > 0) {
+            // 현재 chunk 확정 후 새 chunk 시작
+            chunks.push(currentChunk);
+            // 단일 문단이 maxLength 초과 시 문장 단위 Fallback
+            if (para.length > maxLength) {
+                const sentences = para.split(/(?<=\. )/);
+                let sentenceChunk = '';
+                for (const sentence of sentences) {
+                    if ((sentenceChunk + sentence).length > maxLength && sentenceChunk.length > 0) {
+                        chunks.push(sentenceChunk.trimEnd());
+                        sentenceChunk = sentence;
+                    } else {
+                        sentenceChunk += sentence;
+                    }
+                }
+                currentChunk = sentenceChunk;
+            } else {
+                currentChunk = para;
+            }
+        } else {
+            currentChunk = candidate;
+        }
     }
-    // 최후 수단: 글자 수 기준
-    if (splitAt <= 0) splitAt = idealLength;
 
-    const part1 = text.substring(0, splitAt).trimEnd();
-    const part2 = text.substring(splitAt).trimStart();
-    return part2.length > 0 ? [part1, part2] : [part1];
+    if (currentChunk.length > 0) chunks.push(currentChunk);
+    return chunks.length > 0 ? chunks : [text];
 }
 
 function buildKakaoSharePayload(text, shareUrl) {
@@ -1636,7 +1648,7 @@ async function sendBriefingToKakao() {
         return;
     }
 
-    // 문맥 기반 스마트 분할 (최대 2개 메시지)
+    // 문맥 기반 스마트 분할 (문단 누적형, N개 동적 전송)
     const companyName = state.company?.name || '기업';
     const parts = splitBriefingContextually(fullText);
     const total = parts.length;
@@ -1650,7 +1662,7 @@ async function sendBriefingToKakao() {
         for (let i = 0; i < messages.length; i++) {
             await requestKakaoMemoSend(messages[i], shareUrl, accessToken);
             if (i < messages.length - 1) {
-                await new Promise(r => setTimeout(r, 300));
+                await new Promise(r => setTimeout(r, 400));
             }
         }
         writeKakaoStorage(KAKAO_STORAGE_TOKEN, accessToken);
