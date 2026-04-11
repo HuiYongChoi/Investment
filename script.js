@@ -1490,22 +1490,34 @@ function buildKakaoBriefingText() {
         .replace(/[ \t]+/g, ' ')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
-    // 주요 소제목에 이모지 삽입
+    // 소제목 줄에만 이모지 삽입 (줄 시작 기준, 본문 중간 단어에는 절대 적용 안 됨)
     text = text
-        .replace(/(핵심\s*요약)/g, '💡 $1')
-        .replace(/(상승\s*촉매\s*및\s*강점|상승\s*촉매|강점)/g, '🚀 $1')
-        .replace(/(핵심\s*리스크\s*및\s*매크로\s*역풍|리스크|역풍)/g, '⚠️ $1')
-        .replace(/(재무적\s*요새|재무\s*건전성|재무)/g, '🛡️ $1');
+        .replace(/(^|\n)([^\n]*(?:핵심\s*요약|Investment\s*Thesis)[^\n]*)/g, '\n\n💡 $2\n ')
+        .replace(/(^|\n)([^\n]*(?:상승\s*촉매|강점|Catalysts)[^\n]*)/g, '\n\n🚀 $2\n ')
+        .replace(/(^|\n)([^\n]*(?:리스크|역풍|Risks)[^\n]*)/g, '\n\n⚠️ $2\n ')
+        .replace(/(^|\n)([^\n]*(?:재무|건전성)[^\n]*)/g, '\n\n🛡️ $2\n ')
+        .replace(/\n{3,}/g, '\n\n')  // 이모지 삽입 후 생긴 과잉 줄바꿈 정리
+        .trim();
     return text;
 }
 
-function splitBriefingContextually(text, idealLength = 600) {
-    if (text.length <= 700) return [text];
+function splitBriefingContextually(text, idealLength = 650) {
+    if (text.length <= 750) return [text];
 
     const searchFrom = Math.min(idealLength, text.length - 1);
 
+    // 1순위: 이중 줄바꿈 (문단 끝)
     let splitAt = text.lastIndexOf('\n\n', searchFrom);
+    // 2순위: 단일 줄바꿈 (줄 끝)
     if (splitAt <= 0) splitAt = text.lastIndexOf('\n', searchFrom);
+    // 3순위: 문장 끝 '. ' 또는 '.\n'
+    if (splitAt <= 0) {
+        const dotSpace = text.lastIndexOf('. ', searchFrom);
+        const dotNewline = text.lastIndexOf('.\n', searchFrom);
+        splitAt = Math.max(dotSpace, dotNewline);
+        if (splitAt > 0 && text[splitAt] === '.') splitAt += 1; // 마침표 포함
+    }
+    // 최후 수단: 글자 수 기준
     if (splitAt <= 0) splitAt = idealLength;
 
     const part1 = text.substring(0, splitAt).trimEnd();
