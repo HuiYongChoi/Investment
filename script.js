@@ -1484,24 +1484,41 @@ function buildKakaoShareLinkUrl() {
 }
 
 function buildKakaoBriefingText() {
-    const rawText = document.getElementById('briefing-content')?.innerText || '';
-    // 줄바꿈 보존, 불필요한 공백/탭만 압축
-    let text = rawText
-        .replace(/[ \t]+/g, ' ')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
-    // 줄의 시작(^)에 해당 키워드가 있을 때만 이모지 삽입 (m 플래그로 다중 행 처리)
+    const container = document.getElementById('briefing-content');
+    if (!container) return '';
+
+    // DOM .briefing-section 구조에서 직접 추출 → \n\n 구분 보장
+    const sections = Array.from(container.querySelectorAll('.briefing-section'));
+    let text;
+    if (sections.length > 0) {
+        text = sections.map(section => {
+            const title = section.querySelector('h3')?.innerText?.trim() || '';
+            const body = section.querySelector('.briefing-body, .briefing-list')?.innerText
+                ?.replace(/[ \t]+/g, ' ').trim() || '';
+            return title && body ? `${title}\n${body}` : (title || body);
+        }).filter(Boolean).join('\n\n');
+    } else {
+        // 섹션 구조 없을 때 fallback
+        text = container.innerText.replace(/[ \t]+/g, ' ').trim();
+    }
+
+    text = text.replace(/\n{3,}/g, '\n\n').trim();
+
+    // 소제목 줄에만 이모지 삽입 (m 플래그, ^ 줄 시작 기준)
     text = text
         .replace(/^(?:\[)?(?:핵심 요약|Investment Thesis)[^\n]*/gm, '💡 $&')
         .replace(/^(?:\[)?(?:상승 촉매|강점|Catalysts)[^\n]*/gm, '🚀 $&')
         .replace(/^(?:\[)?(?:리스크|역풍|Risks)[^\n]*/gm, '⚠️ $&')
         .replace(/^(?:\[)?(?:재무|건전성)[^\n]*/gm, '🛡️ $&')
         .replace(/^(?:\[)?(?:대응 전략|최종 투자|투자의견)[^\n]*/gm, '🎯 $&');
+
     return text;
 }
 
-function splitBriefingContextually(text, maxLength = 650) {
-    const paragraphs = text.split('\n\n');
+function splitBriefingContextually(text, maxLength = 900) {
+    const paragraphs = text.split('\n\n').filter(p => p.trim().length > 0);
+    if (paragraphs.length <= 1 && text.length <= maxLength) return [text];
+
     const chunks = [];
     let currentChunk = '';
 
@@ -1510,11 +1527,10 @@ function splitBriefingContextually(text, maxLength = 650) {
         const candidate = currentChunk + separator + para;
 
         if (candidate.length > maxLength && currentChunk.length > 0) {
-            // 현재 chunk 확정 후 새 chunk 시작
-            chunks.push(currentChunk);
-            // 단일 문단이 maxLength 초과 시 문장 단위 Fallback
+            chunks.push(currentChunk.trimEnd());
+            // 단일 문단이 maxLength 초과 → 문장 단위 분할 (lookbehind 없는 안전한 방식)
             if (para.length > maxLength) {
-                const sentences = para.split(/(?<=\. )/);
+                const sentences = para.match(/[^.!?]*[.!?]+[\s]*/g) || [para];
                 let sentenceChunk = '';
                 for (const sentence of sentences) {
                     if ((sentenceChunk + sentence).length > maxLength && sentenceChunk.length > 0) {
@@ -1533,7 +1549,7 @@ function splitBriefingContextually(text, maxLength = 650) {
         }
     }
 
-    if (currentChunk.length > 0) chunks.push(currentChunk);
+    if (currentChunk.trim().length > 0) chunks.push(currentChunk.trimEnd());
     return chunks.length > 0 ? chunks : [text];
 }
 
