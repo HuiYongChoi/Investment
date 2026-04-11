@@ -7,6 +7,8 @@ const KAKAO_STORAGE_ERROR = 'invest_nav_kakao_error';
 const KAKAO_STORAGE_RETURN_URL = 'invest_nav_kakao_return_url';
 const KAKAO_STORAGE_PROFILE = 'invest_nav_kakao_profile';
 const KAKAO_STORAGE_MESSAGE_RETRY = 'invest_nav_kakao_message_retry';
+const KAKAO_STORAGE_PENDING_COMPANY = 'invest_nav_kakao_pending_company';
+const isKakaoBrowser = /KAKAOTALK/i.test(navigator.userAgent);
 const KAKAO_REQUIRED_SCOPES = Object.freeze(['talk_message', 'profile_nickname', 'profile_image']);
 const KAKAO_SHARE_ALLOWED_ORIGINS = Object.freeze([
     'https://hyfin.duckdns.org',
@@ -151,7 +153,7 @@ resetFinancialSectionToggles();
 startClock();
 initKakao();
 syncKakaoAuthUI(null, { loggedIn: false });
-restoreKakaoSession().finally(consumeKakaoMessage);
+restoreKakaoSession().finally(() => { consumeKakaoMessage(); restorePendingCompany(); });
 loadMarketSummary();
 loadCompanyDirectory();
 syncMobileTabUI();
@@ -213,6 +215,18 @@ function bindEvents() {
         refreshTechnicals();
     });
     document.getElementById('pdf-btn').addEventListener('click', exportPdf);
+    if (isKakaoBrowser) {
+        const pdfBtn = document.getElementById('pdf-btn');
+        if (pdfBtn) {
+            pdfBtn.style.opacity = '0.5';
+            const spanEl = pdfBtn.querySelector('span');
+            if (spanEl) spanEl.textContent = '⚠️ PDF 리포트';
+            const notice = document.createElement('div');
+            notice.style.cssText = 'color:#e53e3e;font-size:11px;margin-top:4px;text-align:center;line-height:1.3;';
+            notice.textContent = '카카오톡 내부에서는 PDF 다운로드가 지원되지 않습니다.';
+            pdfBtn.parentNode.insertBefore(notice, pdfBtn.nextSibling);
+        }
+    }
     document.getElementById('briefing-copy-btn').addEventListener('click', copyBriefingText);
     document.getElementById('briefing-share-btn').addEventListener('click', shareBriefingExternally);
     document.getElementById('btn-kakao-login').addEventListener('click', beginKakaoLogin);
@@ -1372,6 +1386,9 @@ function beginKakaoLogin(options = {}) {
     }
     writeKakaoStorage(KAKAO_STORAGE_RETURN_URL, location.href);
     writeKakaoStorage(KAKAO_STORAGE_ERROR, '');
+    if (state.company) {
+        writeKakaoStorage(KAKAO_STORAGE_PENDING_COMPANY, JSON.stringify(state.company));
+    }
     const authorizeOptions = {
         redirectUri: KAKAO_REDIRECT_URI,
         scope: options.scope || KAKAO_REQUIRED_SCOPES.join(',')
@@ -1397,6 +1414,24 @@ async function restoreKakaoSession() {
         console.warn('Kakao profile restore failed', error);
         expireKakaoSession('카카오 세션이 만료되어 다시 로그인이 필요합니다.');
     }
+}
+
+function restorePendingCompany() {
+    const raw = readKakaoStorage(KAKAO_STORAGE_PENDING_COMPANY);
+    if (!raw) return;
+    writeKakaoStorage(KAKAO_STORAGE_PENDING_COMPANY, '');
+    let company;
+    try {
+        company = JSON.parse(raw);
+    } catch (e) {
+        return;
+    }
+    if (!company || !company.name) return;
+    const companyInput = document.getElementById('company-input');
+    if (companyInput) {
+        companyInput.value = company.name;
+    }
+    startSearch();
 }
 
 async function logoutKakao() {
@@ -5090,6 +5125,10 @@ function renderBriefingSections(sections) {
 }
 
 async function exportPdf() {
+    if (isKakaoBrowser) {
+        alert('카카오톡 브라우저에서는 파일 다운로드가 제한됩니다.\n화면 우측 하단의 [⠇] 버튼을 눌러 \'다른 브라우저(Safari/Chrome)로 열기\'를 선택해주세요.');
+        return;
+    }
     if (!state.company) return;
     const model = extractBriefingPdfModel();
     if (!model) {
