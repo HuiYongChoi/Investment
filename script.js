@@ -8,7 +8,7 @@ const KAKAO_STORAGE_RETURN_URL = 'invest_nav_kakao_return_url';
 const KAKAO_STORAGE_PROFILE = 'invest_nav_kakao_profile';
 const KAKAO_STORAGE_MESSAGE_RETRY = 'invest_nav_kakao_message_retry';
 const KAKAO_REQUIRED_SCOPES = Object.freeze(['talk_message', 'profile_nickname', 'profile_image']);
-const KAKAO_MEMO_TEMPLATE_MAX_CHARS = 180;
+const KAKAO_MEMO_CHUNK_SIZE = 200;
 const KAKAO_SHARE_ALLOWED_ORIGINS = Object.freeze([
     'https://hyfin.duckdns.org',
     'http://54.116.99.19'
@@ -1481,18 +1481,22 @@ function safeJsonParse(raw) {
 }
 
 function buildKakaoShareLinkUrl() {
-    const currentOrigin = String(location.origin || '').trim();
-    const safeOrigin = KAKAO_SHARE_ALLOWED_ORIGINS.includes(currentOrigin)
-        ? currentOrigin
-        : KAKAO_SHARE_ALLOWED_ORIGINS[0];
-
-    return safeOrigin ? `${safeOrigin}/index.html` : KAKAO_SHARE_FALLBACK_URL;
+    return window.location.href;
 }
 
 function buildKakaoBriefingText() {
     const rawText = document.getElementById('briefing-content')?.innerText || '';
-    const normalized = rawText.replace(/\s+/g, ' ').trim().slice(0, 180);
-    return `[Investment Navigator] ${state.company?.name || '기업'} 브리핑\n\n${normalized}`;
+    return rawText.replace(/\s+/g, ' ').trim();
+}
+
+function splitTextIntoChunks(text, chunkSize) {
+    const chunks = [];
+    let remaining = text;
+    while (remaining.length > 0) {
+        chunks.push(remaining.slice(0, chunkSize));
+        remaining = remaining.slice(chunkSize);
+    }
+    return chunks.length > 0 ? chunks : [''];
 }
 
 function buildKakaoSharePayload(text, shareUrl) {
@@ -1596,7 +1600,7 @@ async function sendBriefingToKakao() {
         return;
     }
 
-    const text = buildKakaoBriefingText();
+    const fullText = buildKakaoBriefingText();
     const shareUrl = buildKakaoShareLinkUrl();
     const accessToken = getKakaoAccessToken();
 
@@ -1606,12 +1610,32 @@ async function sendBriefingToKakao() {
         return;
     }
 
+    // 헤더(첫 메시지) + 본문 청크 구성
+    const header = `[Investment Navigator] ${state.company?.name || '기업'} 브리핑\n\n`;
+    const firstBodySize = KAKAO_MEMO_CHUNK_SIZE - header.length;
+    const firstChunk = header + fullText.slice(0, firstBodySize);
+    const rest = fullText.slice(firstBodySize);
+    const allChunks = rest.length > 0
+        ? [firstChunk, ...splitTextIntoChunks(rest, KAKAO_MEMO_CHUNK_SIZE)]
+        : [firstChunk];
+
     try {
         await requestKakaoUserProfile(accessToken);
-        await requestKakaoMemoSend(text, shareUrl, accessToken);
+
+        for (let i = 0; i < allChunks.length; i++) {
+            await requestKakaoMemoSend(allChunks[i], shareUrl, accessToken);
+            // API 레이트 리밋 방지: 메시지 사이 300ms 대기
+            if (i < allChunks.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+        }
+
         writeKakaoStorage(KAKAO_STORAGE_TOKEN, accessToken);
         writeKakaoStorage(KAKAO_STORAGE_MESSAGE_RETRY, '');
-        alert('카카오톡 나에게 보내기가 완료되었습니다.');
+        const totalMsg = allChunks.length;
+        alert(totalMsg > 1
+            ? `카카오톡 나에게 보내기가 완료되었습니다. (총 ${totalMsg}개 메시지)`
+            : '카카오톡 나에게 보내기가 완료되었습니다.');
     } catch (error) {
         console.error("Kakao 403 Error Details: ", error);
         console.error('[Kakao Send Error] Request Link:', shareUrl);

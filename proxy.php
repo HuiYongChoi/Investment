@@ -1129,7 +1129,7 @@ try {
 
         $templateObject = [
             'object_type' => 'text',
-            'text' => utf8_prefix($text, 200),
+            'text' => $text,
             'link' => [
                 'web_url' => $linkUrl,
                 'mobile_web_url' => $linkUrl,
