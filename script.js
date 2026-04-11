@@ -8,7 +8,6 @@ const KAKAO_STORAGE_RETURN_URL = 'invest_nav_kakao_return_url';
 const KAKAO_STORAGE_PROFILE = 'invest_nav_kakao_profile';
 const KAKAO_STORAGE_MESSAGE_RETRY = 'invest_nav_kakao_message_retry';
 const KAKAO_REQUIRED_SCOPES = Object.freeze(['talk_message', 'profile_nickname', 'profile_image']);
-const KAKAO_MEMO_CHUNK_SIZE = 200;
 const KAKAO_SHARE_ALLOWED_ORIGINS = Object.freeze([
     'https://hyfin.duckdns.org',
     'http://54.116.99.19'
@@ -1489,16 +1488,6 @@ function buildKakaoBriefingText() {
     return rawText.replace(/\s+/g, ' ').trim();
 }
 
-function splitTextIntoChunks(text, chunkSize) {
-    const chunks = [];
-    let remaining = text;
-    while (remaining.length > 0) {
-        chunks.push(remaining.slice(0, chunkSize));
-        remaining = remaining.slice(chunkSize);
-    }
-    return chunks.length > 0 ? chunks : [''];
-}
-
 function buildKakaoSharePayload(text, shareUrl) {
     return {
         objectType: 'text',
@@ -1610,32 +1599,18 @@ async function sendBriefingToKakao() {
         return;
     }
 
-    // 헤더(첫 메시지) + 본문 청크 구성
+    // 헤더 추가 + 1,000자 제한 (필요시에만 절삭)
     const header = `[Investment Navigator] ${state.company?.name || '기업'} 브리핑\n\n`;
-    const firstBodySize = KAKAO_MEMO_CHUNK_SIZE - header.length;
-    const firstChunk = header + fullText.slice(0, firstBodySize);
-    const rest = fullText.slice(firstBodySize);
-    const allChunks = rest.length > 0
-        ? [firstChunk, ...splitTextIntoChunks(rest, KAKAO_MEMO_CHUNK_SIZE)]
-        : [firstChunk];
+    const messageBody = header + fullText;
+    const finalMessage = messageBody.length > 1000 ? messageBody.substring(0, 1000) + '...' : messageBody;
 
     try {
         await requestKakaoUserProfile(accessToken);
-
-        for (let i = 0; i < allChunks.length; i++) {
-            await requestKakaoMemoSend(allChunks[i], shareUrl, accessToken);
-            // API 레이트 리밋 방지: 메시지 사이 300ms 대기
-            if (i < allChunks.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 300));
-            }
-        }
+        await requestKakaoMemoSend(finalMessage, shareUrl, accessToken);
 
         writeKakaoStorage(KAKAO_STORAGE_TOKEN, accessToken);
         writeKakaoStorage(KAKAO_STORAGE_MESSAGE_RETRY, '');
-        const totalMsg = allChunks.length;
-        alert(totalMsg > 1
-            ? `카카오톡 나에게 보내기가 완료되었습니다. (총 ${totalMsg}개 메시지)`
-            : '카카오톡 나에게 보내기가 완료되었습니다.');
+        alert('카카오톡 나에게 보내기가 완료되었습니다.');
     } catch (error) {
         console.error("Kakao 403 Error Details: ", error);
         console.error('[Kakao Send Error] Request Link:', shareUrl);
