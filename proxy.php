@@ -21,6 +21,7 @@ const NAVER_STOCK_BASE = 'https://m.stock.naver.com/api/stock';
 const GEMINI_MODEL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
 const KAKAO_TOKEN_URL = 'https://kauth.kakao.com/oauth/token';
 const KAKAO_USER_URL = 'https://kapi.kakao.com/v2/user/me';
+const KAKAO_MEMO_SEND_URL = 'https://kapi.kakao.com/v2/api/talk/memo/default/send';
 
 function json_response(int $status, array $payload): void
 {
@@ -371,6 +372,15 @@ function safe_json_decode(string $raw): array
 {
     $decoded = json_decode($raw, true);
     return is_array($decoded) ? $decoded : ['raw' => $raw];
+}
+
+function utf8_prefix(string $text, int $limit): string
+{
+    if ($limit <= 0) return '';
+    if (function_exists('mb_substr')) {
+        return mb_substr($text, 0, $limit, 'UTF-8');
+    }
+    return substr($text, 0, $limit);
 }
 
 function yfinance_bridge_path(): string
@@ -1103,6 +1113,68 @@ try {
                 }
             }
         }
+        http_response_code($upstream['status']);
+        echo json_encode($responsePayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+
+    if ($action === 'kakao_memo') {
+        $payload = parse_json_body();
+        $accessToken = trim((string) ($payload['accessToken'] ?? ''));
+        $text = trim((string) ($payload['text'] ?? ''));
+        $linkUrl = trim((string) ($payload['linkUrl'] ?? ''));
+        if ($accessToken === '' || $text === '' || $linkUrl === '') {
+            json_response(400, ['error' => 'accessToken, text, and linkUrl are required']);
+        }
+
+        $templateObject = [
+            'object_type' => 'text',
+            'text' => utf8_prefix($text, 200),
+            'link' => [
+                'web_url' => $linkUrl,
+                'mobile_web_url' => $linkUrl,
+            ],
+            'button_title' => '웹에서 보기',
+        ];
+
+        $body = http_build_query([
+            'template_object' => json_encode($templateObject, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ]);
+
+        $upstream = request_upstream(
+            KAKAO_MEMO_SEND_URL,
+            [
+                'Authorization: Bearer ' . $accessToken,
+                'Content-Type: application/x-www-form-urlencoded;charset=utf-8',
+            ],
+            $body,
+            'POST'
+        );
+        $responsePayload = safe_json_decode($upstream['body']);
+        $responsePayload['status'] = $upstream['status'];
+        http_response_code($upstream['status']);
+        echo json_encode($responsePayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+
+    if ($action === 'kakao_user') {
+        $payload = parse_json_body();
+        $accessToken = trim((string) ($payload['accessToken'] ?? ''));
+        if ($accessToken === '') {
+            json_response(400, ['error' => 'accessToken is required']);
+        }
+
+        $upstream = request_upstream(
+            KAKAO_USER_URL,
+            [
+                'Authorization: Bearer ' . $accessToken,
+                'Content-Type: application/x-www-form-urlencoded;charset=utf-8',
+            ],
+            null,
+            'GET'
+        );
+        $responsePayload = safe_json_decode($upstream['body']);
+        $responsePayload['status'] = $upstream['status'];
         http_response_code($upstream['status']);
         echo json_encode($responsePayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;

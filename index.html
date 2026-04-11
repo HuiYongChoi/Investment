@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Investment Navigator</title>
     <meta name="description" content="DART 공시, Yahoo Finance 시세, Gemini 브리핑, Kakao 로그인을 결합한 투자 분석 대시보드">
-    <link rel="stylesheet" href="style.css?v=1.1.11">
+    <link rel="stylesheet" href="style.css?v=1.1.20">
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.6/kakao.min.js" crossorigin="anonymous"></script>
@@ -35,21 +35,21 @@
                     <button id="btn-kakao-logout" class="btn-outline">로그아웃</button>
                 </div>
             </div>
-            <button id="mobile-kakao-login" class="mobile-auth-chip hidden" type="button">
+            <button id="mobile-kakao-login" class="mobile-auth-chip hidden" type="button" hidden>
                 <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M12 2c-5.52 0-10 3.58-10 8 0 2.87 1.83 5.39 4.61 6.84L5.3 21.03l4.63-2.61c.67.11 1.36.17 2.07.17 5.52 0 10-3.58 10-8s-4.48-8-10-8z"/>
                 </svg>
                 <span>카카오</span>
             </button>
-            <div class="mobile-auth-inline">
-                <div id="mobile-kakao-profile" class="mobile-auth-chip hidden">
+            <div class="mobile-auth-inline hidden" hidden aria-hidden="true">
+                <div id="mobile-kakao-profile" class="mobile-auth-chip hidden" hidden>
                     <img id="mobile-kakao-profile-img" src="" alt="카카오 프로필">
                     <div class="mobile-auth-meta">
                         <span id="mobile-kakao-nickname">카카오 사용자</span>
                         <span id="mobile-kakao-login-state">카카오 로그인 유지 중</span>
                     </div>
                 </div>
-                <button id="mobile-kakao-logout" class="mobile-auth-logout hidden" type="button">로그아웃</button>
+                <button id="mobile-kakao-logout" class="mobile-auth-logout hidden" type="button" hidden>로그아웃</button>
             </div>
         </div>
     </header>
@@ -381,13 +381,23 @@
                         </label>
                         <label class="input-block">
                             <div class="field-label-row">
-                                <span>선행 희석 EPS (원)</span>
+                                <span>선행 EPS (원)</span>
+                                <button class="metric-help-icon metric-help-warn" type="button" aria-label="희석 EPS 검토 필요">
+                                    <span aria-hidden="true">!</span>
+                                    <span class="metric-help-tooltip" role="tooltip">희석 EPS를 별도로 확보하지 못해 현재는 EPS와 동일 값 또는 보정치로 표시될 수 있습니다. 투자 전 공시 원문에서 희석 EPS를 확인해 주세요.</span>
+                                </button>
                                 <span class="field-warning-icon hidden" id="forward-eps-warning" title="전망치 과열 주의">!</span>
                             </div>
                             <input type="text" id="m-forward-eps" class="tech-in tech-in-readonly" placeholder="-" readonly data-number-format="won" inputmode="numeric">
                         </label>
                         <label class="input-block">
-                            <span>TTM 희석 EPS (원)</span>
+                            <div class="field-label-row">
+                                <span>TTM EPS (원)</span>
+                                <button class="metric-help-icon metric-help-warn" type="button" aria-label="희석 EPS 검토 필요">
+                                    <span aria-hidden="true">!</span>
+                                    <span class="metric-help-tooltip" role="tooltip">희석 EPS를 별도로 확보하지 못해 현재는 EPS와 동일 값 또는 보정치로 표시될 수 있습니다. 투자 전 공시 원문에서 희석 EPS를 확인해 주세요.</span>
+                                </button>
+                            </div>
                             <input type="text" id="m-trailing-eps" class="tech-in tech-in-readonly" placeholder="-" readonly data-number-format="won" inputmode="numeric">
                         </label>
                         <label class="input-block">
@@ -422,7 +432,13 @@
                             </select>
                         </label>
                         <label class="input-block">
-                            <span>조정 희석 EPS (원)</span>
+                            <div class="field-label-row">
+                                <span>조정 EPS (원)</span>
+                                <button class="metric-help-icon metric-help-warn" type="button" aria-label="희석 EPS 검토 필요">
+                                    <span aria-hidden="true">!</span>
+                                    <span class="metric-help-tooltip" role="tooltip">희석 EPS를 별도로 확보하지 못해 현재는 EPS와 동일 값 또는 보정치로 표시될 수 있습니다. 투자 전 공시 원문에서 희석 EPS를 확인해 주세요.</span>
+                                </button>
+                            </div>
                             <input type="text" id="m-adjusted-eps" class="tech-in" placeholder="0" data-number-format="won" inputmode="numeric">
                         </label>
                         <label class="input-block">
@@ -430,7 +446,7 @@
                             <input type="number" id="m-target-per" class="tech-in" placeholder="15" step="0.1">
                         </label>
                         <label class="input-block">
-                            <span>희석 EPS 예상 성장률 (%)</span>
+                            <span>EPS 예상 성장률 (%)</span>
                             <input type="number" id="m-eps-growth" class="tech-in" placeholder="0" step="0.1">
                         </label>
                         <label class="input-block">
@@ -537,6 +553,10 @@
                         <i data-lucide="copy"></i>
                         <span id="briefing-copy-label">텍스트 복사</span>
                     </button>
+                    <button class="btn-outline briefing-share-btn" id="briefing-share-btn" type="button">
+                        <i data-lucide="share-2"></i>
+                        <span id="briefing-share-label">공유하기</span>
+                    </button>
                     <button class="btn-outline btn-kakao-share" id="kakao-send-btn" type="button">
                         <span class="kakao-send-icon" aria-hidden="true">
                             <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
@@ -604,7 +624,7 @@
         </button>
     </nav>
 
-    <script src="dashboard_logic.js?v=1.1.8"></script>
-    <script src="script.js?v=1.1.8"></script>
+    <script src="dashboard_logic.js?v=1.1.9"></script>
+    <script src="script.js?v=1.1.20"></script>
 </body>
 </html>

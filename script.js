@@ -6,6 +6,14 @@ const KAKAO_STORAGE_TOKEN = 'invest_nav_kakao_token';
 const KAKAO_STORAGE_ERROR = 'invest_nav_kakao_error';
 const KAKAO_STORAGE_RETURN_URL = 'invest_nav_kakao_return_url';
 const KAKAO_STORAGE_PROFILE = 'invest_nav_kakao_profile';
+const KAKAO_STORAGE_MESSAGE_RETRY = 'invest_nav_kakao_message_retry';
+const KAKAO_REQUIRED_SCOPES = Object.freeze(['talk_message', 'profile_nickname', 'profile_image']);
+const KAKAO_MEMO_TEMPLATE_MAX_CHARS = 180;
+const KAKAO_SHARE_ALLOWED_ORIGINS = Object.freeze([
+    'https://hyfin.duckdns.org',
+    'http://54.116.99.19'
+]);
+const KAKAO_SHARE_FALLBACK_URL = 'https://hyfin.duckdns.org/index.html';
 const BRIEFING_MODEL_CANDIDATES = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 const KAKAO_REDIRECT_URI = InvestmentLogic.resolveKakaoRedirectUri(location.href);
 const CHART_HISTORY_YEARS = 5;
@@ -45,6 +53,7 @@ const CHART_MA_COLORS = {
     200: '#f97316'
 };
 const DILUTED_EPS_TOOLTIP_TEXT = '스톡옵션, 전환사채 등 잠재적 주식이 모두 실제 주식으로 전환되었다고 가정하고 보수적으로 계산한 1주당 순이익입니다.';
+const DILUTED_EPS_REVIEW_TOOLTIP_TEXT = '희석 EPS를 별도로 확보하지 못해 현재는 EPS와 동일 값 또는 보정치로 표시될 수 있습니다. 투자 전 공시 원문에서 희석 EPS를 확인해 주세요.';
 
 const COMPANY_MAP = {
     '삼성전자': { corpCode: '00126380', stockCode: '005930', market: 'KOSPI' },
@@ -133,6 +142,7 @@ let priceHoverIndex = null;
 let briefingRefreshTimer = null;
 let briefingButtonResetTimer = null;
 let briefingCopyResetTimer = null;
+let briefingShareResetTimer = null;
 let marketSummaryReloadTimer = null;
 
 lucide.createIcons();
@@ -205,6 +215,7 @@ function bindEvents() {
     });
     document.getElementById('pdf-btn').addEventListener('click', exportPdf);
     document.getElementById('briefing-copy-btn').addEventListener('click', copyBriefingText);
+    document.getElementById('briefing-share-btn').addEventListener('click', shareBriefingExternally);
     document.getElementById('btn-kakao-login').addEventListener('click', beginKakaoLogin);
     document.getElementById('btn-kakao-logout').addEventListener('click', logoutKakao);
     document.getElementById('mobile-kakao-login')?.addEventListener('click', beginKakaoLogin);
@@ -244,6 +255,7 @@ function bindEvents() {
         input.addEventListener('blur', onValuationManualInput);
     });
     window.addEventListener('resize', debounce(() => {
+        syncKakaoAuthSurfaceVisibility(isKakaoLoggedInState());
         syncMobileTabUI();
         positionMetricTooltips();
         if (!document.getElementById('dashboard').classList.contains('hidden')) {
@@ -402,6 +414,30 @@ function setBriefingCopyButtonState(mode = 'idle') {
     label.textContent = '텍스트 복사';
 }
 
+function setBriefingShareButtonState(mode = 'idle') {
+    const button = document.getElementById('briefing-share-btn');
+    const label = document.getElementById('briefing-share-label');
+    if (!button || !label) return;
+
+    button.classList.remove('is-complete');
+
+    if (briefingShareResetTimer) {
+        clearTimeout(briefingShareResetTimer);
+        briefingShareResetTimer = null;
+    }
+
+    if (mode === 'complete') {
+        button.classList.add('is-complete');
+        label.textContent = '공유 준비 완료!';
+        briefingShareResetTimer = setTimeout(() => {
+            setBriefingShareButtonState('idle');
+        }, 2000);
+        return;
+    }
+
+    label.textContent = '공유하기';
+}
+
 function renderBriefingIdle(message = '분석 항목을 고른 뒤 보고서 작성 버튼을 눌러 AI 리포트를 생성하세요.') {
     document.getElementById('briefing-meta').textContent = '선택한 항목만 반영해 리포트를 생성합니다.';
     document.getElementById('briefing-content').innerHTML = `
@@ -450,6 +486,31 @@ async function copyBriefingText() {
     } catch (error) {
         console.error('briefing copy failed', error);
         alert('텍스트 복사에 실패했습니다.');
+    }
+}
+
+async function shareBriefingExternally() {
+    const text = buildKakaoBriefingText();
+    const shareUrl = buildKakaoShareLinkUrl();
+    const shareData = {
+        title: `[Investment Navigator] ${state.company?.name || '기업'} 브리핑`,
+        text,
+        url: shareUrl
+    };
+
+    try {
+        if (navigator.share) {
+            await navigator.share(shareData);
+        } else {
+            await navigator.clipboard.writeText(`${shareData.title}\n\n${text}\n\n${shareUrl}`);
+        }
+        setBriefingShareButtonState('complete');
+    } catch (error) {
+        if (error?.name === 'AbortError') {
+            return;
+        }
+        console.error('briefing external share failed', error);
+        alert('공유에 실패했습니다. 다시 시도해 주세요.');
     }
 }
 
@@ -813,6 +874,76 @@ function readStoredKakaoProfile() {
     }
 }
 
+function isMobileHeaderAuthViewport() {
+    return window.matchMedia('(max-width: 860px)').matches;
+}
+
+function isKakaoLoggedInState() {
+    if (window.Kakao?.Auth?.getAccessToken?.()) {
+        return true;
+    }
+    return Boolean(readKakaoStorage(KAKAO_STORAGE_TOKEN));
+}
+
+function syncKakaoAuthSurfaceVisibility(isLoggedIn = false) {
+    const desktopAuthArea = document.getElementById('kakao-auth-area');
+    const desktopLogin = document.getElementById('btn-kakao-login');
+    const desktopProfile = document.getElementById('kakao-user-profile');
+    const mobileLogin = document.getElementById('mobile-kakao-login');
+    const mobileInline = document.querySelector('.mobile-auth-inline');
+    const mobileProfile = document.getElementById('mobile-kakao-profile');
+    const mobileLogout = document.getElementById('mobile-kakao-logout');
+    const isMobile = isMobileHeaderAuthViewport();
+
+    if (isMobile) {
+        desktopAuthArea?.classList.add('hidden');
+        desktopAuthArea?.setAttribute('aria-hidden', 'true');
+        mobileInline?.classList.remove('hidden');
+        mobileInline?.removeAttribute('hidden');
+        mobileInline?.setAttribute('aria-hidden', 'false');
+        if (isLoggedIn) {
+            desktopLogin?.classList.add('hidden');
+            desktopProfile?.classList.add('hidden');
+            mobileLogin?.classList.add('hidden');
+            mobileLogin?.setAttribute('hidden', '');
+            mobileProfile?.classList.remove('hidden');
+            mobileProfile?.removeAttribute('hidden');
+            mobileLogout?.classList.remove('hidden');
+            mobileLogout?.removeAttribute('hidden');
+        } else {
+            desktopLogin?.classList.remove('hidden');
+            desktopProfile?.classList.add('hidden');
+            mobileLogin?.classList.remove('hidden');
+            mobileLogin?.removeAttribute('hidden');
+            mobileProfile?.classList.add('hidden');
+            mobileProfile?.setAttribute('hidden', '');
+            mobileLogout?.classList.add('hidden');
+            mobileLogout?.setAttribute('hidden', '');
+        }
+        return;
+    }
+
+    desktopAuthArea?.classList.remove('hidden');
+    desktopAuthArea?.setAttribute('aria-hidden', 'false');
+    mobileInline?.classList.add('hidden');
+    mobileInline?.setAttribute('hidden', '');
+    mobileInline?.setAttribute('aria-hidden', 'true');
+    mobileLogin?.classList.add('hidden');
+    mobileLogin?.setAttribute('hidden', '');
+    mobileProfile?.classList.add('hidden');
+    mobileProfile?.setAttribute('hidden', '');
+    mobileLogout?.classList.add('hidden');
+    mobileLogout?.setAttribute('hidden', '');
+
+    if (isLoggedIn) {
+        desktopLogin?.classList.add('hidden');
+        desktopProfile?.classList.remove('hidden');
+    } else {
+        desktopLogin?.classList.remove('hidden');
+        desktopProfile?.classList.add('hidden');
+    }
+}
+
 function syncKakaoAuthUI(profile, options = {}) {
     const isLoggedIn = options.loggedIn === true;
     const isFallback = options.fallback === true;
@@ -820,19 +951,7 @@ function syncKakaoAuthUI(profile, options = {}) {
     const image = profile?.image || '';
     const stateText = isFallback ? '카카오 로그인 유지 중' : '카카오 프로필 동기화 완료';
 
-    if (isLoggedIn) {
-        document.getElementById('btn-kakao-login').classList.add('hidden');
-        document.getElementById('kakao-user-profile').classList.remove('hidden');
-        document.getElementById('mobile-kakao-login')?.classList.add('hidden');
-        document.getElementById('mobile-kakao-profile')?.classList.remove('hidden');
-        document.getElementById('mobile-kakao-logout')?.classList.remove('hidden');
-    } else {
-        document.getElementById('btn-kakao-login').classList.remove('hidden');
-        document.getElementById('kakao-user-profile').classList.add('hidden');
-        document.getElementById('mobile-kakao-login')?.classList.remove('hidden');
-        document.getElementById('mobile-kakao-profile')?.classList.add('hidden');
-        document.getElementById('mobile-kakao-logout')?.classList.add('hidden');
-    }
+    syncKakaoAuthSurfaceVisibility(isLoggedIn);
 
     if (!isLoggedIn) {
         setTextIfPresent('kakao-nickname', '카카오 로그인');
@@ -1241,7 +1360,7 @@ function initKakao() {
     }
 }
 
-function beginKakaoLogin() {
+function beginKakaoLogin(options = {}) {
     if (!window.Kakao) {
         alert('카카오 SDK를 불러오지 못했습니다.');
         return;
@@ -1254,39 +1373,30 @@ function beginKakaoLogin() {
     }
     writeKakaoStorage(KAKAO_STORAGE_RETURN_URL, location.href);
     writeKakaoStorage(KAKAO_STORAGE_ERROR, '');
-    Kakao.Auth.authorize({
-        redirectUri: KAKAO_REDIRECT_URI
-    });
+    const authorizeOptions = {
+        redirectUri: KAKAO_REDIRECT_URI,
+        scope: options.scope || KAKAO_REQUIRED_SCOPES.join(',')
+    };
+    if (options.forceConsent) {
+        authorizeOptions.prompt = 'consent';
+    }
+    Kakao.Auth.authorize(authorizeOptions);
 }
 
 async function restoreKakaoSession() {
-    const accessToken = sessionStorage.getItem(KAKAO_STORAGE_TOKEN) || localStorage.getItem(KAKAO_STORAGE_TOKEN) || (window.Kakao ? Kakao.Auth.getAccessToken() : '');
-    const storedProfile = readStoredKakaoProfile();
+    const accessToken = getKakaoAccessToken();
     if (!accessToken) return;
     try {
         if (window.Kakao) {
             Kakao.Auth.setAccessToken(accessToken);
         }
+        const profile = await requestKakaoUserProfile(accessToken);
         writeKakaoStorage(KAKAO_STORAGE_TOKEN, accessToken);
-        if (storedProfile) {
-            applyKakaoProfile(storedProfile, { fallback: true });
-        } else {
-            syncKakaoAuthUI({ nickname: '카카오 사용자', image: '' }, { loggedIn: true, fallback: true });
-        }
-        if (!window.Kakao) return;
-        const profile = await Kakao.API.request({ url: '/v2/user/me' });
         applyKakaoProfile(profile);
         writeKakaoStorage(KAKAO_STORAGE_ERROR, '');
     } catch (error) {
-        console.warn('Kakao profile restore fallback', error);
-        writeKakaoStorage(KAKAO_STORAGE_TOKEN, accessToken);
-        if (storedProfile) {
-            applyKakaoProfile(storedProfile, { fallback: true });
-            writeKakaoStorage(KAKAO_STORAGE_ERROR, '');
-            return;
-        }
-        syncKakaoAuthUI({ nickname: '카카오 사용자', image: '' }, { loggedIn: true, fallback: true });
-        writeKakaoStorage(KAKAO_STORAGE_ERROR, '카카오 프로필을 기본 상태로 연결했습니다.');
+        console.warn('Kakao profile restore failed', error);
+        expireKakaoSession('카카오 세션이 만료되어 다시 로그인이 필요합니다.');
     }
 }
 
@@ -1322,24 +1432,29 @@ function consumeKakaoMessage() {
 
 function logKakaoSendError(error) {
     const response =
+        error?.data ??
         error?.response?.data ??
-        error?.responseJSON ??
         error?.response ??
+        error?.responseJSON ??
+        safeJsonParse(error?.xhr?.responseText) ??
         error?.error ??
         error?.body ??
         null;
     const code =
-        error?.code ??
         response?.code ??
+        error?.code ??
         response?.error_code ??
+        error?.status ??
+        error?.xhr?.status ??
         error?.status ??
         response?.status ??
         'unknown';
     const msg =
-        error?.msg ??
         response?.msg ??
+        error?.msg ??
         response?.message ??
         response?.error_description ??
+        error?.xhr?.responseText ??
         error?.message ??
         'Unknown Kakao send error';
 
@@ -1354,9 +1469,125 @@ function logKakaoSendError(error) {
     });
 }
 
+function safeJsonParse(raw) {
+    if (typeof raw !== 'string' || raw.trim() === '') {
+        return null;
+    }
+    try {
+        return JSON.parse(raw);
+    } catch (error) {
+        return null;
+    }
+}
+
+function buildKakaoShareLinkUrl() {
+    const currentOrigin = String(location.origin || '').trim();
+    const safeOrigin = KAKAO_SHARE_ALLOWED_ORIGINS.includes(currentOrigin)
+        ? currentOrigin
+        : KAKAO_SHARE_ALLOWED_ORIGINS[0];
+
+    return safeOrigin ? `${safeOrigin}/index.html` : KAKAO_SHARE_FALLBACK_URL;
+}
+
+function buildKakaoBriefingText() {
+    const rawText = document.getElementById('briefing-content')?.innerText || '';
+    const normalized = rawText.replace(/\s+/g, ' ').trim().slice(0, 180);
+    return `[Investment Navigator] ${state.company?.name || '기업'} 브리핑\n\n${normalized}`;
+}
+
+function buildKakaoSharePayload(text, shareUrl) {
+    return {
+        objectType: 'text',
+        text,
+        link: {
+            webUrl: shareUrl,
+            mobileWebUrl: shareUrl
+        },
+        buttons: [
+            {
+                title: '웹에서 보기',
+                link: {
+                    webUrl: shareUrl,
+                    mobileWebUrl: shareUrl
+                }
+            }
+        ]
+    };
+}
+
+async function requestKakaoMemoSend(messageText, shareUrl, accessToken) {
+    const response = await fetch(buildProxyPostUrl('kakao_memo', '', 'kakao_memo'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            accessToken,
+            text: messageText,
+            linkUrl: shareUrl
+        })
+    });
+    const contentType = response.headers.get('content-type') || '';
+    const data = contentType.includes('application/json')
+        ? await response.json()
+        : { raw: await response.text() };
+    if (!response.ok) {
+        const error = new Error(
+            typeof data?.error === 'string'
+                ? data.error
+                : data?.msg || data?.message || response.statusText || 'Kakao memo send failed'
+        );
+        error.status = response.status;
+        error.data = data;
+        throw error;
+    }
+    return data;
+}
+
+async function requestKakaoUserProfile(accessToken) {
+    const response = await fetch(buildProxyPostUrl('kakao_user', '', 'kakao_user'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken })
+    });
+    const contentType = response.headers.get('content-type') || '';
+    const data = contentType.includes('application/json')
+        ? await response.json()
+        : { raw: await response.text() };
+    if (!response.ok) {
+        const error = new Error(
+            typeof data?.error === 'string'
+                ? data.error
+                : data?.msg || data?.message || response.statusText || 'Kakao user profile validation failed'
+        );
+        error.status = response.status;
+        error.data = data;
+        throw error;
+    }
+    return data;
+}
+
+function getKakaoAccessToken() {
+    return (window.Kakao?.Auth?.getAccessToken?.() || readKakaoStorage(KAKAO_STORAGE_TOKEN) || '').trim();
+}
+
+function getKakaoErrorMeta(error) {
+    const payload = error?.data ?? safeJsonParse(error?.xhr?.responseText) ?? error?.response ?? null;
+    return {
+        payload,
+        kakaoCode: String(payload?.code ?? error?.code ?? ''),
+        responseStatus: String(payload?.status ?? error?.status ?? error?.xhr?.status ?? ''),
+        kakaoMessage: String(payload?.msg ?? payload?.message ?? error?.message ?? '').toLowerCase()
+    };
+}
+
+function expireKakaoSession(message = '카카오 세션이 만료되었습니다. 다시 로그인해 주세요.') {
+    clearKakaoSession();
+    writeKakaoStorage(KAKAO_STORAGE_ERROR, message);
+    setStatus(`카카오 로그인 안내: ${message}`, 'warn');
+}
+
 async function sendBriefingToKakao() {
-    if (!window.Kakao || !Kakao.Auth.getAccessToken()) {
-        alert('카카오 로그인이 필요합니다.');
+    if (!window.Kakao) {
+        alert('카카오 SDK를 불러오지 못했습니다.');
         return;
     }
 
@@ -1365,24 +1596,45 @@ async function sendBriefingToKakao() {
         return;
     }
 
-    const text = document.getElementById('briefing-content').innerText.replace(/\s+/g, ' ').trim().slice(0, 350);
+    const text = buildKakaoBriefingText();
+    const shareUrl = buildKakaoShareLinkUrl();
+    const accessToken = getKakaoAccessToken();
+
+    if (!accessToken) {
+        alert('카카오 로그인이 필요합니다. 다시 로그인해 주세요.');
+        beginKakaoLogin({ scope: KAKAO_REQUIRED_SCOPES.join(',') });
+        return;
+    }
+
     try {
-        await Kakao.API.request({
-            url: '/v2/api/talk/memo/default/send',
-            data: {
-                template_object: {
-                    object_type: 'text',
-                    text: `[Investment Navigator] ${state.company.name} 브리핑\n\n${text}`,
-                    link: {
-                        web_url: location.href,
-                        mobile_web_url: location.href
-                    }
-                }
-            }
-        });
+        await requestKakaoUserProfile(accessToken);
+        await requestKakaoMemoSend(text, shareUrl, accessToken);
+        writeKakaoStorage(KAKAO_STORAGE_TOKEN, accessToken);
+        writeKakaoStorage(KAKAO_STORAGE_MESSAGE_RETRY, '');
         alert('카카오톡 나에게 보내기가 완료되었습니다.');
     } catch (error) {
+        console.error("Kakao 403 Error Details: ", error);
+        console.error('[Kakao Send Error] Request Link:', shareUrl);
         logKakaoSendError(error);
+        const { kakaoCode, responseStatus, kakaoMessage } = getKakaoErrorMeta(error);
+        const alreadyRetriedConsent = readKakaoStorage(KAKAO_STORAGE_MESSAGE_RETRY) === '1';
+        const shouldRetryConsent = (kakaoCode === '-402' || kakaoMessage.includes('insufficient scopes'))
+            && !alreadyRetriedConsent;
+        if (shouldRetryConsent) {
+            writeKakaoStorage(KAKAO_STORAGE_MESSAGE_RETRY, '1');
+            alert('카카오톡 메시지 권한 동의가 필요합니다. 다시 로그인해 주세요.');
+            beginKakaoLogin({ forceConsent: true, scope: 'talk_message' });
+            return;
+        }
+        if (kakaoCode === '-401' || responseStatus === '401' || kakaoMessage.includes('access token')) {
+            expireKakaoSession('카카오 세션이 만료되었습니다. 다시 로그인해 주세요.');
+            alert('카카오 세션이 만료되었습니다. 다시 로그인해 주세요.');
+            return;
+        }
+        if (kakaoCode === '-403' || responseStatus === '403' || kakaoMessage.includes('forbidden')) {
+            alert('카카오 서버가 나에게 보내기 요청을 거부했습니다. 공유하기 버튼은 별도로 사용하시고, 나에게 보내기는 재로그인 후 다시 시도해 주세요.');
+            return;
+        }
         alert('카카오톡 전송에 실패했습니다. 메시지 API 권한과 로그인 상태를 확인해주세요.');
     }
 }
@@ -2143,23 +2395,27 @@ function buildDartCompanySearchUrl(company) {
 
 function buildFinancialRows(periods) {
     const fallbackShareCount = Number(state.quote?.sharesOutstanding) || 0;
+    const referencePeriods = state.annualsAll.length ? state.annualsAll : periods;
     return periods.map((period) => {
         const summary = period.summary || summarizeStatement(period.list);
+        const resolvedShareCount = InvestmentLogic.resolvePeriodShareCount(period, referencePeriods, fallbackShareCount);
         const epsMetrics = InvestmentLogic.resolveStableEpsValues({
             dilutedEps: summary?.dilutedEps,
             basicEps: summary?.basicEps ?? summary?.eps,
             netIncome: summary?.netIncome,
             dilutedShareCount: summary?.weightedDilutedShares,
             basicShareCount: summary?.weightedBasicShares,
-            shareCount: period?.shareCount || fallbackShareCount
+            shareCount: resolvedShareCount
         });
         return {
             ...period,
+            shareCount: period?.shareCount || resolvedShareCount,
             summary: {
                 ...summary,
                 eps: epsMetrics.eps,
                 dilutedEps: epsMetrics.dilutedEps,
-                basicEps: epsMetrics.basicEps
+                basicEps: epsMetrics.basicEps,
+                dilutedEpsNeedsReview: epsMetrics.dilutedEpsNeedsReview
             }
         };
     });
@@ -2326,18 +2582,30 @@ function renderChangeBadge(growth) {
     return `<span class="fin-chg ${chgClass}">${growth > 0 ? '+' : ''}${growth.toFixed(1)}%</span>`;
 }
 
-function renderMetricLabel(label, tooltipText = '') {
-    const safeLabel = escapeHtml(label);
+function renderMetricHelpIcon(iconText, tooltipText, variantClass = '') {
     if (!tooltipText) {
+        return '';
+    }
+    const buttonClass = ['metric-help-icon', variantClass].filter(Boolean).join(' ');
+    const ariaLabel = iconText === '!' ? `${iconText} 경고` : `${iconText} 설명`;
+    return `
+        <button class="${buttonClass}" type="button" aria-label="${escapeHtml(ariaLabel)} 보기">
+            <span aria-hidden="true">${escapeHtml(iconText)}</span>
+            <span class="metric-help-tooltip" role="tooltip">${escapeHtml(tooltipText)}</span>
+        </button>
+    `;
+}
+
+function renderMetricLabel(label, tooltipText = '', warningText = '') {
+    const safeLabel = escapeHtml(label);
+    if (!tooltipText && !warningText) {
         return safeLabel;
     }
     return `
         <span class="metric-label-cell">
             <span>${safeLabel}</span>
-            <button class="metric-help-icon" type="button" aria-label="${escapeHtml(label)} 설명 보기">
-                <span aria-hidden="true">?</span>
-                <span class="metric-help-tooltip" role="tooltip">${escapeHtml(tooltipText)}</span>
-            </button>
+            ${renderMetricHelpIcon('?', tooltipText)}
+            ${renderMetricHelpIcon('!', warningText, 'metric-help-warn')}
         </span>
     `;
 }
@@ -2378,6 +2646,7 @@ function renderHistoricalMetricsTable(containerId, rows) {
         return;
     }
 
+    const dilutedEpsNeedsReview = rows.some((row) => row?.dilutedEpsNeedsReview);
     const metricRows = [
         { label: '연말 종가', key: 'yearEndClose', type: 'money' },
         { label: '발행주식수', key: 'shareCount', type: 'shares' },
@@ -2387,7 +2656,13 @@ function renderHistoricalMetricsTable(containerId, rows) {
         { label: '영업이익률', key: 'operatingMargin', type: 'pct' },
         { label: '순이익률', key: 'netMargin', type: 'pct' },
         { label: 'EPS', key: 'basicEps', type: 'money' },
-        { label: '희석 EPS', key: 'dilutedEps', type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
+        {
+            label: '희석 EPS',
+            key: 'dilutedEps',
+            type: 'money',
+            tooltip: DILUTED_EPS_TOOLTIP_TEXT,
+            warning: dilutedEpsNeedsReview ? DILUTED_EPS_REVIEW_TOOLTIP_TEXT : ''
+        },
         { label: 'ROE', key: 'roe', type: 'pct' },
         { label: 'ROIC', key: 'roic', type: 'pct' }
     ];
@@ -2395,7 +2670,7 @@ function renderHistoricalMetricsTable(containerId, rows) {
     const headerCells = rows.map((row) => `<th>${row.year}</th>`).join('');
     const body = metricRows.map((metric) => `
         <tr>
-            <td>${renderMetricLabel(metric.label, metric.tooltip)}</td>
+            <td>${renderMetricLabel(metric.label, metric.tooltip, metric.warning)}</td>
             ${rows.map((row) => {
                 return `<td><span class="fin-val">${formatMetricValue(row[metric.key], metric.type)}</span>${renderChangeBadge(row?.changes?.[metric.key])}</td>`;
             }).join('')}
@@ -2426,11 +2701,18 @@ function renderQuarterlyMetricsTable(containerId, periods) {
     }
 
     const summaries = buildFinancialRows(validPeriods);
+    const dilutedEpsNeedsReview = summaries.some((period) => period?.summary?.dilutedEpsNeedsReview);
     const rows = [
         { label: '영업이익률', key: 'operatingMargin', type: 'pct' },
         { label: '순이익률',   key: 'netMargin',       type: 'pct' },
         { label: 'EPS',        key: 'basicEps',        type: 'money' },
-        { label: '희석 EPS',   key: 'dilutedEps',      type: 'money', tooltip: DILUTED_EPS_TOOLTIP_TEXT },
+        {
+            label: '희석 EPS',
+            key: 'dilutedEps',
+            type: 'money',
+            tooltip: DILUTED_EPS_TOOLTIP_TEXT,
+            warning: dilutedEpsNeedsReview ? DILUTED_EPS_REVIEW_TOOLTIP_TEXT : ''
+        },
         { label: 'ROE',        key: 'roe',             type: 'pct' },
         { label: 'ROA',        key: 'roa',             type: 'pct' },
         { label: '부채비율',   key: 'debtRatio',       type: 'pct' },
@@ -2453,7 +2735,7 @@ function renderQuarterlyMetricsTable(containerId, periods) {
             const growth = computeGrowth(current, prev);
             return `<td><span class="fin-val">${formatMetricValue(current, row.type)}</span>${renderChangeBadge(growth)}</td>`;
         }).join('');
-        return `<tr><td>${renderMetricLabel(row.label, row.tooltip)}</td>${cells}</tr>`;
+        return `<tr><td>${renderMetricLabel(row.label, row.tooltip, row.warning)}</td>${cells}</tr>`;
     }).join('');
 
     container.innerHTML = `
@@ -2887,13 +3169,17 @@ function calcMetrics() {
     renderValuationPresetGuide(selectedSectorPreset);
     renderForwardEpsWarning(forwardOverheat);
 
+    const dilutedEpsReviewNeeded = Boolean(
+        state.quote?.dilutedEpsNeedsReview
+        || state.summaries.some((entry) => entry?.summary?.dilutedEpsNeedsReview)
+    );
     const epsSourceLabel = epsSource === 'manual'
-        ? '조정 희석 EPS'
+        ? '조정 EPS'
         : epsSource === 'forward'
-            ? '선행 희석 EPS'
+            ? '선행 EPS'
             : epsSource === 'ttm'
-                ? 'TTM 희석 EPS'
-                : '희석 EPS';
+                ? 'TTM EPS'
+                : 'EPS';
     const hasUpsideInputs = price > 0 && finalTargetPrice > 0;
 
     state.lastAnalysis.metrics = {
@@ -2925,16 +3211,16 @@ function calcMetrics() {
                     : '-',
             tone: lossMaking ? 'warn' : '',
             hint: lossMaking
-                ? `희석 EPS 기준: ${epsSourceLabel} · 적자 구간은 PER보다 PBR 밴드와 자산가치를 우선 확인하세요.`
+                ? `EPS 기준: ${epsSourceLabel} · 적자 구간은 PER보다 PBR 밴드와 자산가치를 우선 확인하세요.${dilutedEpsReviewNeeded ? ' 희석 EPS는 공시 원문 확인이 필요합니다.' : ''}`
                 : finalTargetPrice
-                ? `PER 모델 ${Math.round(perFairValue).toLocaleString()}원 × 무형자산 가산 ${premiumRatePct.toFixed(0)}% · 희석 EPS 기준: ${epsSourceLabel}`
-                : '희석 EPS와 목표 PER가 잡히면 섹터 프리미엄을 반영합니다.'
+                ? `PER 모델 ${Math.round(perFairValue).toLocaleString()}원 × 무형자산 가산 ${premiumRatePct.toFixed(0)}% · EPS 기준: ${epsSourceLabel}${dilutedEpsReviewNeeded ? ' · 희석 EPS는 별도 검토 권장' : ''}`
+                : 'EPS와 목표 PER가 잡히면 섹터 프리미엄을 반영합니다.'
         },
         {
             label: 'PEG 지표',
             value: pegRatio === null ? '-' : pegRatio.toFixed(2),
             tone: pegTone,
-            hint: `목표 PER ${basePER.toFixed(1)}배 / 희석 EPS 예상 성장률 ${epsGrowth.toFixed(1)}%`
+            hint: `목표 PER ${basePER.toFixed(1)}배 / EPS 예상 성장률 ${epsGrowth.toFixed(1)}%`
         },
         {
             label: 'S-RIM 적정주가',
@@ -2948,7 +3234,7 @@ function calcMetrics() {
                 : '-',
             tone: hasUpsideInputs ? upsideTone : '',
             hint: hasUpsideInputs
-                ? `${usingManualEps ? '조정 희석 EPS' : epsSourceLabel} 기준 최종 목표가 대비`
+                ? `${usingManualEps ? '조정 EPS' : epsSourceLabel} 기준 최종 목표가 대비${dilutedEpsReviewNeeded ? ' · 희석 EPS는 별도 검토 권장' : ''}`
                 : '현재 주가와 최종 목표가가 모두 잡히면 상승여력을 계산합니다.'
         }
     ];
@@ -4731,26 +5017,364 @@ function renderBriefingSections(sections) {
 
 async function exportPdf() {
     if (!state.company) return;
-    const exportTarget = document.getElementById('dashboard');
-    if (!exportTarget) return;
-
-    exportTarget.classList.add('pdf-export-mode');
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-
+    const model = extractBriefingPdfModel();
+    if (!model) {
+        alert('PDF로 저장할 브리핑이 없습니다.');
+        return;
+    }
     try {
-        await html2pdf().from(exportTarget).set({
-            margin: 10,
-            filename: `InvestmentNavigator_${state.company.name}_${getCurrentYearKst()}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-        }).save();
+        const canvases = renderBriefingPdfCanvases(model);
+        if (!canvases.length) {
+            throw new Error('No PDF canvas pages were generated.');
+        }
+        const pdfBlob = buildPdfBlobFromCanvases(canvases);
+        triggerPdfDownload(pdfBlob, `InvestmentNavigator_${state.company.name}_${getCurrentYearKst()}.pdf`);
     } catch (error) {
         console.error('pdf export failed', error);
         alert('PDF 리포트 생성에 실패했습니다.');
-    } finally {
-        exportTarget.classList.remove('pdf-export-mode');
     }
+}
+
+function extractBriefingPdfModel() {
+    const briefingContent = document.getElementById('briefing-content');
+    if (!briefingContent || !briefingContent.innerHTML.trim()) {
+        return null;
+    }
+
+    const sections = Array.from(briefingContent.querySelectorAll('.briefing-section')).map((sectionEl) => {
+        const title = sectionEl.querySelector('h3')?.textContent?.trim() || '';
+        const listItems = Array.from(sectionEl.querySelectorAll('.briefing-list li'))
+            .map((item) => item.textContent?.trim() || '')
+            .filter(Boolean);
+        const paragraphs = Array.from(sectionEl.querySelectorAll('.briefing-body'))
+            .flatMap((body) => String(body.innerText || '')
+                .split(/\n+/)
+                .map((line) => line.trim())
+                .filter(Boolean));
+        return { title, listItems, paragraphs };
+    }).filter((section) => section.title || section.listItems.length || section.paragraphs.length);
+
+    if (!sections.length) {
+        const rawText = String(briefingContent.innerText || '')
+            .split(/\n+/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+        if (!rawText.length) {
+            return null;
+        }
+        sections.push({ title: '', listItems: [], paragraphs: rawText });
+    }
+
+    return {
+        companyName: state.company?.name || '기업',
+        eyebrow: 'Investment Navigator',
+        badge: briefingContent.querySelector('.briefing-badge')?.textContent?.trim() || '',
+        meta: document.getElementById('briefing-meta')?.textContent?.trim() || '핵심 지표 기반 리포트',
+        generatedAt: document.getElementById('market-datetime')?.textContent?.trim() || formatCachedBriefingTime(new Date().toISOString()),
+        sections
+    };
+}
+
+function renderBriefingPdfCanvases(model) {
+    const PAGE_WIDTH = 1600;
+    const PAGE_HEIGHT = 2260;
+    const MARGIN_X = 118;
+    const TOP_Y = 118;
+    const BOTTOM_Y = 170;
+    const CONTENT_WIDTH = PAGE_WIDTH - (MARGIN_X * 2);
+    const pages = [];
+
+    const startPage = (pageIndex) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = PAGE_WIDTH;
+        canvas.height = PAGE_HEIGHT;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+
+        const topGradient = ctx.createLinearGradient(MARGIN_X, 0, PAGE_WIDTH - MARGIN_X, 0);
+        topGradient.addColorStop(0, '#4f7df3');
+        topGradient.addColorStop(1, '#7c66ff');
+        ctx.fillStyle = topGradient;
+        fillRoundedRect(ctx, MARGIN_X, 78, CONTENT_WIDTH, 14, 7);
+
+        ctx.textBaseline = 'top';
+        setCanvasTextStyle(ctx, 700, pageIndex === 0 ? 64 : 48, '#4f46e5');
+        ctx.fillText(model.eyebrow, MARGIN_X, TOP_Y);
+
+        let y = TOP_Y + (pageIndex === 0 ? 92 : 76);
+
+        setCanvasTextStyle(ctx, 800, pageIndex === 0 ? 76 : 58, '#0f172a');
+        const titleLines = wrapCanvasText(ctx, `${model.companyName} AI 투자 브리핑`, CONTENT_WIDTH);
+        titleLines.forEach((line) => {
+            ctx.fillText(line, MARGIN_X, y);
+            y += pageIndex === 0 ? 92 : 72;
+        });
+
+        if (pageIndex === 0 && model.badge) {
+            setCanvasTextStyle(ctx, 700, 26, '#7c2d12');
+            const badgeWidth = Math.min(CONTENT_WIDTH, ctx.measureText(model.badge).width + 72);
+            ctx.fillStyle = '#ffedd5';
+            fillRoundedRect(ctx, MARGIN_X, y + 10, badgeWidth, 54, 27);
+            ctx.fillStyle = '#7c2d12';
+            ctx.fillText(model.badge, MARGIN_X + 36, y + 21);
+            y += 86;
+        } else {
+            y += 20;
+        }
+
+        setCanvasTextStyle(ctx, 500, 28, '#475569');
+        const metaLines = wrapCanvasText(ctx, `${model.meta} · 생성 시각 ${model.generatedAt}`, CONTENT_WIDTH);
+        metaLines.forEach((line) => {
+            ctx.fillText(line, MARGIN_X, y);
+            y += 42;
+        });
+
+        y += 28;
+
+        return { canvas, ctx, y };
+    };
+
+    let current = startPage(0);
+
+    const ensureSpace = (requiredHeight) => {
+        if (current.y + requiredHeight <= PAGE_HEIGHT - BOTTOM_Y) {
+            return;
+        }
+        pages.push(current);
+        current = startPage(pages.length);
+    };
+
+    model.sections.forEach((section) => {
+        setCanvasTextStyle(current.ctx, 800, 42, '#0f172a');
+        const sectionTitleLines = section.title
+            ? wrapCanvasText(current.ctx, section.title, CONTENT_WIDTH)
+            : [];
+        const paragraphBlocks = [];
+        if (section.paragraphs.length) {
+            setCanvasTextStyle(current.ctx, 500, 30, '#1f2937');
+            section.paragraphs.forEach((paragraph) => {
+                paragraphBlocks.push(wrapCanvasText(current.ctx, paragraph, CONTENT_WIDTH));
+            });
+        }
+        const listBlocks = [];
+        if (section.listItems.length) {
+            setCanvasTextStyle(current.ctx, 500, 30, '#1f2937');
+            section.listItems.forEach((item) => {
+                listBlocks.push(wrapCanvasText(current.ctx, item, CONTENT_WIDTH - 40));
+            });
+        }
+
+        const estimatedHeight =
+            (sectionTitleLines.length * 54)
+            + paragraphBlocks.reduce((sum, lines) => sum + (lines.length * 42) + 18, 0)
+            + listBlocks.reduce((sum, lines) => sum + (lines.length * 42) + 20, 0)
+            + 42;
+
+        ensureSpace(Math.max(estimatedHeight, 120));
+
+        if (sectionTitleLines.length) {
+            setCanvasTextStyle(current.ctx, 800, 42, '#0f172a');
+            sectionTitleLines.forEach((line) => {
+                current.ctx.fillText(line, MARGIN_X, current.y);
+                current.y += 54;
+            });
+            current.y += 12;
+        }
+
+        setCanvasTextStyle(current.ctx, 500, 30, '#1f2937');
+        paragraphBlocks.forEach((lines) => {
+            ensureSpace((lines.length * 42) + 20);
+            lines.forEach((line) => {
+                current.ctx.fillText(line, MARGIN_X, current.y);
+                current.y += 42;
+            });
+            current.y += 20;
+        });
+
+        listBlocks.forEach((lines) => {
+            ensureSpace((lines.length * 42) + 18);
+            lines.forEach((line, index) => {
+                if (index === 0) {
+                    current.ctx.fillText(`• ${line}`, MARGIN_X, current.y);
+                } else {
+                    current.ctx.fillText(line, MARGIN_X + 28, current.y);
+                }
+                current.y += 42;
+            });
+            current.y += 18;
+        });
+
+        current.y += 18;
+    });
+
+    pages.push(current);
+
+    pages.forEach((page, index) => {
+        const footerY = PAGE_HEIGHT - 82;
+        page.ctx.strokeStyle = '#e2e8f0';
+        page.ctx.lineWidth = 2;
+        page.ctx.beginPath();
+        page.ctx.moveTo(MARGIN_X, footerY - 28);
+        page.ctx.lineTo(PAGE_WIDTH - MARGIN_X, footerY - 28);
+        page.ctx.stroke();
+
+        setCanvasTextStyle(page.ctx, 500, 24, '#64748b');
+        page.ctx.fillText(`생성 시각 · ${model.generatedAt}`, MARGIN_X, footerY);
+        page.ctx.textAlign = 'right';
+        page.ctx.fillText(`${index + 1} / ${pages.length}`, PAGE_WIDTH - MARGIN_X, footerY);
+        page.ctx.textAlign = 'left';
+    });
+
+    return pages.map((page) => page.canvas);
+}
+
+function buildPdfBlobFromCanvases(canvases) {
+    const jpegPages = (canvases || []).map((canvas) => ({
+        width: canvas.width,
+        height: canvas.height,
+        bytes: dataUriToUint8Array(canvas.toDataURL('image/jpeg', 0.95)),
+    })).filter((page) => page.bytes?.length);
+
+    if (!jpegPages.length) {
+        throw new Error('No JPEG pages available for PDF export.');
+    }
+
+    const encoder = new TextEncoder();
+    const chunks = [];
+    const offsets = [];
+    let position = 0;
+
+    const pushString = (value) => {
+        const bytes = encoder.encode(String(value));
+        chunks.push(bytes);
+        position += bytes.length;
+    };
+
+    const pushBytes = (bytes) => {
+        chunks.push(bytes);
+        position += bytes.length;
+    };
+
+    const writeObject = (objectNumber, body) => {
+        offsets[objectNumber] = position;
+        pushString(`${objectNumber} 0 obj\n`);
+        if (typeof body === 'string') {
+            pushString(body);
+        } else {
+            pushBytes(body);
+        }
+        pushString(`\nendobj\n`);
+    };
+
+    const pageWidth = 595.28;
+    const pageHeight = 841.89;
+    const firstPageObject = 3;
+    const objectCount = 2 + (jpegPages.length * 3);
+
+    pushString('%PDF-1.4\n');
+    pushBytes(new Uint8Array([0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]));
+
+    writeObject(1, '<< /Type /Catalog /Pages 2 0 R >>');
+
+    const kids = jpegPages.map((_, index) => `${firstPageObject + (index * 3)} 0 R`).join(' ');
+    writeObject(2, `<< /Type /Pages /Count ${jpegPages.length} /Kids [${kids}] >>`);
+
+    jpegPages.forEach((page, index) => {
+        const pageObject = firstPageObject + (index * 3);
+        const contentObject = pageObject + 1;
+        const imageObject = pageObject + 2;
+        const contentStream = `q\n${pageWidth.toFixed(2)} 0 0 ${pageHeight.toFixed(2)} 0 0 cm\n/Im${index + 1} Do\nQ`;
+        const contentBytes = encoder.encode(contentStream);
+
+        writeObject(
+            pageObject,
+            `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth.toFixed(2)} ${pageHeight.toFixed(2)}] /Resources << /XObject << /Im${index + 1} ${imageObject} 0 R >> >> /Contents ${contentObject} 0 R >>`
+        );
+
+        offsets[contentObject] = position;
+        pushString(`${contentObject} 0 obj\n<< /Length ${contentBytes.length} >>\nstream\n`);
+        pushBytes(contentBytes);
+        pushString(`\nendstream\nendobj\n`);
+
+        offsets[imageObject] = position;
+        pushString(
+            `${imageObject} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.bytes.length} >>\nstream\n`
+        );
+        pushBytes(page.bytes);
+        pushString(`\nendstream\nendobj\n`);
+    });
+
+    const xrefOffset = position;
+    pushString(`xref\n0 ${objectCount + 1}\n`);
+    pushString('0000000000 65535 f \n');
+    for (let objectNumber = 1; objectNumber <= objectCount; objectNumber += 1) {
+        pushString(`${String(offsets[objectNumber] || 0).padStart(10, '0')} 00000 n \n`);
+    }
+    pushString(`trailer\n<< /Size ${objectCount + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+
+    return new Blob(chunks, { type: 'application/pdf' });
+}
+
+function dataUriToUint8Array(dataUri) {
+    const base64 = String(dataUri || '').split(',', 2)[1] || '';
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+}
+
+function triggerPdfDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function setCanvasTextStyle(ctx, weight, size, color) {
+    ctx.font = `${weight} ${size}px 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif`;
+    ctx.fillStyle = color;
+}
+
+function wrapCanvasText(ctx, text, maxWidth) {
+    const raw = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return [];
+    const lines = [];
+    let current = '';
+    for (const char of raw) {
+        const candidate = current + char;
+        if (ctx.measureText(candidate).width > maxWidth && current) {
+            lines.push(current.trim());
+            current = char.trim() ? char : '';
+            continue;
+        }
+        current = candidate;
+    }
+    if (current.trim()) {
+        lines.push(current.trim());
+    }
+    return lines;
+}
+
+function fillRoundedRect(ctx, x, y, width, height, radius) {
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    ctx.fill();
 }
 
 function computeSMA(values, period) {

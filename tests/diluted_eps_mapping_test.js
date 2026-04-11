@@ -87,6 +87,17 @@ function run() {
     }));
     assertEqual(summaryWithBasicFallback.dilutedEps, 980, 'DART summary should fall back to 기본주당이익 when 희석주당이익 is absent.');
     assertEqual(summaryWithBasicFallback.basicEps, 980, 'DART summary should keep the basic EPS value available for reference.');
+    assertEqual(summaryWithBasicFallback.dilutedEpsNeedsReview, true, 'DART summary should flag diluted EPS for review when it falls back to 기본주당이익.');
+
+    const resolvedQuarterShareCount = InvestmentLogic.resolvePeriodShareCount(
+        { year: 2025, period: 'Q3', shareCount: 0 },
+        [
+            { year: 2025, shareCount: 12 },
+            { year: 2024, shareCount: 10 }
+        ],
+        0
+    );
+    assertEqual(resolvedQuarterShareCount, 12, 'Quarterly EPS recovery should reuse the annual share count of the same fiscal year when the quarter has no share count.');
 
     const investmentRows = InvestmentLogic.buildHistoricalInvestmentRows([
         {
@@ -137,7 +148,10 @@ function run() {
         trailingEps: 6.2,
         epsForward: 9.4
     }, '');
+    assertEqual(normalizedQuote.basicEps, 6.2, 'Yahoo quote normalization should preserve the separate basic EPS value.');
+    assertEqual(normalizedQuote.dilutedEps, 6.2, 'Yahoo quote normalization should still fill diluted EPS with the basic/trailing fallback when dilutedEPS is zero.');
     assertEqual(normalizedQuote.trailingEps, 6.2, 'Yahoo quote normalization should fall back to basic/trailing EPS when dilutedEPS is zero.');
+    assertEqual(normalizedQuote.dilutedEpsNeedsReview, true, 'Yahoo quote normalization should flag diluted EPS for review when it falls back to a non-diluted source.');
 
     const bridgeSource = readFile('/Users/huiyong/Desktop/Vibe Investment/yfinance_bridge.py');
     const scriptSource = readFile('/Users/huiyong/Desktop/Vibe Investment/script.js');
@@ -145,13 +159,15 @@ function run() {
 
     assert(bridgeSource.includes('info.get("dilutedEPS")'), 'yfinance bridge should map dilutedEPS directly from Yahoo Finance.');
     assert(bridgeSource.includes('"basicEps": basic_eps'), 'yfinance bridge should expose a basic EPS fallback payload when diluted EPS is unavailable.');
+    assert(scriptSource.includes('InvestmentLogic.resolvePeriodShareCount('), 'Quarterly metric rendering should recover EPS using annual share counts when quarter share counts are missing.');
     assert(scriptSource.includes('summary?.dilutedEps'), 'Valuation fallback logic should reference the parsed diluted EPS from DART summaries.');
     assert(!scriptSource.includes("safeDivide(summary?.netIncome || 0, lastTrade.sharesOutstanding)"), 'Valuation fallback should no longer derive EPS from net income divided by shares.');
     assert(scriptSource.includes("label: '희석 EPS'"), 'Historical investment table should relabel EPS as 희석 EPS.');
     assert(scriptSource.includes("label: 'EPS'"), 'Historical and quarterly investment tables should also render a separate EPS row.');
-    assert(htmlSource.includes('선행 희석 EPS (원)'), 'Read-only valuation form should relabel the forward EPS field as diluted EPS.');
-    assert(htmlSource.includes('TTM 희석 EPS (원)'), 'Read-only valuation form should relabel the TTM EPS field as diluted EPS.');
-    assert(htmlSource.includes('조정 희석 EPS (원)'), 'Manual valuation override field should relabel the adjusted EPS input as diluted EPS.');
+    assert(htmlSource.includes('선행 EPS (원)'), 'Read-only valuation form should show a generic forward EPS label when diluted EPS needs manual review.');
+    assert(htmlSource.includes('TTM EPS (원)'), 'Read-only valuation form should show a generic TTM EPS label when diluted EPS needs manual review.');
+    assert(htmlSource.includes('조정 EPS (원)'), 'Manual valuation override field should use a generic EPS label instead of over-claiming diluted EPS.');
+    assert(htmlSource.includes('EPS 예상 성장률 (%)'), 'Valuation growth input should use a generic EPS growth label.');
 
     console.log('diluted_eps_mapping_test: ok');
 }

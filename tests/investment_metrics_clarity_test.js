@@ -94,6 +94,7 @@ function run() {
     assert(!scriptSource.includes('해당 연도 마지막 종가'), 'Historical metrics table should remove the year-end close helper copy.');
     assert(scriptSource.includes('metric-help-icon'), 'Investment metrics renderer should include an EPS help icon.');
     assert(scriptSource.includes('positionMetricTooltips()'), 'Script should dynamically position metric tooltips to avoid viewport clipping.');
+    assert(scriptSource.includes('DILUTED_EPS_REVIEW_TOOLTIP_TEXT'), 'Investment metrics renderer should include a dedicated diluted EPS review warning tooltip.');
 
     assert(styleSource.includes('.metric-help-icon'), 'Styles should define the investment metric help icon.');
     assert(styleSource.includes('.metric-help-tooltip'), 'Styles should define the investment metric tooltip.');

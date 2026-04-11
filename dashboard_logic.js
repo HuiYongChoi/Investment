@@ -191,8 +191,17 @@
         return income / shares;
     }
 
+    function hasMeaningfulEpsValue(value) {
+        const parsed = parseNumberText(value);
+        return parsed !== null && parsed !== 0;
+    }
+
     function resolveStableEpsValues(input) {
         const payload = input || {};
+        const explicitBasicEps = parseNumberText(payload.basicEps);
+        const explicitDilutedEps = parseNumberText(payload.dilutedEps);
+        const hasExplicitBasicEps = explicitBasicEps !== null && explicitBasicEps !== 0;
+        const hasExplicitDilutedEps = explicitDilutedEps !== null && explicitDilutedEps !== 0;
         const shareCount = pickPreferredNumericValue(
             payload.shareCount,
             payload.basicShareCount,
@@ -219,8 +228,60 @@
             basicEps,
             dilutedEps,
             basicShareCount,
-            dilutedShareCount
+            dilutedShareCount,
+            basicEpsProvided: hasExplicitBasicEps,
+            dilutedEpsProvided: hasExplicitDilutedEps,
+            dilutedEpsNeedsReview: !hasExplicitDilutedEps && hasMeaningfulEpsValue(dilutedEps),
+            epsSource: hasExplicitDilutedEps
+                ? 'diluted'
+                : hasExplicitBasicEps
+                    ? 'basic'
+                    : hasMeaningfulEpsValue(dilutedEps) || hasMeaningfulEpsValue(basicEps)
+                        ? 'computed'
+                        : 'none'
         };
+    }
+
+    function resolvePeriodShareCount(period, referencePeriods, fallbackShareCount) {
+        const directShareCount = pickPreferredNumericValue(
+            period?.shareCount,
+            period?.summary?.weightedBasicShares,
+            period?.summary?.weightedDilutedShares
+        );
+        if (directShareCount && directShareCount > 0) {
+            return directShareCount;
+        }
+
+        const periodYear = Number(period?.year) || 0;
+        const candidates = (Array.isArray(referencePeriods) ? referencePeriods : [])
+            .filter(Boolean)
+            .map((item) => ({
+                year: Number(item?.year) || 0,
+                shareCount: pickPreferredNumericValue(
+                    item?.shareCount,
+                    item?.summary?.weightedBasicShares,
+                    item?.summary?.weightedDilutedShares
+                )
+            }))
+            .filter((item) => item.year && item.shareCount && item.shareCount > 0);
+
+        if (!candidates.length) {
+            return pickPreferredNumericValue(fallbackShareCount) ?? 0;
+        }
+
+        const sameYear = candidates.find((item) => item.year === periodYear);
+        if (sameYear) {
+            return sameYear.shareCount;
+        }
+
+        const nearest = candidates
+            .slice()
+            .sort((left, right) => (
+                Math.abs(left.year - periodYear) - Math.abs(right.year - periodYear)
+                || right.year - left.year
+            ))[0];
+
+        return nearest?.shareCount ?? (pickPreferredNumericValue(fallbackShareCount) ?? 0);
     }
 
     function findStatementAmount(list, aliases) {
@@ -318,6 +379,9 @@
             basicEps: epsMetrics.basicEps,
             weightedDilutedShares: epsMetrics.dilutedShareCount,
             weightedBasicShares: epsMetrics.basicShareCount,
+            dilutedEpsNeedsReview: epsMetrics.dilutedEpsNeedsReview,
+            dilutedEpsProvided: epsMetrics.dilutedEpsProvided,
+            basicEpsProvided: epsMetrics.basicEpsProvided,
             assets,
             liabilities,
             equity,
@@ -937,10 +1001,11 @@
         const explicitChangePct = parseSignedNumberText(payload?.changePct ?? payload?.regularMarketChangePercent);
         const change = explicitChange ?? (previousClose !== null ? close - previousClose : 0);
         const changePct = explicitChangePct ?? (previousClose ? percentage(change, previousClose) : 0);
-        const dilutedEps = resolvePreferredEpsValue(
-            payload?.dilutedEPS ?? payload?.dilutedEps,
-            payload?.basicEps ?? payload?.trailingEps ?? payload?.epsTrailing ?? payload?.ttmEps
-        );
+        const trailingEpsInput = pickPreferredNumericValue(payload?.trailingEps, payload?.epsTrailing, payload?.ttmEps);
+        const epsMetrics = resolveStableEpsValues({
+            dilutedEps: payload?.dilutedEPS ?? payload?.dilutedEps,
+            basicEps: payload?.basicEps ?? payload?.basicEPS ?? trailingEpsInput
+        });
 
         return {
             name: String(payload?.shortName ?? payload?.longName ?? payload?.name ?? '').trim(),
@@ -954,8 +1019,10 @@
             low: parseNumberText(payload?.dayLow ?? payload?.low ?? payload?.regularMarketDayLow) ?? 0,
             volume: parseNumberText(payload?.volume ?? payload?.regularMarketVolume ?? payload?.lastVolume) ?? 0,
             forwardEps: parseNumberText(payload?.epsForward ?? payload?.forwardEps),
-            dilutedEps,
-            trailingEps: dilutedEps,
+            dilutedEps: epsMetrics.dilutedEps,
+            basicEps: epsMetrics.basicEps,
+            trailingEps: pickPreferredNumericValue(trailingEpsInput, epsMetrics.dilutedEps, epsMetrics.basicEps),
+            dilutedEpsNeedsReview: epsMetrics.dilutedEpsNeedsReview,
             forwardPer: parseNumberText(payload?.forwardPE ?? payload?.forwardPer ?? payload?.trailingPE),
             bps: parseNumberText(payload?.bookValue ?? payload?.bps),
             roe: parseNumberText(payload?.returnOnEquity ?? payload?.roe),
@@ -1482,6 +1549,7 @@
                     eps,
                     dilutedEps,
                     basicEps,
+                    dilutedEpsNeedsReview: epsMetrics.dilutedEpsNeedsReview,
                     bps,
                     per,
                     pbr,
@@ -1769,6 +1837,7 @@
         computeValuationOutputs,
         parseFormattedNumber,
         resolvePreferredEpsValue,
+        resolvePeriodShareCount,
         resolveStableEpsValues,
         panChartWindow,
         resolveChartAnchorRatio,

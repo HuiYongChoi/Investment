@@ -534,10 +534,17 @@ header#header {
 }
 
 .mobile-auth-inline {
-    display: inline-flex;
+    display: none;
     align-items: center;
     gap: 8px;
     min-width: 0;
+}
+
+.mobile-header-auth .mobile-auth-inline,
+.mobile-header-auth #mobile-kakao-login,
+.mobile-header-auth #mobile-kakao-profile,
+.mobile-header-auth #mobile-kakao-logout {
+    display: none !important;
 }
 
 .mobile-auth-chip {
@@ -1722,6 +1729,12 @@ header#header {
     cursor: help;
 }
 
+.metric-help-icon.metric-help-warn {
+    background: rgba(245, 158, 11, 0.18);
+    border: 1px solid rgba(245, 158, 11, 0.28);
+    color: #fbbf24;
+}
+
 .metric-help-tooltip {
     position: absolute;
     top: calc(100% + 10px);
@@ -1760,6 +1773,10 @@ header#header {
 .metric-help-icon.metric-tooltip-right .metric-help-tooltip {
     left: auto;
     right: 0;
+}
+
+.field-label-row .metric-help-icon {
+    margin-left: 2px;
 }
 
 .input-grid {
@@ -2287,6 +2304,12 @@ header#header {
     color: #d9ffe7;
 }
 
+.briefing-share-btn.is-complete {
+    border-color: rgba(79, 140, 255, 0.34);
+    background: rgba(79, 140, 255, 0.14);
+    color: #dbe7ff;
+}
+
 .pdf-export,
 .pdf-export-mode {
     background: #ffffff !important;
@@ -2377,6 +2400,92 @@ header#header {
 .pdf-export canvas,
 .pdf-export-mode canvas {
     background: #ffffff !important;
+}
+
+.pdf-export-surface {
+    position: fixed;
+    inset: 0;
+    overflow: auto;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 24px;
+    background: rgba(255, 255, 255, 0.98);
+    color: #111827;
+    z-index: 2147483647;
+    pointer-events: none;
+}
+
+.pdf-export-page {
+    width: 800px;
+    min-height: 1120px;
+    padding: 40px 44px;
+    background: #ffffff;
+    color: #111827;
+    font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+}
+
+.pdf-export-eyebrow {
+    font-size: 0.8rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #6366f1;
+    margin-bottom: 10px;
+}
+
+.pdf-export-title {
+    margin: 0 0 8px;
+    font-size: 2rem;
+    line-height: 1.2;
+    color: #0f172a;
+}
+
+.pdf-export-meta,
+.pdf-export-footer {
+    color: #475569;
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
+.pdf-export-footer {
+    margin-top: 28px;
+    padding-top: 18px;
+    border-top: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.pdf-export-panel {
+    margin-top: 24px;
+    padding: 28px 30px;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    border-radius: 24px;
+    background: #ffffff;
+    box-shadow: none;
+}
+
+.pdf-export-mode .pdf-export-panel,
+.pdf-export-mode .pdf-export-page,
+.pdf-export-mode .pdf-export-page * {
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+    text-shadow: none !important;
+}
+
+.pdf-export-mode .briefing-badge {
+    background: rgba(99, 102, 241, 0.12) !important;
+    color: #3730a3 !important;
+    -webkit-text-fill-color: #3730a3 !important;
+}
+
+.pdf-export-mode .briefing-section h3 {
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+}
+
+.pdf-export-mode .briefing-list,
+.pdf-export-mode .briefing-body {
+    color: #334155 !important;
+    -webkit-text-fill-color: #334155 !important;
 }
 
 ::-webkit-scrollbar {
@@ -2616,8 +2725,16 @@ header#header {
     }
 
     .mobile-auth-inline {
+        display: inline-flex;
         flex: 0 1 auto;
         gap: 6px;
+    }
+
+    .mobile-header-auth #mobile-kakao-login:not(.hidden),
+    .mobile-header-auth #mobile-kakao-profile:not(.hidden),
+    .mobile-header-auth #mobile-kakao-logout:not(.hidden),
+    .mobile-header-auth .mobile-auth-inline:not(.hidden) {
+        display: inline-flex !important;
     }
 
     .mobile-utility-strip {
